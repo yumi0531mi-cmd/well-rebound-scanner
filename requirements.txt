@@ -1,0 +1,10 @@
+streamlit>=1.41,<2
+streamlit-autorefresh>=1.0.1
+pandas>=2.2,<3
+numpy>=2.0,<3
+requests>=2.32,<3
+websockets>=15,<17
+plotly>=5.24,<7
+filelock>=3.16
+pytest>=8.3,<10
+ruff>=0.9,<1
