@@ -87,26 +87,7 @@ def _live_price_content(candidate: Candidate) -> None:
     st.caption(f"{source} · 데이터 {timestamp.strftime('%H:%M:%S')} · 화면 {datetime.now(UTC).strftime('%H:%M:%S')} UTC")
 
 
-@st.fragment(run_every=1.0)
-def live_price_1s(candidate: Candidate) -> None:
-    _live_price_content(candidate)
-
-
-@st.fragment(run_every=3.0)
-def live_price_3s(candidate: Candidate) -> None:
-    _live_price_content(candidate)
-
-
-@st.fragment(run_every=5.0)
-def live_price_5s(candidate: Candidate) -> None:
-    _live_price_content(candidate)
-
-
-def render_price(candidate: Candidate, seconds: int) -> None:
-    {1: live_price_1s, 3: live_price_3s, 5: live_price_5s}[seconds](candidate)
-
-
-def render_result(candidate: Candidate, result: ScanResult, refresh_seconds: int) -> None:
+def render_result(candidate: Candidate, result: ScanResult) -> None:
     stage_class = "good" if result.stage == Stage.FINAL_BUY else "bad" if result.stage in {Stage.EXCLUDED, Stage.MISSED} else "wait"
     with st.container(border=True, key=f"card-{candidate.key}"):
         st.markdown(
@@ -114,7 +95,7 @@ def render_result(candidate: Candidate, result: ScanResult, refresh_seconds: int
             f'<div class="stage {stage_class}">{html.escape(result.stage.value)} · {result.strategy.value}</div>',
             unsafe_allow_html=True,
         )
-        render_price(candidate, refresh_seconds)
+        _live_price_content(candidate)
         summary = st.columns(4)
         summary[0].metric("순서 점수", f"{result.score}")
         summary[1].metric("확정 Swing", price_text(result.net_swing_pct) + "%" if result.net_swing_pct else "수집 중")
@@ -179,18 +160,26 @@ else:
 selected = filtered[: min(display_count + 3, 12)]
 realtime().configure(selected)
 
-results: list[tuple[Candidate, ScanResult]] = []
-for candidate in selected:
-    bars = history().backfill_candidate(client(), candidate, target_bars=1000)
-    tick = realtime().tick(candidate)
-    price = tick.price if tick else candidate.price
-    result = evaluate(candidate.key, bars, price, sequences())
-    if result.stage == Stage.FINAL_BUY:
-        validations().record(result, ENGINE_VERSION, candidate.market.value, candidate.session.value)
-    for case in validations().cases():
-        if case.symbol == candidate.key and case.market == candidate.market.value and case.session == candidate.session.value and not case.scored:
-            validations().score(case, bars)
-    results.append((candidate, result))
+@st.cache_data(ttl=65, show_spinner=False)
+def structure_results(candidates: tuple[Candidate, ...], completed_minute: int) -> list[tuple[Candidate, ScanResult]]:
+    del completed_minute
+    output: list[tuple[Candidate, ScanResult]] = []
+    for candidate in candidates:
+        bars = history().backfill_candidate(client(), candidate, target_bars=1000)
+        tick = realtime().tick(candidate)
+        price = tick.price if tick else candidate.price
+        result = evaluate(candidate.key, bars, price, sequences())
+        if result.stage == Stage.FINAL_BUY:
+            validations().record(result, ENGINE_VERSION, candidate.market.value, candidate.session.value)
+        for case in validations().cases():
+            if case.symbol == candidate.key and case.market == candidate.market.value and case.session == candidate.session.value and not case.scored:
+                validations().score(case, bars)
+        output.append((candidate, result))
+    return output
+
+
+minute_bucket = int(datetime.now(UTC).timestamp() // 60)
+results = structure_results(tuple(selected), minute_bucket)
 
 stage_priority = {
     Stage.FINAL_BUY: 7,
@@ -209,7 +198,7 @@ st.caption(
     f"진입가능 {counts[Stage.FINAL_BUY]} · 진입대기 {counts[Stage.ENTRY_WAIT]} · 데이터수집 {counts[Stage.DATA_WAIT]}"
 )
 for candidate, result in visible:
-    render_result(candidate, result, refresh_seconds)
+    render_result(candidate, result)
 
 with st.expander("사후검증·Calibration"):
     for strategy_name in ("TREND_SWING", "RANGE_SWING"):
@@ -223,5 +212,5 @@ with st.expander("사후검증·Calibration"):
 if not visible:
     st.warning("현재 모드와 가격 조건을 통과한 후보가 없습니다.")
 
-# Structure and outcome scoring rerun once per completed minute. Price fragments remain independent.
-st_autorefresh(interval=60_000, key="completed-minute-refresh")
+# The page/current-price path follows the selected interval. structure_results remains cached per completed minute.
+st_autorefresh(interval=refresh_seconds * 1000, key="price-refresh")
