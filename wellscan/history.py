@@ -64,7 +64,7 @@ class HistoryCache:
 
     def backfill_candidate(self, client: KISClient, candidate: Candidate, target_bars: int = 1000) -> pd.DataFrame:
         if candidate.market == Market.KR:
-            return self.backfill(client, candidate.symbol, target_bars=target_bars, max_days=1)
+            return self.backfill(client, candidate.symbol, target_bars=target_bars, max_days=3)
         namespace = f"US-{candidate.exchange}-{candidate.session.value}"
         cached = self.load(candidate.symbol, namespace)
         if len(cached) >= target_bars:
