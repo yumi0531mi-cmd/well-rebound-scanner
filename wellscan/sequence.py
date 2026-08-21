@@ -17,6 +17,12 @@ class SequenceState:
     updated_at: str = ""
     trend_at: str = ""
     well_at: str = ""
+    convergence_at: str = ""
+    stochastic_at: str = ""
+    macd_at: str = ""
+    higher_low_at: str = ""
+    volume_at: str = ""
+    vwap_at: str = ""
     entry_wait_at: str = ""
     cooldown_until: str = ""
     hard_kill_date: str = ""
@@ -72,6 +78,12 @@ class SequenceStore:
         trend_ready: bool,
         well_ready: bool,
         entry_ready: bool,
+        convergence: bool = False,
+        stochastic_rebound: bool = False,
+        macd_turn: bool = False,
+        higher_low: bool = False,
+        volume_recovery: bool = False,
+        vwap_recovery: bool = False,
         breakout: bool,
         missed: bool,
         excluded: bool,
@@ -82,6 +94,27 @@ class SequenceStore:
     ) -> SequenceState:
         current_time = now or datetime.now(UTC)
         state = self.load(symbol)
+        if well_ready:
+            convergence = stochastic_rebound = macd_turn = True
+        if entry_ready:
+            higher_low = volume_recovery = vwap_recovery = True
+        for active, attribute in (
+            (convergence, "convergence_at"),
+            (stochastic_rebound, "stochastic_at"),
+            (macd_turn, "macd_at"),
+            (higher_low, "higher_low_at"),
+            (volume_recovery, "volume_at"),
+            (vwap_recovery, "vwap_at"),
+        ):
+            if active:
+                setattr(state, attribute, current_time.isoformat())
+
+        def fresh(attribute: str, minutes: int) -> bool:
+            occurred = self._parse(getattr(state, attribute))
+            return occurred is not None and current_time - occurred <= timedelta(minutes=minutes)
+
+        well_sequence_ready = fresh("convergence_at", 30) and fresh("stochastic_at", 20) and fresh("macd_at", 30)
+        entry_sequence_ready = fresh("higher_low_at", 15) and fresh("volume_at", 10) and fresh("vwap_at", 10)
         cooldown_until = self._parse(state.cooldown_until)
         well_at = self._parse(state.well_at)
         entry_wait_at = self._parse(state.entry_wait_at)
@@ -103,8 +136,10 @@ class SequenceStore:
             state.stage = Stage.TREND_READY if trend_ready else Stage.CANDIDATE
         elif breakout and state.entry_price and entry_fresh and state.stage in {Stage.ENTRY_WAIT, Stage.FINAL_BUY}:
             state.stage = Stage.FINAL_BUY
-        elif entry_ready and (well_ready or (state.stage in {Stage.WELL_FORMING, Stage.ENTRY_WAIT} and well_fresh)):
-            state.stage = Stage.ENTRY_WAIT
+        elif entry_sequence_ready and candidate_entry and candidate_hard_stop and (
+            well_sequence_ready or (state.stage in {Stage.WELL_FORMING, Stage.ENTRY_WAIT} and well_fresh)
+        ):
+            state.stage = Stage.FINAL_BUY if breakout else Stage.ENTRY_WAIT
             state.entry_wait_at = current_time.isoformat()
             state.entry_price = candidate_entry or state.entry_price
             state.entry_hard_stop = candidate_hard_stop or state.entry_hard_stop
@@ -112,7 +147,7 @@ class SequenceStore:
             state.stage = Stage.ENTRY_WAIT
         elif state.stage == Stage.WELL_FORMING and well_fresh and trend_ready:
             state.stage = Stage.WELL_FORMING
-        elif well_ready and trend_ready:
+        elif well_sequence_ready and trend_ready:
             state.stage = Stage.WELL_FORMING
             state.well_at = current_time.isoformat()
         elif trend_ready:
@@ -124,6 +159,11 @@ class SequenceStore:
             state.entry_price = None
             state.entry_hard_stop = None
             state.entry_wait_at = ""
+        if state.stage in {Stage.EXCLUDED, Stage.MISSED, Stage.CANDIDATE}:
+            for attribute in (
+                "convergence_at", "stochastic_at", "macd_at", "higher_low_at", "volume_at", "vwap_at"
+            ):
+                setattr(state, attribute, "")
         state.updated_at = current_time.isoformat()
         self.save(state)
         return state

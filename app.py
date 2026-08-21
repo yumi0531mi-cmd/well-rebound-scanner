@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+from dataclasses import replace
 from datetime import UTC, datetime
 
 import streamlit as st
@@ -71,7 +72,7 @@ def price_text(value: float | None) -> str:
     return "미확인" if value is None else f"{value:,.2f}".rstrip("0").rstrip(".")
 
 
-def _live_price_content(candidate: Candidate) -> None:
+def _live_quote(candidate: Candidate) -> tuple[float, float, datetime, str]:
     tick = realtime().tick(candidate)
     if tick is not None:
         price, timestamp, source = tick.price, tick.timestamp, "KIS WebSocket 체결"
@@ -82,11 +83,49 @@ def _live_price_content(candidate: Candidate) -> None:
             source = "KIS REST 1초 현재가"
         except KISError:
             price, change, timestamp, source = candidate.price, candidate.change_pct, datetime.now(UTC), "순위 조회가"
+    return price, change, timestamp, source
+
+
+def _live_price_content(quote: tuple[float, float, datetime, str]) -> None:
+    price, change, timestamp, source = quote
     st.metric("현재가", price_text(price), f"{change:+.2f}%")
     st.caption(f"{source} · 데이터 {timestamp.strftime('%H:%M:%S')} · 화면 {datetime.now(UTC).strftime('%H:%M:%S')} UTC")
 
 
+def _confirm_live_breakout(candidate: Candidate, result: ScanResult, live_price: float) -> ScanResult:
+    levels = result.levels
+    atr = float(result.diagnostics.get("atr_3m") or 0)
+    if (
+        result.stage != Stage.ENTRY_WAIT
+        or result.risk_state.value != "NORMAL"
+        or not levels.entry
+        or atr <= 0
+        or not (levels.entry < live_price <= levels.entry + atr * 1.2)
+    ):
+        return result
+    state = sequences().advance(
+        candidate.key,
+        trend_ready=True,
+        well_ready=False,
+        entry_ready=False,
+        breakout=True,
+        missed=False,
+        excluded=False,
+        now=datetime.now(UTC),
+    )
+    if state.stage != Stage.FINAL_BUY:
+        return result
+    conditions = dict(result.conditions)
+    conditions["첫 반등고점 돌파"] = True
+    conditions["FINAL_BUY"] = True
+    confirmed = replace(result, evaluated_at=datetime.now(UTC), stage=Stage.FINAL_BUY, conditions=conditions)
+    validations().record(confirmed, ENGINE_VERSION, candidate.market.value, candidate.session.value)
+    return confirmed
+
+
 def render_result(candidate: Candidate, result: ScanResult) -> None:
+    quote = _live_quote(candidate)
+    result = _confirm_live_breakout(candidate, result, quote[0])
     stage_class = "good" if result.stage == Stage.FINAL_BUY else "bad" if result.stage in {Stage.EXCLUDED, Stage.MISSED} else "wait"
     with st.container(border=True, key=f"card-{candidate.key}"):
         st.markdown(
@@ -94,7 +133,7 @@ def render_result(candidate: Candidate, result: ScanResult) -> None:
             f'<div class="stage {stage_class}">{html.escape(result.stage.value)} · {result.strategy.value}</div>',
             unsafe_allow_html=True,
         )
-        _live_price_content(candidate)
+        _live_price_content(quote)
         summary = st.columns(4)
         summary[0].metric("순서 점수", f"{result.score}")
         summary[1].metric("확정 Swing", price_text(result.net_swing_pct) + "%" if result.net_swing_pct else "수집 중")
@@ -182,7 +221,13 @@ def structure_results(candidates: tuple[Candidate, ...], completed_minute: int) 
     for candidate in candidates:
         bars = history().backfill_candidate(client(), candidate, target_bars=1000)
         tick = realtime().tick(candidate)
-        price = tick.price if tick else candidate.price
+        if tick is not None:
+            price = tick.price
+        else:
+            try:
+                price, _, _ = rest_price(candidate.market, candidate.symbol, candidate.exchange, candidate.session)
+            except KISError:
+                price = candidate.price
         result = evaluate(candidate.key, bars, price, sequences())
         if result.stage == Stage.FINAL_BUY:
             validations().record(result, ENGINE_VERSION, candidate.market.value, candidate.session.value)
