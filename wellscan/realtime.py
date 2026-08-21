@@ -62,7 +62,7 @@ class RealtimeHub:
                 subscribed = self._subscriptions
                 approval = self.client.websocket_approval_key()
                 async with websockets.connect(
-                    "ws://ops.koreainvestment.com:21000", ping_interval=20, ping_timeout=20, open_timeout=10
+                    "ws://ops.koreainvestment.com:21000", proxy=None, ping_interval=20, ping_timeout=20, open_timeout=10
                 ) as socket:
                     for _key, tr_id, tr_key in subscribed:
                         await socket.send(

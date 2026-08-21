@@ -159,6 +159,13 @@ else:
     filtered = [candidate for candidate in pool if minimum_price <= candidate.price <= maximum_price and 7 < candidate.change_pct <= 20]
 selected = filtered[: min(display_count + 3, 12)]
 realtime().configure(selected)
+with st.sidebar:
+    if realtime().connected:
+        st.success("KIS WebSocket 연결됨")
+    elif realtime().last_error:
+        st.warning(f"WebSocket 연결 대기 · {realtime().last_error}")
+    else:
+        st.caption("KIS WebSocket 연결 시도 중")
 
 @st.cache_data(ttl=65, show_spinner=False)
 def structure_results(candidates: tuple[Candidate, ...], completed_minute: int) -> list[tuple[Candidate, ScanResult]]:
