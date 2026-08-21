@@ -23,6 +23,10 @@ python -m streamlit run app.py
 
 Render에서는 저장소 루트의 `render.yaml`을 Blueprint로 배포하고 위 두 비밀값만 입력합니다. `SUPABASE_URL`, `SUPABASE_KEY`는 사용하지 않습니다.
 
+## 무료 모바일 접속 대안
+
+Windows PC를 켜둘 수 있다면 `start_mobile_server.ps1`을 실행해 로컬 Streamlit과 무료 Cloudflare Quick Tunnel을 함께 시작할 수 있습니다. KIS 키는 실행 중인 프로세스 환경변수에만 넣고 파일로 저장하지 않습니다. 표시되는 임시 `https://*.trycloudflare.com` 주소를 휴대전화에서 열면 됩니다. 임시 주소는 재시작할 때 바뀌며 Cloudflare가 운영 안정성을 보장하는 서비스는 아닙니다. 종료할 때는 터널 창을 닫고 `stop_mobile_server.ps1`을 실행합니다.
+
 ## 데이터와 안전장치
 
 - 15분 MA60 계산 전까지 최소 900개의 실제 1분봉을 누적하며 임의값을 만들지 않습니다.
