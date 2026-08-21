@@ -128,7 +128,15 @@ with st.sidebar:
         minimum_price = st.number_input("최소 가격(원)", 100.0, 300000.0, 1000.0, 100.0)
         maximum_price = st.number_input("최대 가격(원)", 1000.0, 1000000.0, 300000.0, 1000.0)
     else:
-        minimum_price = st.number_input("최소 가격(USD)", 0.1, 1000.0, 2.0, 0.5)
+        default_minimum = 0.1 if mode == "급등주" else 2.0
+        minimum_price = st.number_input(
+            "최소 가격(USD)",
+            0.1,
+            1000.0,
+            default_minimum,
+            0.1,
+            key=f"minimum-usd-{mode}",
+        )
         maximum_price = st.number_input("최대 가격(USD)", 1.0, 10000.0, 500.0, 5.0)
     st.caption("후보풀: KIS 거래량 TOP100 ∪ 거래대금 TOP100 · 미국 NAS/NYS/AMS 통합")
     st.caption("구조 계산: 새 완료봉 60초 · 현재가: WebSocket 우선")
