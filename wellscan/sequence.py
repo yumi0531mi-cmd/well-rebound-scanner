@@ -76,8 +76,6 @@ class SequenceStore:
         symbol: str,
         *,
         trend_ready: bool,
-        well_ready: bool,
-        entry_ready: bool,
         convergence: bool = False,
         stochastic_rebound: bool = False,
         macd_turn: bool = False,
@@ -94,10 +92,6 @@ class SequenceStore:
     ) -> SequenceState:
         current_time = now or datetime.now(UTC)
         state = self.load(symbol)
-        if well_ready:
-            convergence = stochastic_rebound = macd_turn = True
-        if entry_ready:
-            higher_low = volume_recovery = vwap_recovery = True
         for active, attribute in (
             (convergence, "convergence_at"),
             (stochastic_rebound, "stochastic_at"),

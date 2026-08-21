@@ -79,12 +79,10 @@ def _well_rebound(frame5: pd.DataFrame, session: TradingSession | None = None) -
     return convergence, stochastic_rebound, macd_turn
 
 
-def _entry_setup(frame3: pd.DataFrame, session: TradingSession | None = None) -> tuple[bool, bool, bool, float | None, float | None]:
-    data = enriched(frame3, session)
+def _entry_setup(data: pd.DataFrame) -> tuple[bool, bool, bool, float | None, float | None]:
     if len(data) < 25:
         return False, False, False, None, None
-    _, lows = pivot_points(data.tail(30), 2, 2)
-    highs, _ = pivot_points(data.tail(30), 2, 2)
+    highs, lows = pivot_points(data.tail(30), 2, 2)
     higher_low = bool(len(lows) >= 2 and float(lows.iloc[-1]) > float(lows.iloc[-2]))
     volume_recovery = bool(data.volume.iloc[-1] > data.volume.iloc[-6:-1].mean() * 1.05)
     vwap_recovery = bool(data.close.iloc[-1] > data.vwap.iloc[-1] and data.close.iloc[-2] <= data.vwap.iloc[-2])
@@ -139,14 +137,12 @@ def evaluate(
     frame3 = completed_resample(bars, 3)
     aligned, transitioning, strategy = _trend(frame15, session)
     convergence, stochastic_rebound, macd_turn = _well_rebound(frame5, session)
-    higher_low, volume_recovery, vwap_recovery, rebound_high, second_low = _entry_setup(frame3, session)
+    data3 = enriched(frame3, session)
+    higher_low, volume_recovery, vwap_recovery, rebound_high, second_low = _entry_setup(data3)
     net_swing, persistence, confidence, fatigue = _swing_quality(frame5)
 
-    data3 = enriched(frame3, session)
     latest3 = data3.iloc[-1]
     trend_ready = aligned or transitioning
-    well_ready = convergence and stochastic_rebound and macd_turn
-    entry_ready = higher_low and volume_recovery and vwap_recovery
     breakout = bool(rebound_high and live_price > rebound_high)
     overheated = bool(latest3.stoch_k >= 85 or live_price > latest3.ema20 * 1.05)
     missed = bool(rebound_high and live_price > rebound_high + latest3.atr * 1.2)
@@ -177,8 +173,6 @@ def evaluate(
     state = sequence_store.advance(
         symbol,
         trend_ready=trend_ready,
-        well_ready=well_ready,
-        entry_ready=entry_ready,
         convergence=convergence,
         stochastic_rebound=stochastic_rebound,
         macd_turn=macd_turn,
