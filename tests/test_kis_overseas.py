@@ -5,7 +5,7 @@ from wellscan.kis import KISClient
 
 def test_overseas_current_price_fields(tmp_path: Path) -> None:
     client = KISClient(tmp_path)
-    client.get = lambda *args, **kwargs: ({"output": {"last": "231.45", "rate": "1.23"}}, "")  # type: ignore[method-assign]
+    client.get = lambda *_args, **_kwargs: ({"output": {"last": "231.45", "rate": "1.23"}}, "")  # type: ignore[method-assign]
     price, change, _ = client.overseas_current_price("AAPL", "NAS")
     assert price == 231.45
     assert change == 1.23

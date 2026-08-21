@@ -9,15 +9,34 @@ from wellscan.sequence import SequenceStore
 def test_ordered_sequence_and_final_buy_persistence(tmp_path) -> None:
     store = SequenceStore(tmp_path)
     now = datetime(2026, 8, 21, 1, 0, tzinfo=UTC)
-    assert store.advance("005930", trend_ready=True, well_ready=False, entry_ready=False, breakout=False, missed=False, excluded=False, now=now).stage == Stage.TREND_READY
-    assert store.advance("005930", trend_ready=True, well_ready=True, entry_ready=False, breakout=False, missed=False, excluded=False, now=now).stage == Stage.WELL_FORMING
+    assert store.advance("005930", trend_ready=True, breakout=False, missed=False, excluded=False, now=now).stage == Stage.TREND_READY
+    assert store.advance(
+        "005930",
+        trend_ready=True,
+        convergence=True,
+        stochastic_rebound=True,
+        macd_turn=True,
+        breakout=False,
+        missed=False,
+        excluded=False,
+        now=now,
+    ).stage == Stage.WELL_FORMING
     entry_wait = store.advance(
-        "005930", trend_ready=True, well_ready=True, entry_ready=True, breakout=False, missed=False,
-        excluded=False, candidate_entry=70000, candidate_hard_stop=69300, now=now,
+        "005930",
+        trend_ready=True,
+        higher_low=True,
+        volume_recovery=True,
+        vwap_recovery=True,
+        breakout=False,
+        missed=False,
+        excluded=False,
+        candidate_entry=70000,
+        candidate_hard_stop=69300,
+        now=now,
     )
     assert entry_wait.stage == Stage.ENTRY_WAIT
-    assert store.advance("005930", trend_ready=True, well_ready=True, entry_ready=True, breakout=True, missed=False, excluded=False, now=now).stage == Stage.FINAL_BUY
-    assert store.advance("005930", trend_ready=True, well_ready=True, entry_ready=True, breakout=True, missed=False, excluded=False, now=now + timedelta(seconds=5)).stage == Stage.FINAL_BUY
+    assert store.advance("005930", trend_ready=True, breakout=True, missed=False, excluded=False, now=now).stage == Stage.FINAL_BUY
+    assert store.advance("005930", trend_ready=True, breakout=True, missed=False, excluded=False, now=now + timedelta(seconds=5)).stage == Stage.FINAL_BUY
 
 
 def test_cycle_manager_deduplicates_bar_and_hard_kills_at_three(tmp_path) -> None:
@@ -35,30 +54,43 @@ def test_cycle_manager_deduplicates_bar_and_hard_kills_at_three(tmp_path) -> Non
 def test_well_and_entry_are_remembered_across_later_bars(tmp_path) -> None:
     store = SequenceStore(tmp_path)
     now = datetime(2026, 8, 21, 1, 0, tzinfo=UTC)
-    store.advance("005930", trend_ready=True, well_ready=True, entry_ready=False, breakout=False, missed=False, excluded=False, now=now)
+    store.advance(
+        "005930",
+        trend_ready=True,
+        convergence=True,
+        stochastic_rebound=True,
+        macd_turn=True,
+        breakout=False,
+        missed=False,
+        excluded=False,
+        now=now,
+    )
     waiting = store.advance(
-        "005930", trend_ready=True, well_ready=False, entry_ready=True, breakout=False, missed=False, excluded=False,
-        candidate_entry=70100, candidate_hard_stop=69400, now=now + timedelta(minutes=3),
+        "005930",
+        trend_ready=True,
+        higher_low=True,
+        volume_recovery=True,
+        vwap_recovery=True,
+        breakout=False,
+        missed=False,
+        excluded=False,
+        candidate_entry=70100,
+        candidate_hard_stop=69400,
+        now=now + timedelta(minutes=3),
     )
     assert waiting.stage == Stage.ENTRY_WAIT
     assert waiting.entry_price == 70100
-    held = store.advance(
-        "005930", trend_ready=True, well_ready=False, entry_ready=False, breakout=False, missed=False, excluded=False,
-        now=now + timedelta(minutes=6),
-    )
+    held = store.advance("005930", trend_ready=True, breakout=False, missed=False, excluded=False, now=now + timedelta(minutes=6))
     assert held.stage == Stage.ENTRY_WAIT
     assert held.entry_price == 70100
-    bought = store.advance(
-        "005930", trend_ready=True, well_ready=False, entry_ready=False, breakout=True, missed=False, excluded=False,
-        now=now + timedelta(minutes=7),
-    )
+    bought = store.advance("005930", trend_ready=True, breakout=True, missed=False, excluded=False, now=now + timedelta(minutes=7))
     assert bought.stage == Stage.FINAL_BUY
 
 
 def test_individual_components_form_an_ordered_entry_across_bars(tmp_path) -> None:
     store = SequenceStore(tmp_path)
     now = datetime(2026, 8, 21, 1, 0, tzinfo=UTC)
-    common = dict(trend_ready=True, well_ready=False, entry_ready=False, breakout=False, missed=False, excluded=False)
+    common = dict(trend_ready=True, breakout=False, missed=False, excluded=False)
 
     store.advance("NVDA", **common, convergence=True, now=now)
     store.advance("NVDA", **common, stochastic_rebound=True, now=now + timedelta(minutes=5))
@@ -78,18 +110,14 @@ def test_individual_components_form_an_ordered_entry_across_bars(tmp_path) -> No
     assert waiting.stage == Stage.ENTRY_WAIT
     assert waiting.entry_price == 101
 
-    bought = store.advance(
-        "NVDA",
-        **{**common, "breakout": True},
-        now=now + timedelta(minutes=15),
-    )
+    bought = store.advance("NVDA", **{**common, "breakout": True}, now=now + timedelta(minutes=15))
     assert bought.stage == Stage.FINAL_BUY
 
 
 def test_expired_component_does_not_create_stale_well(tmp_path) -> None:
     store = SequenceStore(tmp_path)
     now = datetime(2026, 8, 21, 1, 0, tzinfo=UTC)
-    common = dict(trend_ready=True, well_ready=False, entry_ready=False, breakout=False, missed=False, excluded=False)
+    common = dict(trend_ready=True, breakout=False, missed=False, excluded=False)
     store.advance("NVDA", **common, stochastic_rebound=True, now=now)
     store.advance("NVDA", **common, convergence=True, now=now + timedelta(minutes=25))
     state = store.advance("NVDA", **common, macd_turn=True, now=now + timedelta(minutes=26))
