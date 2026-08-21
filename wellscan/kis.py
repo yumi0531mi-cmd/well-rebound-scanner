@@ -12,7 +12,7 @@ import pandas as pd
 import requests
 from filelock import FileLock
 
-from .models import Candidate
+from .models import Candidate, Market, TradingSession
 
 
 class KISError(RuntimeError):
@@ -31,6 +31,8 @@ class KISClient:
         self.session = requests.Session()
         self._lock = threading.Lock()
         self._last_request = 0.0
+        self._approval_key = ""
+        self._approval_expires = datetime.min.replace(tzinfo=UTC)
 
     @property
     def configured(self) -> bool:
@@ -88,6 +90,8 @@ class KISClient:
         return token
 
     def websocket_approval_key(self) -> str:
+        if self._approval_key and self._approval_expires > datetime.now(UTC):
+            return self._approval_key
         response = self.session.post(
             f"{self.base_url}/oauth2/Approval",
             json={"grant_type": "client_credentials", "appkey": self.app_key, "secretkey": self.app_secret},
@@ -98,6 +102,8 @@ class KISClient:
         key = str(response.json().get("approval_key") or "")
         if not key:
             raise KISError("WebSocket 접속키가 비어 있습니다.")
+        self._approval_key = key
+        self._approval_expires = datetime.now(UTC) + timedelta(hours=23)
         return key
 
     def _throttle(self) -> None:
@@ -214,6 +220,106 @@ class KISClient:
         if price <= 0:
             raise KISError(f"{symbol} 현재가 미수신")
         return price, change, datetime.now(UTC)
+
+    def _overseas_ranking(self, exchange: str, source: str, limit: int, session: TradingSession) -> list[Candidate]:
+        path = "/uapi/overseas-stock/v1/ranking/trade-vol" if source == "거래량 TOP100" else "/uapi/overseas-stock/v1/ranking/trade-pbmn"
+        tr_id = "HHDFS76310010" if source == "거래량 TOP100" else "HHDFS76320010"
+        rows: list[dict[str, Any]] = []
+        keyb = ""
+        continuation = ""
+        for _ in range(5):
+            payload, next_continuation = self.get(
+                path,
+                tr_id,
+                {"EXCD": exchange, "NDAY": "0", "VOL_RANG": "0", "KEYB": keyb, "AUTH": "", "PRC1": "", "PRC2": ""},
+                continuation,
+            )
+            rows.extend(row for row in payload.get("output2", []) if isinstance(row, dict))
+            keyb = str(payload.get("keyb") or "")
+            if len(rows) >= limit or next_continuation not in {"M", "F"}:
+                break
+            continuation = "N"
+        results = []
+        for row in rows[:limit]:
+            symbol = str(row.get("symb") or "").strip().upper()
+            if not symbol:
+                continue
+            results.append(Candidate(
+                symbol=symbol,
+                name=str(row.get("name") or row.get("ename") or symbol),
+                price=self._number(row, "last"),
+                change_pct=self._number(row, "rate"),
+                volume=self._number(row, "tvol"),
+                turnover=self._number(row, "tamt"),
+                sources=frozenset({source}),
+                market=Market.US,
+                exchange=exchange,
+                session=session,
+            ))
+        return results
+
+    def overseas_candidate_union(self, session: TradingSession, limit_each: int = 100) -> list[Candidate]:
+        merged: dict[tuple[str, str], Candidate] = {}
+        per_exchange = max(20, (limit_each + 2) // 3)
+        for exchange in ("NAS", "NYS", "AMS"):
+            for source in ("거래량 TOP100", "거래대금 TOP100"):
+                for item in self._overseas_ranking(exchange, source, per_exchange, session):
+                    key = (exchange, item.symbol)
+                    previous = merged.get(key)
+                    if previous is None:
+                        merged[key] = item
+                    else:
+                        merged[key] = Candidate(
+                            symbol=item.symbol, name=previous.name or item.name, price=previous.price or item.price,
+                            change_pct=previous.change_pct or item.change_pct, volume=max(previous.volume, item.volume),
+                            turnover=max(previous.turnover, item.turnover), sources=previous.sources | item.sources,
+                            market=Market.US, exchange=exchange, session=session,
+                        )
+        return sorted(merged.values(), key=lambda item: (len(item.sources), item.turnover, item.volume), reverse=True)[: limit_each * 2]
+
+    def overseas_current_price(self, symbol: str, exchange: str) -> tuple[float, float, datetime]:
+        payload, _ = self.get(
+            "/uapi/overseas-price/v1/quotations/price", "HHDFS00000300",
+            {"AUTH": "", "EXCD": exchange, "SYMB": symbol},
+        )
+        output = payload.get("output") or {}
+        price = self._number(output, "last")
+        if price <= 0:
+            raise KISError(f"{exchange}:{symbol} 해외 현재가 미수신")
+        return price, self._number(output, "rate"), datetime.now(UTC)
+
+    def overseas_minutes(self, symbol: str, exchange: str, max_records: int = 1200, before: str = "") -> pd.DataFrame:
+        rows: list[dict[str, Any]] = []
+        keyb = before
+        for page in range(max(1, min(10, (max_records + 119) // 120))):
+            continuation_page = bool(before) or page > 0
+            payload, continuation = self.get(
+                "/uapi/overseas-price/v1/quotations/inquire-time-itemchartprice", "HHDFS76950200",
+                {"AUTH": "", "EXCD": exchange, "SYMB": symbol, "NMIN": "1", "PINC": "1" if continuation_page else "0",
+                 "NEXT": "1" if continuation_page else "", "NREC": "120", "FILL": "", "KEYB": keyb},
+                "N" if continuation_page else "",
+            )
+            batch = [row for row in payload.get("output2", []) if isinstance(row, dict)]
+            rows.extend(batch)
+            if not batch or len(rows) >= max_records or continuation not in {"M", "F"}:
+                break
+            last = batch[-1]
+            raw = f"{last.get('xymd', '')}{str(last.get('xhms', '')).zfill(6)}"
+            try:
+                keyb = (datetime.strptime(raw, "%Y%m%d%H%M%S") - timedelta(minutes=1)).strftime("%Y%m%d%H%M%S")
+            except ValueError:
+                break
+        records = []
+        for row in rows:
+            try:
+                timestamp = pd.to_datetime(f"{row['xymd']}{str(row['xhms']).zfill(6)}", format="%Y%m%d%H%M%S")
+                records.append({"timestamp": timestamp, "open": float(row["open"]), "high": float(row["high"]),
+                                "low": float(row["low"]), "close": float(row["last"]), "volume": float(row["evol"])})
+            except (KeyError, TypeError, ValueError):
+                continue
+        if not records:
+            return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
+        return pd.DataFrame(records).set_index("timestamp").sort_index().drop_duplicates()
 
     def minute_day(self, symbol: str, business_date: str) -> pd.DataFrame:
         payload, _ = self.get(

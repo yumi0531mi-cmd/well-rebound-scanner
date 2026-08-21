@@ -8,6 +8,8 @@ from filelock import FileLock
 
 from .indicators import normalize_bars
 from .kis import KISClient
+from .models import Candidate, Market
+from .sessions import filter_session_bars, session_exchange
 
 
 class HistoryCache:
@@ -15,11 +17,12 @@ class HistoryCache:
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
 
-    def path(self, symbol: str) -> Path:
-        return self.root / f"{symbol.upper()}.csv"
+    def path(self, symbol: str, namespace: str = "KR-KRX-KR_REGULAR") -> Path:
+        safe = namespace.replace(":", "-").replace("/", "-")
+        return self.root / safe / f"{symbol.upper()}.csv"
 
-    def load(self, symbol: str) -> pd.DataFrame:
-        path = self.path(symbol)
+    def load(self, symbol: str, namespace: str = "KR-KRX-KR_REGULAR") -> pd.DataFrame:
+        path = self.path(symbol, namespace)
         if not path.exists():
             return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
         try:
@@ -28,10 +31,12 @@ class HistoryCache:
         except (OSError, ValueError, KeyError):
             return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
 
-    def merge(self, symbol: str, incoming: pd.DataFrame) -> pd.DataFrame:
-        path = self.path(symbol)
+    def merge(self, symbol: str, incoming: pd.DataFrame, namespace: str = "KR-KRX-KR_REGULAR") -> pd.DataFrame:
+        path = self.path(symbol, namespace)
+        path.parent.mkdir(parents=True, exist_ok=True)
         with FileLock(str(path) + ".lock", timeout=5):
-            combined = pd.concat([self.load(symbol), incoming])
+            existing = self.load(symbol, namespace)
+            combined = incoming.copy() if existing.empty else pd.concat([existing, incoming])
             combined = normalize_bars(combined).tail(3000)
             temporary = path.with_suffix(".tmp")
             combined.to_csv(temporary, index_label="timestamp")
@@ -39,7 +44,8 @@ class HistoryCache:
         return combined
 
     def backfill(self, client: KISClient, symbol: str, target_bars: int = 1000, max_days: int = 12) -> pd.DataFrame:
-        cached = self.load(symbol)
+        namespace = "KR-KRX-KR_REGULAR"
+        cached = self.load(symbol, namespace)
         if len(cached) >= target_bars:
             return cached
         cursor = date.today()
@@ -51,7 +57,26 @@ class HistoryCache:
             if cursor.weekday() < 5:
                 day_frame = client.minute_day(symbol, cursor.strftime("%Y%m%d"))
                 if not day_frame.empty:
-                    cached = self.merge(symbol, day_frame)
+                    cached = self.merge(symbol, day_frame, namespace)
                 fetched_days += 1
             cursor -= timedelta(days=1)
         return cached
+
+    def backfill_candidate(self, client: KISClient, candidate: Candidate, target_bars: int = 1000) -> pd.DataFrame:
+        if candidate.market == Market.KR:
+            return self.backfill(client, candidate.symbol, target_bars=target_bars, max_days=12)
+        namespace = f"US-{candidate.exchange}-{candidate.session.value}"
+        cached = self.load(candidate.symbol, namespace)
+        if len(cached) >= target_bars:
+            return cached
+        before = ""
+        if not cached.empty:
+            before = (pd.Timestamp(cached.index.min()) - pd.Timedelta(minutes=1)).strftime("%Y%m%d%H%M%S")
+        frame = client.overseas_minutes(
+            candidate.symbol,
+            session_exchange(candidate.exchange, candidate.session),
+            max_records=min(target_bars, 1200),
+            before=before,
+        )
+        frame = filter_session_bars(frame, candidate.session)
+        return self.merge(candidate.symbol, frame, namespace) if not frame.empty else cached

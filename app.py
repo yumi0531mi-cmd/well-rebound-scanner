@@ -10,9 +10,10 @@ from wellscan import APP_VERSION, ENGINE_VERSION
 from wellscan.engine import evaluate
 from wellscan.history import HistoryCache
 from wellscan.kis import KISClient, KISError
-from wellscan.models import Candidate, ScanResult, Stage
+from wellscan.models import Candidate, Market, ScanResult, Stage, TradingSession
 from wellscan.realtime import RealtimeHub
 from wellscan.sequence import SequenceStore
+from wellscan.sessions import session_exchange, session_status
 from wellscan.validation import ValidationStore
 
 st.set_page_config(page_title="정배열·우물반등 순서 스캐너", page_icon="📈", layout="wide")
@@ -56,13 +57,15 @@ def validations() -> ValidationStore:
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def candidate_pool() -> list[Candidate]:
-    return client().candidate_union(100)
+def candidate_pool(market: Market, session: TradingSession) -> list[Candidate]:
+    return client().candidate_union(100) if market == Market.KR else client().overseas_candidate_union(session, 100)
 
 
-@st.cache_data(ttl=30, show_spinner=False)
-def rest_price(symbol: str) -> tuple[float, float, datetime]:
-    return client().current_price(symbol)
+@st.cache_data(ttl=3, show_spinner=False)
+def rest_price(market: Market, symbol: str, exchange: str, session: TradingSession) -> tuple[float, float, datetime]:
+    if market == Market.KR:
+        return client().current_price(symbol)
+    return client().overseas_current_price(symbol, session_exchange(exchange, session))
 
 
 def price_text(value: float | None) -> str:
@@ -70,14 +73,14 @@ def price_text(value: float | None) -> str:
 
 
 def _live_price_content(candidate: Candidate) -> None:
-    tick = realtime().tick(candidate.symbol)
+    tick = realtime().tick(candidate)
     if tick is not None:
         price, timestamp, source = tick.price, tick.timestamp, "KIS WebSocket 체결"
         change = candidate.change_pct
     else:
         try:
-            price, change, timestamp = rest_price(candidate.symbol)
-            source = "KIS REST 30초 안전 대체"
+            price, change, timestamp = rest_price(candidate.market, candidate.symbol, candidate.exchange, candidate.session)
+            source = "KIS REST 3초 안전 대체"
         except KISError:
             price, change, timestamp, source = candidate.price, candidate.change_pct, datetime.now(UTC), "순위 조회가"
     st.metric("현재가", price_text(price), f"{change:+.2f}%")
@@ -105,7 +108,7 @@ def render_price(candidate: Candidate, seconds: int) -> None:
 
 def render_result(candidate: Candidate, result: ScanResult, refresh_seconds: int) -> None:
     stage_class = "good" if result.stage == Stage.FINAL_BUY else "bad" if result.stage in {Stage.EXCLUDED, Stage.MISSED} else "wait"
-    with st.container(border=True, key=f"card-{candidate.symbol}"):
+    with st.container(border=True, key=f"card-{candidate.key}"):
         st.markdown(
             f'<div class="symbol">{html.escape(candidate.symbol)} · {html.escape(candidate.name)}</div>'
             f'<div class="stage {stage_class}">{html.escape(result.stage.value)} · {result.strategy.value}</div>',
@@ -133,12 +136,20 @@ def render_result(candidate: Candidate, result: ScanResult, refresh_seconds: int
 
 with st.sidebar:
     st.title("새 순서 스캐너")
+    market_label = st.radio("시장", ["국내주식", "미국주식"], horizontal=True)
+    market = Market.KR if market_label == "국내주식" else Market.US
+    status = session_status(market)
+    st.info(f"현재 세션: {status.label}" + (" · 감시 중" if status.active else " · 신규 신호 중지"))
     mode = st.radio("후보 모드", ["일반주", "급등주"], horizontal=True)
     display_count = st.slider("표시 후보", 5, 10, 5)
     refresh_seconds = int(st.radio("현재가 화면 갱신", [1, 3, 5], horizontal=True, format_func=lambda value: f"{value}초"))
-    minimum_price = st.number_input("최소 가격", 100.0, 300000.0, 1000.0, 100.0)
-    maximum_price = st.number_input("최대 가격", 1000.0, 1000000.0, 300000.0, 1000.0)
-    st.caption("후보풀: KIS 거래량 TOP100 ∪ 거래대금 TOP100")
+    if market == Market.KR:
+        minimum_price = st.number_input("최소 가격(원)", 100.0, 300000.0, 1000.0, 100.0)
+        maximum_price = st.number_input("최대 가격(원)", 1000.0, 1000000.0, 300000.0, 1000.0)
+    else:
+        minimum_price = st.number_input("최소 가격(USD)", 0.1, 1000.0, 2.0, 0.5)
+        maximum_price = st.number_input("최대 가격(USD)", 1.0, 10000.0, 500.0, 5.0)
+    st.caption("후보풀: KIS 거래량 TOP100 ∪ 거래대금 TOP100 · 미국 NAS/NYS/AMS 통합")
     st.caption("구조 계산: 새 완료봉 60초 · 현재가: WebSocket 우선")
 
 st.markdown('<div class="hero"><h1>정배열·이격수렴·우물반등 순서 스캐너</h1><p>15분 추세 → 5분 우물 → 3분 진입준비 → FINAL_BUY</p></div>', unsafe_allow_html=True)
@@ -147,12 +158,16 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+pool: list[Candidate] = []
 if not client().configured:
     st.error("KIS_APP_KEY와 KIS_APP_SECRET 환경변수가 필요합니다.")
     st.stop()
 
 try:
-    pool = candidate_pool()
+    if not status.active:
+        st.warning(f"{status.label}입니다. 세션 밖의 오래된 가격으로 신규 매수 신호를 만들지 않습니다.")
+        st.stop()
+    pool = candidate_pool(market, status.session)
 except KISError as exc:
     st.error(f"KIS 후보풀 수신 실패: {exc}")
     st.stop()
@@ -162,18 +177,18 @@ if mode == "일반주":
 else:
     filtered = [candidate for candidate in pool if minimum_price <= candidate.price <= maximum_price and 7 < candidate.change_pct <= 20]
 selected = filtered[: min(display_count + 3, 12)]
-realtime().configure([candidate.symbol for candidate in selected])
+realtime().configure(selected)
 
 results: list[tuple[Candidate, ScanResult]] = []
 for candidate in selected:
-    bars = history().backfill(client(), candidate.symbol, target_bars=1000, max_days=1)
-    tick = realtime().tick(candidate.symbol)
+    bars = history().backfill_candidate(client(), candidate, target_bars=1000)
+    tick = realtime().tick(candidate)
     price = tick.price if tick else candidate.price
-    result = evaluate(candidate.symbol, bars, price, sequences())
+    result = evaluate(candidate.key, bars, price, sequences())
     if result.stage == Stage.FINAL_BUY:
-        validations().record(result, ENGINE_VERSION)
+        validations().record(result, ENGINE_VERSION, candidate.market.value, candidate.session.value)
     for case in validations().cases():
-        if case.symbol == candidate.symbol and not case.scored:
+        if case.symbol == candidate.key and case.market == candidate.market.value and case.session == candidate.session.value and not case.scored:
             validations().score(case, bars)
     results.append((candidate, result))
 
@@ -198,7 +213,7 @@ for candidate, result in visible:
 
 with st.expander("사후검증·Calibration"):
     for strategy_name in ("TREND_SWING", "RANGE_SWING"):
-        calibration = validations().calibration(strategy_name, ENGINE_VERSION)
+        calibration = validations().calibration(strategy_name, ENGINE_VERSION, market.value, status.session.value)
         samples = int(calibration["samples"] or 0)
         if samples < 100:
             st.write(f"{strategy_name}: 보정 전 {samples}/100 · 실제 승률로 표시하지 않음")

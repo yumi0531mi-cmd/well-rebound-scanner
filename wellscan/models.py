@@ -31,6 +31,20 @@ class RiskState(StrEnum):
     HARD_KILL = "HARD_KILL"
 
 
+class Market(StrEnum):
+    KR = "KR"
+    US = "US"
+
+
+class TradingSession(StrEnum):
+    KR_REGULAR = "KR_REGULAR"
+    US_DAY = "US_DAY"
+    US_PRE = "US_PRE"
+    US_REGULAR = "US_REGULAR"
+    US_AFTER = "US_AFTER"
+    CLOSED = "CLOSED"
+
+
 @dataclass(frozen=True)
 class Candidate:
     symbol: str
@@ -40,6 +54,13 @@ class Candidate:
     volume: float
     turnover: float
     sources: frozenset[str] = frozenset()
+    market: Market = Market.KR
+    exchange: str = "KRX"
+    session: TradingSession = TradingSession.KR_REGULAR
+
+    @property
+    def key(self) -> str:
+        return f"{self.market.value}:{self.exchange}:{self.session.value}:{self.symbol.upper()}"
 
 
 @dataclass(frozen=True)

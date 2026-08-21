@@ -21,6 +21,8 @@ class SignalCase:
     hard_stop: float
     strategy: str
     engine_version: str
+    market: str = "KR"
+    session: str = "KR_REGULAR"
     scored: bool = False
     mfe_5: float | None = None
     mae_5: float | None = None
@@ -39,7 +41,7 @@ class ValidationStore:
     def _path(self, case_id: str) -> Path:
         return self.root / f"{case_id}.json"
 
-    def record(self, result: ScanResult, engine_version: str) -> SignalCase | None:
+    def record(self, result: ScanResult, engine_version: str, market: str = "KR", session: str = "KR_REGULAR") -> SignalCase | None:
         levels = result.levels
         if not result.final_buy or not all((levels.entry, levels.target1, levels.target2, levels.hard_stop)):
             return None
@@ -54,6 +56,8 @@ class ValidationStore:
             hard_stop=float(levels.hard_stop),
             strategy=result.strategy.value,
             engine_version=engine_version,
+            market=market,
+            session=session,
         )
         path = self._path(case_id)
         with FileLock(str(path) + ".lock", timeout=3):
@@ -99,8 +103,9 @@ class ValidationStore:
                 path.write_text(json.dumps(asdict(case), ensure_ascii=False, indent=2), encoding="utf-8")
         return case
 
-    def calibration(self, strategy: str, engine_version: str) -> dict[str, float | int | None]:
-        matching = [case for case in self.cases() if case.scored and case.strategy == strategy and case.engine_version == engine_version]
+    def calibration(self, strategy: str, engine_version: str, market: str | None = None, session: str | None = None) -> dict[str, float | int | None]:
+        matching = [case for case in self.cases() if case.scored and case.strategy == strategy and case.engine_version == engine_version
+                    and (market is None or case.market == market) and (session is None or case.session == session)]
         wins = [case for case in matching if case.first_hit == "TARGET1"]
         return {
             "samples": len(matching),
