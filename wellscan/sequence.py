@@ -23,6 +23,8 @@ class SequenceState:
     breakdown_date: str = ""
     breakdown_count: int = 0
     last_breakdown_marker: str = ""
+    entry_price: float | None = None
+    entry_hard_stop: float | None = None
 
 
 class SequenceStore:
@@ -74,11 +76,17 @@ class SequenceStore:
         missed: bool,
         excluded: bool,
         hard_kill: bool = False,
+        candidate_entry: float | None = None,
+        candidate_hard_stop: float | None = None,
         now: datetime | None = None,
     ) -> SequenceState:
         current_time = now or datetime.now(UTC)
         state = self.load(symbol)
         cooldown_until = self._parse(state.cooldown_until)
+        well_at = self._parse(state.well_at)
+        entry_wait_at = self._parse(state.entry_wait_at)
+        well_fresh = well_at is not None and current_time - well_at <= timedelta(minutes=30)
+        entry_fresh = entry_wait_at is not None and current_time - entry_wait_at <= timedelta(minutes=30)
         if hard_kill:
             state.stage = Stage.EXCLUDED
             state.hard_kill_date = current_time.date().isoformat()
@@ -93,19 +101,29 @@ class SequenceStore:
             state.stage = Stage.MISSED
         elif state.stage in {Stage.EXCLUDED, Stage.MISSED}:
             state.stage = Stage.TREND_READY if trend_ready else Stage.CANDIDATE
-        elif breakout and entry_ready and state.stage in {Stage.ENTRY_WAIT, Stage.WELL_FORMING, Stage.FINAL_BUY}:
+        elif breakout and state.entry_price and entry_fresh and state.stage in {Stage.ENTRY_WAIT, Stage.FINAL_BUY}:
             state.stage = Stage.FINAL_BUY
-        elif entry_ready and well_ready:
+        elif entry_ready and (well_ready or (state.stage in {Stage.WELL_FORMING, Stage.ENTRY_WAIT} and well_fresh)):
             state.stage = Stage.ENTRY_WAIT
-            state.entry_wait_at = state.entry_wait_at or current_time.isoformat()
+            state.entry_wait_at = current_time.isoformat()
+            state.entry_price = candidate_entry or state.entry_price
+            state.entry_hard_stop = candidate_hard_stop or state.entry_hard_stop
+        elif state.stage == Stage.ENTRY_WAIT and entry_fresh and trend_ready:
+            state.stage = Stage.ENTRY_WAIT
+        elif state.stage == Stage.WELL_FORMING and well_fresh and trend_ready:
+            state.stage = Stage.WELL_FORMING
         elif well_ready and trend_ready:
             state.stage = Stage.WELL_FORMING
-            state.well_at = state.well_at or current_time.isoformat()
+            state.well_at = current_time.isoformat()
         elif trend_ready:
             state.stage = Stage.TREND_READY
             state.trend_at = state.trend_at or current_time.isoformat()
         else:
             state.stage = Stage.CANDIDATE
+        if state.stage not in {Stage.ENTRY_WAIT, Stage.FINAL_BUY}:
+            state.entry_price = None
+            state.entry_hard_stop = None
+            state.entry_wait_at = ""
         state.updated_at = current_time.isoformat()
         self.save(state)
         return state

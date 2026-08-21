@@ -180,6 +180,8 @@ def evaluate(
         missed=missed or overheated,
         excluded=excluded,
         hard_kill=cycle.hard_kill_date == evaluated_at.date().isoformat(),
+        candidate_entry=rebound_high if entry_ready else None,
+        candidate_hard_stop=hard_stop,
         now=evaluated_at,
     )
     if cycle.hard_kill_date == evaluated_at.date().isoformat():
@@ -187,7 +189,8 @@ def evaluate(
     elif state.stage == Stage.EXCLUDED and state.cooldown_until and risk_state == RiskState.NORMAL:
         risk_state = RiskState.COOLDOWN
 
-    entry = rebound_high if entry_ready else None
+    entry = state.entry_price if state.stage in {Stage.ENTRY_WAIT, Stage.FINAL_BUY} else None
+    hard_stop = state.entry_hard_stop if entry and state.entry_hard_stop else hard_stop
     risk = entry - hard_stop if entry and hard_stop and hard_stop < entry else None
     target1 = entry + risk * 1.5 if risk else None
     target2 = entry + risk * 2.2 if risk else None
