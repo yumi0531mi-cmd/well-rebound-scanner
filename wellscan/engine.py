@@ -9,10 +9,9 @@ from .indicators import completed_resample, enriched, pivot_points
 from .models import RiskState, ScanResult, Stage, Strategy, TradeLevels
 from .sequence import SequenceStore
 
-# 330 completed one-minute bars are enough for the 5-minute well (65 bars)
-# and the 15-minute transition trend (20 bars).  A strict MA60 alignment is
-# used only when the full 900-minute history is actually available.
-MIN_ONE_MINUTE_BARS = 330
+# Three hours preserve a usable 15-minute transition context during early US
+# pre-market. Strict MA5/20/60 alignment is still used only when available.
+MIN_ONE_MINUTE_BARS = 180
 
 
 def _slope(values: pd.Series, periods: int = 5) -> float:
@@ -56,7 +55,7 @@ def _swing_quality(frame5: pd.DataFrame) -> tuple[float | None, float | None, fl
 
 def _well_rebound(frame5: pd.DataFrame) -> tuple[bool, bool, bool]:
     data = enriched(frame5)
-    if len(data) < 65:
+    if len(data) < 25:
         return False, False, False
     last = data.iloc[-1]
     distance_gap = (data.dist5 - data.dist20).abs()
@@ -96,11 +95,11 @@ def _entry_setup(frame3: pd.DataFrame) -> tuple[bool, bool, bool, float | None, 
 
 def _trend(frame15: pd.DataFrame) -> tuple[bool, bool, Strategy]:
     data = enriched(frame15)
-    if len(data) < 20:
+    if len(data) < 12:
         return False, False, Strategy.NONE
     last = data.iloc[-1]
     aligned = bool(pd.notna(last.ma60) and last.close > last.ma5 > last.ma20 > last.ma60)
-    transitioning = bool(last.close > last.ma20 and _slope(data.ma5) > 0 and _slope(data.ma20) > 0)
+    transitioning = bool(last.close > last.ema20 and _slope(data.ema9) > 0 and _slope(data.ema20) > 0)
     recent_range = data.tail(20)
     range_width = (recent_range.high.max() / recent_range.low.min() - 1) * 100
     strategy = Strategy.RANGE_SWING if 0.5 <= range_width <= 5 and not aligned else Strategy.TREND_SWING
@@ -129,8 +128,8 @@ def evaluate(
             pattern_fatigue=None,
             net_swing_pct=None,
             levels=TradeLevels(),
-            conditions={"330분 완료봉": False},
-            reasons=(f"5분 우물·15분 전환추세 계산에 필요한 330분 중 {len(bars)}분 수집",),
+            conditions={"180분 완료봉": False},
+            reasons=(f"5분 우물·15분 EMA 전환추세 계산에 필요한 180분 중 {len(bars)}분 수집",),
             diagnostics={"bar_count": len(bars), "required_bar_count": MIN_ONE_MINUTE_BARS},
         )
 

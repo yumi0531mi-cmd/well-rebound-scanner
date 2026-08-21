@@ -24,9 +24,9 @@ def bars(count: int) -> pd.DataFrame:
 
 
 def test_warmup_threshold_matches_multi_timeframe_requirement(tmp_path) -> None:
-    assert MIN_ONE_MINUTE_BARS == 330
-    waiting = evaluate("TEST", bars(329), 110.0, SequenceStore(tmp_path), datetime.now(UTC))
-    ready = evaluate("TEST2", bars(330), 110.0, SequenceStore(tmp_path), datetime.now(UTC))
+    assert MIN_ONE_MINUTE_BARS == 180
+    waiting = evaluate("TEST", bars(179), 110.0, SequenceStore(tmp_path), datetime.now(UTC))
+    ready = evaluate("TEST2", bars(180), 110.0, SequenceStore(tmp_path), datetime.now(UTC))
 
     assert waiting.stage == Stage.DATA_WAIT
     assert ready.stage != Stage.DATA_WAIT

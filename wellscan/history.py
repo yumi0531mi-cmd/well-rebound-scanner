@@ -71,12 +71,22 @@ class HistoryCache:
             return cached
         before = ""
         if not cached.empty:
-            before = (pd.Timestamp(cached.index.min()) - pd.Timedelta(minutes=1)).strftime("%Y%m%d%H%M%S")
-        frame = client.overseas_minutes(
-            candidate.symbol,
-            session_exchange(candidate.exchange, candidate.session),
-            max_records=min(max(target_bars - len(cached), 120), 480),
-            before=before,
-        )
-        frame = filter_session_bars(frame, candidate.session)
-        return self.merge(candidate.symbol, frame, namespace) if not frame.empty else cached
+            before = (pd.Timestamp(cached.index.min()).to_pydatetime() - timedelta(minutes=1)).strftime("%Y%m%d%H%M%S")
+        # KIS often ends one response at 120 records without a continuation
+        # header. Continue explicitly from the oldest saved timestamp.
+        for _ in range(3):
+            frame = client.overseas_minutes(
+                candidate.symbol,
+                session_exchange(candidate.exchange, candidate.session),
+                max_records=120,
+                before=before,
+            )
+            frame = filter_session_bars(frame, candidate.session)
+            if frame.empty:
+                break
+            previous_count = len(cached)
+            cached = self.merge(candidate.symbol, frame, namespace)
+            if len(cached) >= target_bars or len(cached) == previous_count:
+                break
+            before = (pd.Timestamp(cached.index.min()).to_pydatetime() - timedelta(minutes=1)).strftime("%Y%m%d%H%M%S")
+        return cached

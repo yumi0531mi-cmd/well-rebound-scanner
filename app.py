@@ -157,7 +157,7 @@ if mode == "일반주":
     filtered = [candidate for candidate in pool if minimum_price <= candidate.price <= maximum_price and 0 <= candidate.change_pct <= 7]
 else:
     filtered = [candidate for candidate in pool if minimum_price <= candidate.price <= maximum_price and 7 < candidate.change_pct <= 20]
-selected = filtered[: min(display_count + 3, 12)]
+selected = filtered[:display_count]
 realtime().configure(selected)
 with st.sidebar:
     if realtime().connected:
