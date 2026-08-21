@@ -6,12 +6,12 @@ import numpy as np
 import pandas as pd
 
 from .indicators import completed_resample, enriched, pivot_points
-from .models import RiskState, ScanResult, Stage, Strategy, TradeLevels
+from .models import RiskState, ScanResult, Stage, Strategy, TradeLevels, TradingSession
 from .sequence import SequenceStore
 
-# Three hours preserve a usable 15-minute transition context during early US
-# pre-market. Strict MA5/20/60 alignment is still used only when available.
-MIN_ONE_MINUTE_BARS = 180
+# A 15-minute MA60 needs 900 completed one-minute bars.  No signal is emitted
+# until the real session-isolated history reaches this requirement.
+MIN_ONE_MINUTE_BARS = 900
 
 
 def _slope(values: pd.Series, periods: int = 5) -> float:
@@ -53,8 +53,8 @@ def _swing_quality(frame5: pd.DataFrame) -> tuple[float | None, float | None, fl
     return float(np.median(widths)), persistence, confidence, fatigue
 
 
-def _well_rebound(frame5: pd.DataFrame) -> tuple[bool, bool, bool]:
-    data = enriched(frame5)
+def _well_rebound(frame5: pd.DataFrame, session: TradingSession | None = None) -> tuple[bool, bool, bool]:
+    data = enriched(frame5, session)
     if len(data) < 25:
         return False, False, False
     last = data.iloc[-1]
@@ -79,8 +79,8 @@ def _well_rebound(frame5: pd.DataFrame) -> tuple[bool, bool, bool]:
     return convergence, stochastic_rebound, macd_turn
 
 
-def _entry_setup(frame3: pd.DataFrame) -> tuple[bool, bool, bool, float | None, float | None]:
-    data = enriched(frame3)
+def _entry_setup(frame3: pd.DataFrame, session: TradingSession | None = None) -> tuple[bool, bool, bool, float | None, float | None]:
+    data = enriched(frame3, session)
     if len(data) < 25:
         return False, False, False, None, None
     _, lows = pivot_points(data.tail(30), 2, 2)
@@ -93,8 +93,8 @@ def _entry_setup(frame3: pd.DataFrame) -> tuple[bool, bool, bool, float | None, 
     return higher_low, volume_recovery, vwap_recovery, rebound_high, second_low
 
 
-def _trend(frame15: pd.DataFrame) -> tuple[bool, bool, Strategy]:
-    data = enriched(frame15)
+def _trend(frame15: pd.DataFrame, session: TradingSession | None = None) -> tuple[bool, bool, Strategy]:
+    data = enriched(frame15, session)
     if len(data) < 12:
         return False, False, Strategy.NONE
     last = data.iloc[-1]
@@ -112,6 +112,7 @@ def evaluate(
     live_price: float,
     store: SequenceStore | None = None,
     now: datetime | None = None,
+    session: TradingSession | None = None,
 ) -> ScanResult:
     evaluated_at = now or datetime.now(UTC)
     bars = one_minute_bars.copy()
@@ -128,20 +129,20 @@ def evaluate(
             pattern_fatigue=None,
             net_swing_pct=None,
             levels=TradeLevels(),
-            conditions={"180분 완료봉": False},
-            reasons=(f"5분 우물·15분 EMA 전환추세 계산에 필요한 180분 중 {len(bars)}분 수집",),
+            conditions={"900분 완료봉": False},
+            reasons=(f"15분 MA60·5분 우물·3분 진입 준비 계산에 필요한 900분 중 {len(bars)}분 수집",),
             diagnostics={"bar_count": len(bars), "required_bar_count": MIN_ONE_MINUTE_BARS},
         )
 
     frame15 = completed_resample(bars, 15)
     frame5 = completed_resample(bars, 5)
     frame3 = completed_resample(bars, 3)
-    aligned, transitioning, strategy = _trend(frame15)
-    convergence, stochastic_rebound, macd_turn = _well_rebound(frame5)
-    higher_low, volume_recovery, vwap_recovery, rebound_high, second_low = _entry_setup(frame3)
+    aligned, transitioning, strategy = _trend(frame15, session)
+    convergence, stochastic_rebound, macd_turn = _well_rebound(frame5, session)
+    higher_low, volume_recovery, vwap_recovery, rebound_high, second_low = _entry_setup(frame3, session)
     net_swing, persistence, confidence, fatigue = _swing_quality(frame5)
 
-    data3 = enriched(frame3)
+    data3 = enriched(frame3, session)
     latest3 = data3.iloc[-1]
     trend_ready = aligned or transitioning
     well_ready = convergence and stochastic_rebound and macd_turn

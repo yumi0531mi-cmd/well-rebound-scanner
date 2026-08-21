@@ -5,6 +5,8 @@ from datetime import timedelta
 import numpy as np
 import pandas as pd
 
+from .models import TradingSession
+
 OHLCV = ("open", "high", "low", "close", "volume")
 
 
@@ -40,8 +42,13 @@ def completed_resample(frame: pd.DataFrame, minutes: int, now: pd.Timestamp | No
     return grouped[grouped.index <= reference.floor(f"{minutes}min")]
 
 
-def enriched(frame: pd.DataFrame) -> pd.DataFrame:
-    """Single source of truth for every indicator used by the strategy."""
+def enriched(frame: pd.DataFrame, session: TradingSession | None = None) -> pd.DataFrame:
+    """Single source of truth for every indicator used by the strategy.
+
+    Each history cache is already market/exchange/session isolated.  US day
+    trading nevertheless crosses New York midnight, so it uses a 04:00
+    boundary instead of a calendar-date reset for session VWAP.
+    """
     data = normalize_bars(frame)
     close = data.close
     for window in (5, 20, 60):
@@ -49,7 +56,10 @@ def enriched(frame: pd.DataFrame) -> pd.DataFrame:
     data["ema9"] = close.ewm(span=9, adjust=False).mean()
     data["ema20"] = close.ewm(span=20, adjust=False).mean()
     typical = (data.high + data.low + data.close) / 3
-    session_key = pd.Series(data.index.date, index=data.index)
+    if session == TradingSession.US_DAY:
+        session_key = pd.Series([pd.Timestamp(value).to_pydatetime() - timedelta(hours=4) for value in data.index], index=data.index).dt.date
+    else:
+        session_key = pd.Series(data.index.date, index=data.index)
     cumulative_volume = data.volume.groupby(session_key).cumsum().replace(0, np.nan)
     data["vwap"] = (typical * data.volume).groupby(session_key).cumsum() / cumulative_volume
 

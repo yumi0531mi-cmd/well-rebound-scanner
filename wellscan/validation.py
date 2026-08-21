@@ -23,6 +23,7 @@ class SignalCase:
     engine_version: str
     market: str = "KR"
     session: str = "KR_REGULAR"
+    mode: str = "일반주"
     scored: bool = False
     mfe_5: float | None = None
     mae_5: float | None = None
@@ -53,6 +54,7 @@ class ValidationStore:
         engine_version: str,
         market: str = "KR",
         session: str = "KR_REGULAR",
+        mode: str = "일반주",
         limit: int = 10,
     ) -> SignalCase | None:
         levels = result.levels
@@ -71,6 +73,7 @@ class ValidationStore:
             engine_version=engine_version,
             market=market,
             session=session,
+            mode=mode,
         )
         path = self._path(case_id)
         with FileLock(str(self.root / ".collection.lock"), timeout=3):
@@ -79,20 +82,33 @@ class ValidationStore:
                     return SignalCase(**json.loads(path.read_text(encoding="utf-8")))
                 except (OSError, ValueError, TypeError):
                     return None
-            if len(self.cases(engine_version=engine_version)) >= limit:
+            if len(self.cases(engine_version=engine_version, market=market, session=session, mode=mode)) >= limit:
                 return None
             if not path.exists():
                 path.write_text(json.dumps(asdict(case), ensure_ascii=False, indent=2), encoding="utf-8")
         return case
 
-    def cases(self, engine_version: str | None = None) -> list[SignalCase]:
+    def cases(
+        self,
+        engine_version: str | None = None,
+        market: str | None = None,
+        session: str | None = None,
+        mode: str | None = None,
+    ) -> list[SignalCase]:
         results = []
         for path in self.root.glob("*.json"):
             try:
                 results.append(SignalCase(**json.loads(path.read_text(encoding="utf-8"))))
             except (OSError, ValueError, TypeError):
                 continue
-        matching = [case for case in results if engine_version is None or case.engine_version == engine_version]
+        matching = [
+            case
+            for case in results
+            if (engine_version is None or case.engine_version == engine_version)
+            and (market is None or case.market == market)
+            and (session is None or case.session == session)
+            and (mode is None or case.mode == mode)
+        ]
         return sorted(matching, key=lambda case: case.signaled_at)
 
     def update_live(self, case: SignalCase, price: float, checked_at: str) -> SignalCase:
@@ -146,9 +162,19 @@ class ValidationStore:
                 path.write_text(json.dumps(asdict(case), ensure_ascii=False, indent=2), encoding="utf-8")
         return case
 
-    def calibration(self, strategy: str, engine_version: str, market: str | None = None, session: str | None = None) -> dict[str, float | int | None]:
-        matching = [case for case in self.cases() if case.scored and case.strategy == strategy and case.engine_version == engine_version
-                    and (market is None or case.market == market) and (session is None or case.session == session)]
+    def calibration(
+        self,
+        strategy: str,
+        engine_version: str,
+        market: str | None = None,
+        session: str | None = None,
+        mode: str | None = None,
+    ) -> dict[str, float | int | None]:
+        matching = [
+            case
+            for case in self.cases(engine_version=engine_version, market=market, session=session, mode=mode)
+            if case.scored and case.strategy == strategy
+        ]
         wins = [case for case in matching if case.first_hit == "TARGET1"]
         return {
             "samples": len(matching),
