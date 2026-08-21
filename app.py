@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import html
+import logging
 from dataclasses import replace
 from datetime import UTC, datetime
+from time import perf_counter
 
 import streamlit as st
 
@@ -15,6 +17,8 @@ from wellscan.realtime import RealtimeHub
 from wellscan.sequence import SequenceStore
 from wellscan.sessions import session_exchange, session_status
 from wellscan.validation import ValidationStore
+
+LOGGER = logging.getLogger(__name__)
 
 st.set_page_config(page_title="정배열·우물반등 순서 스캐너", page_icon="📈", layout="wide")
 st.markdown(
@@ -134,9 +138,9 @@ def render_result(candidate: Candidate, result: ScanResult) -> None:
         _live_price_content(quote)
         summary = st.columns(4)
         summary[0].metric("순서 점수", f"{result.score}")
-        summary[1].metric("확정 Swing", price_text(result.net_swing_pct) + "%" if result.net_swing_pct else "수집 중")
-        summary[2].metric("Persistence", price_text(result.persistence) if result.persistence is not None else "보정 전")
-        summary[3].metric("Pattern Fatigue", price_text(result.pattern_fatigue) if result.pattern_fatigue is not None else "보정 전")
+        summary[1].metric("확정 Swing", price_text(result.net_swing_pct) + "%" if result.net_swing_pct else "확정 Swing 부족")
+        summary[2].metric("Persistence", price_text(result.persistence) if result.persistence is not None else "확정 Swing 부족")
+        summary[3].metric("Pattern Fatigue", price_text(result.pattern_fatigue) if result.pattern_fatigue is not None else "확정 Swing 부족")
         levels = result.levels
         level_columns = st.columns(3)
         entry_label = "확정 진입가" if result.stage == Stage.FINAL_BUY else "관찰 진입가"
@@ -216,9 +220,10 @@ with st.sidebar:
 @st.cache_data(ttl=65, show_spinner=False)
 def structure_results(candidates: tuple[Candidate, ...], completed_minute: int) -> list[tuple[Candidate, ScanResult]]:
     del completed_minute
+    started = perf_counter()
     output: list[tuple[Candidate, ScanResult]] = []
-    for candidate in candidates:
-        bars = history().backfill_candidate(client(), candidate, target_bars=1000)
+    cache = history()
+    for candidate, bars in cache.iter_backfill_candidates(client(), candidates, target_bars=HistoryCache.INITIAL_READY_BARS):
         tick = realtime().tick(candidate)
         if tick is not None:
             price = tick.price
@@ -239,7 +244,30 @@ def structure_results(candidates: tuple[Candidate, ...], completed_minute: int) 
         for case in validations().cases():
             if case.symbol == candidate.key and case.market == candidate.market.value and case.session == candidate.session.value and not case.scored:
                 validations().score(case, bars)
+        metrics = cache.metrics(candidate)
+        if metrics is not None:
+            LOGGER.info(
+                "structure symbol=%s cache_hit=%s cached_before=%s cached_after=%s api_calls=%s load_s=%.3f api_s=%.3f total_s=%.3f stage=%s",
+                candidate.key,
+                metrics.cache_hit,
+                metrics.cached_before,
+                metrics.cached_after,
+                metrics.api_calls,
+                metrics.load_seconds,
+                metrics.api_seconds,
+                metrics.total_seconds,
+                result.stage.value,
+            )
         output.append((candidate, result))
+    cache.schedule_warmup(client(), candidates)
+    metrics = cache.snapshot_metrics()
+    LOGGER.info(
+        "structure_batch candidates=%s cache_hits=%s api_calls=%s elapsed_s=%.3f",
+        len(output),
+        sum(item.cache_hit for item in metrics),
+        sum(item.api_calls for item in metrics),
+        perf_counter() - started,
+    )
     return output
 
 
