@@ -73,6 +73,7 @@ class RealtimeHub:
                                 }
                             )
                         )
+                        await asyncio.sleep(0.5)
                     self.connected = True
                     self.last_error = ""
                     delay = 1.0
