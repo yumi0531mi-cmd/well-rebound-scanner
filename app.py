@@ -106,8 +106,6 @@ def _confirm_live_breakout(candidate: Candidate, result: ScanResult, live_price:
     state = sequences().advance(
         candidate.key,
         trend_ready=True,
-        well_ready=False,
-        entry_ready=False,
         breakout=True,
         missed=False,
         excluded=False,
