@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import timedelta
+
 import numpy as np
 import pandas as pd
 
@@ -27,7 +29,12 @@ def completed_resample(frame: pd.DataFrame, minutes: int, now: pd.Timestamp | No
     grouped = data.resample(f"{minutes}min", label="right", closed="left").agg(
         {"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"}
     ).dropna()
-    reference = now if now is not None else pd.Timestamp(data.index.max()) + pd.Timedelta(minutes=1)
+    last_timestamp = data.index[-1]
+    if not isinstance(last_timestamp, pd.Timestamp):
+        last_timestamp = pd.Timestamp(last_timestamp)
+    # Normalize NumPy's generic datetime resolution before timestamp arithmetic.
+    last_timestamp = pd.Timestamp(last_timestamp.isoformat())
+    reference = now if now is not None else pd.Timestamp(last_timestamp.to_pydatetime() + timedelta(minutes=1))
     if reference.tzinfo is None and getattr(grouped.index, "tz", None) is not None:
         reference = reference.tz_localize(grouped.index.tz)
     return grouped[grouped.index <= reference.floor(f"{minutes}min")]

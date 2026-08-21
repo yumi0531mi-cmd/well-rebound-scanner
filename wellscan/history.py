@@ -75,7 +75,7 @@ class HistoryCache:
         frame = client.overseas_minutes(
             candidate.symbol,
             session_exchange(candidate.exchange, candidate.session),
-            max_records=min(target_bars, 240),
+            max_records=min(max(target_bars - len(cached), 120), 480),
             before=before,
         )
         frame = filter_session_bars(frame, candidate.session)

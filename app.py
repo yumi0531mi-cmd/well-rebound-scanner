@@ -103,7 +103,8 @@ def render_result(candidate: Candidate, result: ScanResult) -> None:
         summary[3].metric("Pattern Fatigue", price_text(result.pattern_fatigue) if result.pattern_fatigue is not None else "보정 전")
         levels = result.levels
         level_columns = st.columns(3)
-        level_columns[0].metric("진입가", price_text(levels.entry))
+        entry_label = "확정 진입가" if result.stage == Stage.FINAL_BUY else "관찰 진입가"
+        level_columns[0].metric(entry_label, price_text(levels.entry))
         level_columns[1].metric("1차 / 2차", f"{price_text(levels.target1)} / {price_text(levels.target2)}")
         level_columns[2].metric("Soft / Hard Stop", f"{price_text(levels.soft_stop)} / {price_text(levels.hard_stop)}")
         st.caption(f"재매수가 {price_text(levels.rebuy)} · 산출근거 {levels.basis}")

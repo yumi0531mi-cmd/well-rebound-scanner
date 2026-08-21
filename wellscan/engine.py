@@ -9,7 +9,10 @@ from .indicators import completed_resample, enriched, pivot_points
 from .models import RiskState, ScanResult, Stage, Strategy, TradeLevels
 from .sequence import SequenceStore
 
-MIN_ONE_MINUTE_BARS = 900
+# 330 completed one-minute bars are enough for the 5-minute well (65 bars)
+# and the 15-minute transition trend (20 bars).  A strict MA60 alignment is
+# used only when the full 900-minute history is actually available.
+MIN_ONE_MINUTE_BARS = 330
 
 
 def _slope(values: pd.Series, periods: int = 5) -> float:
@@ -93,10 +96,10 @@ def _entry_setup(frame3: pd.DataFrame) -> tuple[bool, bool, bool, float | None, 
 
 def _trend(frame15: pd.DataFrame) -> tuple[bool, bool, Strategy]:
     data = enriched(frame15)
-    if len(data) < 65:
+    if len(data) < 20:
         return False, False, Strategy.NONE
     last = data.iloc[-1]
-    aligned = bool(last.close > last.ma5 > last.ma20 > last.ma60)
+    aligned = bool(pd.notna(last.ma60) and last.close > last.ma5 > last.ma20 > last.ma60)
     transitioning = bool(last.close > last.ma20 and _slope(data.ma5) > 0 and _slope(data.ma20) > 0)
     recent_range = data.tail(20)
     range_width = (recent_range.high.max() / recent_range.low.min() - 1) * 100
@@ -126,8 +129,8 @@ def evaluate(
             pattern_fatigue=None,
             net_swing_pct=None,
             levels=TradeLevels(),
-            conditions={"900분 완료봉": False},
-            reasons=(f"15분 60이평 계산에 필요한 900분 중 {len(bars)}분 수집",),
+            conditions={"330분 완료봉": False},
+            reasons=(f"5분 우물·15분 전환추세 계산에 필요한 330분 중 {len(bars)}분 수집",),
             diagnostics={"bar_count": len(bars), "required_bar_count": MIN_ONE_MINUTE_BARS},
         )
 
@@ -189,8 +192,10 @@ def evaluate(
     elif state.stage == Stage.EXCLUDED and state.cooldown_until and risk_state == RiskState.NORMAL:
         risk_state = RiskState.COOLDOWN
 
-    entry = state.entry_price if state.stage in {Stage.ENTRY_WAIT, Stage.FINAL_BUY} else None
-    hard_stop = state.entry_hard_stop if entry and state.entry_hard_stop else hard_stop
+    confirmed_entry = state.entry_price if state.stage in {Stage.ENTRY_WAIT, Stage.FINAL_BUY} else None
+    planned_entry = rebound_high if trend_ready and rebound_high and second_low and second_low < rebound_high else None
+    entry = confirmed_entry or planned_entry
+    hard_stop = state.entry_hard_stop if confirmed_entry and state.entry_hard_stop else hard_stop
     risk = entry - hard_stop if entry and hard_stop and hard_stop < entry else None
     target1 = entry + risk * 1.5 if risk else None
     target2 = entry + risk * 2.2 if risk else None
@@ -229,7 +234,11 @@ def evaluate(
             target2=target2,
             soft_stop=soft_stop,
             hard_stop=hard_stop,
-            basis="3분 높은 저점·확정 반등고점·ATR 구조",
+            basis=(
+                "FINAL_BUY 확정 반등고점·ATR 구조"
+                if state.stage == Stage.FINAL_BUY
+                else "관찰가: 3분 최근 반등고점 돌파 시 진입·FINAL_BUY 전 매수 금지"
+            ),
         ),
         conditions=conditions,
         reasons=reasons,
@@ -246,5 +255,6 @@ def evaluate(
             "cycle_breakdowns_today": cycle.breakdown_count,
             "cooldown_until": cycle.cooldown_until,
             "hard_kill_date": cycle.hard_kill_date,
+            "level_status": "confirmed" if state.stage == Stage.FINAL_BUY else "watch",
         },
     )
