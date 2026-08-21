@@ -61,7 +61,7 @@ def candidate_pool(market: Market, session: TradingSession) -> list[Candidate]:
     return client().candidate_union(100) if market == Market.KR else client().overseas_candidate_union(session, 100)
 
 
-@st.cache_data(ttl=1, show_spinner=False)
+@st.cache_data(ttl=3, show_spinner=False)
 def rest_price(market: Market, symbol: str, exchange: str, session: TradingSession) -> tuple[float, float, datetime]:
     if market == Market.KR:
         return client().current_price(symbol)
@@ -80,7 +80,7 @@ def _live_quote(candidate: Candidate) -> tuple[float, float, datetime, str]:
     else:
         try:
             price, change, timestamp = rest_price(candidate.market, candidate.symbol, candidate.exchange, candidate.session)
-            source = "KIS REST 1초 현재가"
+            source = "KIS REST 3초 안전 대체"
         except KISError:
             price, change, timestamp, source = candidate.price, candidate.change_pct, datetime.now(UTC), "순위 조회가"
     return price, change, timestamp, source
@@ -178,7 +178,7 @@ with st.sidebar:
         )
         maximum_price = st.number_input("최대 가격(USD)", 1.0, 10000.0, 500.0, 5.0)
     st.caption("후보풀: KIS 거래량 TOP100 ∪ 거래대금 TOP100 · 미국 NAS/NYS/AMS 통합")
-    st.caption("구조 계산: 새 완료봉 60초 · 현재가: WebSocket 우선")
+    st.caption("내부 분석: 상위 10개 · 구조 계산: 새 완료봉 60초 · 현재가: WebSocket 우선")
 
 st.markdown('<div class="hero"><h1>정배열·이격수렴·우물반등 순서 스캐너</h1><p>15분 추세 → 5분 우물 → 3분 진입준비 → FINAL_BUY</p></div>', unsafe_allow_html=True)
 st.markdown(
@@ -204,8 +204,9 @@ if mode == "일반주":
     filtered = [candidate for candidate in pool if minimum_price <= candidate.price <= maximum_price and 0 <= candidate.change_pct <= 7]
 else:
     filtered = [candidate for candidate in pool if minimum_price <= candidate.price <= maximum_price and 7 < candidate.change_pct <= 20]
-selected = filtered[:display_count]
-realtime().configure(selected)
+analysis_count = min(10, len(filtered))
+analysis_candidates = filtered[:analysis_count]
+realtime().configure(analysis_candidates)
 with st.sidebar:
     if realtime().connected:
         st.success("KIS WebSocket 연결됨")
@@ -228,9 +229,15 @@ def structure_results(candidates: tuple[Candidate, ...], completed_minute: int) 
                 price, _, _ = rest_price(candidate.market, candidate.symbol, candidate.exchange, candidate.session)
             except KISError:
                 price = candidate.price
-        result = evaluate(candidate.key, bars, price, sequences())
+        result = evaluate(candidate.key, bars, price, sequences(), session=candidate.session)
         if result.stage == Stage.FINAL_BUY:
-            validations().record(result, ENGINE_VERSION, candidate.market.value, candidate.session.value)
+            validations().record(
+                result,
+                ENGINE_VERSION,
+                candidate.market.value,
+                candidate.session.value,
+                mode=mode,
+            )
         for case in validations().cases():
             if case.symbol == candidate.key and case.market == candidate.market.value and case.session == candidate.session.value and not case.scored:
                 validations().score(case, bars)
@@ -239,7 +246,7 @@ def structure_results(candidates: tuple[Candidate, ...], completed_minute: int) 
 
 
 minute_bucket = int(datetime.now(UTC).timestamp() // 60)
-results = structure_results(tuple(selected), minute_bucket)
+results = structure_results(tuple(analysis_candidates), minute_bucket)
 
 stage_priority = {
     Stage.FINAL_BUY: 7,
@@ -254,7 +261,7 @@ stage_priority = {
 visible = sorted(results, key=lambda item: (stage_priority[item[1].stage], item[1].score), reverse=True)[:display_count]
 counts = {stage: sum(result.stage == stage for _, result in results) for stage in Stage}
 st.caption(
-    f"후보풀 {len(pool)} · 모드 통과 {len(filtered)} · 표시 {len(visible)} · "
+    f"후보풀 {len(pool)} · 모드 통과 {len(filtered)} · 내부 분석 {len(results)} · 표시 {len(visible)} · "
     f"진입가능 {counts[Stage.FINAL_BUY]} · 진입대기 {counts[Stage.ENTRY_WAIT]} · 데이터수집 {counts[Stage.DATA_WAIT]}"
 )
 st.session_state["structure_minute"] = minute_bucket
@@ -277,8 +284,16 @@ st.subheader("FINAL_BUY 실시간 검증 · 최대 10개")
 
 @st.fragment(run_every=5)
 def live_validation_panel() -> None:
-    tracked = validations().cases(engine_version=ENGINE_VERSION)[:10]
-    st.caption(f"실제 신호 {len(tracked)}/10 · 10개 도달 시 추가 기록 자동 중단 · 모의검증(자동주문 아님)")
+    tracked = validations().cases(
+        engine_version=ENGINE_VERSION,
+        market=market.value,
+        session=status.session.value,
+        mode=mode,
+    )[:10]
+    st.caption(
+        f"{status.label} · {mode} · 실제 신호 {len(tracked)}/10 · "
+        "10개 도달 시 추가 기록 자동 중단 · 모의검증(자동주문 아님)"
+    )
     if not tracked:
         st.info("아직 실제 FINAL_BUY 신호가 없습니다. 첫 신호부터 진입가를 고정해 추적합니다.")
         return
@@ -332,7 +347,13 @@ live_validation_panel()
 
 with st.expander("사후검증·Calibration"):
     for strategy_name in ("TREND_SWING", "RANGE_SWING"):
-        calibration = validations().calibration(strategy_name, ENGINE_VERSION, market.value, status.session.value)
+        calibration = validations().calibration(
+            strategy_name,
+            ENGINE_VERSION,
+            market.value,
+            status.session.value,
+            mode,
+        )
         samples = int(calibration["samples"] or 0)
         if samples < 100:
             st.write(f"{strategy_name}: 보정 전 {samples}/100 · 실제 승률로 표시하지 않음")
