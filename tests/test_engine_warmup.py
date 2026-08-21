@@ -24,16 +24,16 @@ def bars(count: int) -> pd.DataFrame:
 
 
 def test_warmup_threshold_matches_multi_timeframe_requirement(tmp_path) -> None:
-    assert MIN_ONE_MINUTE_BARS == 180
-    waiting = evaluate("TEST", bars(179), 110.0, SequenceStore(tmp_path), datetime.now(UTC))
-    ready = evaluate("TEST2", bars(180), 110.0, SequenceStore(tmp_path), datetime.now(UTC))
+    assert MIN_ONE_MINUTE_BARS == 900
+    waiting = evaluate("TEST", bars(899), 110.0, SequenceStore(tmp_path), datetime.now(UTC))
+    ready = evaluate("TEST2", bars(900), 110.0, SequenceStore(tmp_path), datetime.now(UTC))
 
     assert waiting.stage == Stage.DATA_WAIT
     assert ready.stage != Stage.DATA_WAIT
 
 
 def test_watch_levels_are_available_before_final_buy(tmp_path) -> None:
-    count = 420
+    count = 960
     index = pd.date_range("2026-08-20 09:00", periods=count, freq="min")
     steps = np.arange(count)
     close = 100 + steps * 0.015 + np.sin(steps / 7) * 0.7

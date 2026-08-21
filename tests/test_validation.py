@@ -60,3 +60,41 @@ def test_record_stops_at_exactly_ten_cases_per_engine(tmp_path) -> None:
 
     assert store.record(result, "v-cap", limit=10) is None
     assert len(store.cases(engine_version="v-cap")) == 10
+
+
+def test_cases_are_filterable_by_market_session_and_mode(tmp_path) -> None:
+    store = ValidationStore(tmp_path)
+    us_case = SignalCase(
+        "us-pre-gainer",
+        "US:NAS:US_PRE:TEST",
+        "2026-08-21T11:00:00+00:00",
+        100,
+        102,
+        104,
+        99,
+        "TREND_SWING",
+        "v-isolation",
+        market="US",
+        session="US_PRE",
+        mode="급등주",
+    )
+    kr_case = SignalCase(
+        "kr-regular-normal",
+        "KR:KRX:KR_REGULAR:005930",
+        "2026-08-21T11:01:00+00:00",
+        100,
+        102,
+        104,
+        99,
+        "TREND_SWING",
+        "v-isolation",
+        market="KR",
+        session="KR_REGULAR",
+        mode="일반주",
+    )
+    store._path(us_case.case_id).write_text(json.dumps(asdict(us_case)), encoding="utf-8")
+    store._path(kr_case.case_id).write_text(json.dumps(asdict(kr_case)), encoding="utf-8")
+
+    cases = store.cases(engine_version="v-isolation", market="US", session="US_PRE", mode="급등주")
+
+    assert [case.case_id for case in cases] == ["us-pre-gainer"]

@@ -32,3 +32,23 @@ def test_resample_never_keeps_open_bucket() -> None:
     source = bars(13)
     result = completed_resample(source, 5, now=pd.Timestamp("2026-08-03 09:13"))
     assert list(result.index) == [pd.Timestamp("2026-08-03 09:05"), pd.Timestamp("2026-08-03 09:10")]
+
+
+def test_us_day_vwap_stays_in_one_session_across_midnight() -> None:
+    from wellscan.models import TradingSession
+
+    index = pd.DatetimeIndex([pd.Timestamp("2026-08-23 23:59"), pd.Timestamp("2026-08-24 00:00")])
+    frame = pd.DataFrame(
+        {
+            "open": [10.0, 20.0],
+            "high": [10.0, 20.0],
+            "low": [10.0, 20.0],
+            "close": [10.0, 20.0],
+            "volume": [100.0, 100.0],
+        },
+        index=index,
+    )
+
+    data = enriched(frame, TradingSession.US_DAY)
+
+    assert data.vwap.iloc[-1] == 15.0
