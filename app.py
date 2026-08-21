@@ -227,6 +227,64 @@ def live_cards() -> None:
 
 live_cards()
 
+st.subheader("FINAL_BUY 실시간 검증 · 최대 10개")
+
+
+@st.fragment(run_every=5)
+def live_validation_panel() -> None:
+    tracked = validations().cases(engine_version=ENGINE_VERSION)[:10]
+    st.caption(f"실제 신호 {len(tracked)}/10 · 10개 도달 시 추가 기록 자동 중단 · 모의검증(자동주문 아님)")
+    if not tracked:
+        st.info("아직 실제 FINAL_BUY 신호가 없습니다. 첫 신호부터 진입가를 고정해 추적합니다.")
+        return
+    pool_by_key = {candidate.key: candidate for candidate in pool}
+    rows = []
+    for case in tracked:
+        candidate = pool_by_key.get(case.symbol)
+        if candidate is None:
+            parts = case.symbol.split(":")
+            exchange = parts[1] if len(parts) >= 4 else "KRX"
+            ticker = parts[-1]
+            candidate = Candidate(
+                symbol=ticker,
+                name=ticker,
+                price=case.entry,
+                change_pct=0,
+                volume=0,
+                turnover=0,
+                market=Market(case.market),
+                exchange=exchange,
+                session=TradingSession(case.session),
+            )
+        tick = realtime().tick(candidate)
+        try:
+            if tick is not None:
+                price, checked_at = tick.price, tick.timestamp
+            else:
+                price, _, checked_at = rest_price(
+                    candidate.market, candidate.symbol, candidate.exchange, candidate.session
+                )
+            case = validations().update_live(case, price, checked_at.isoformat())
+        except KISError:
+            pass
+        outcome = {"TARGET1": "1차 목표 선도달", "STOP": "손절 선도달"}.get(case.live_outcome, "추적 중")
+        rows.append(
+            {
+                "종목": candidate.symbol,
+                "진입가": case.entry,
+                "현재가": case.last_price,
+                "현재수익률": None if case.live_return_pct is None else round(case.live_return_pct, 2),
+                "MFE": None if case.live_mfe_pct is None else round(case.live_mfe_pct, 2),
+                "MAE": None if case.live_mae_pct is None else round(case.live_mae_pct, 2),
+                "판정": outcome,
+                "신호시각": case.signaled_at,
+            }
+        )
+    st.dataframe(rows, use_container_width=True, hide_index=True)
+
+
+live_validation_panel()
+
 with st.expander("사후검증·Calibration"):
     for strategy_name in ("TREND_SWING", "RANGE_SWING"):
         calibration = validations().calibration(strategy_name, ENGINE_VERSION, market.value, status.session.value)

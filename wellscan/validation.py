@@ -31,6 +31,12 @@ class SignalCase:
     mfe_30: float | None = None
     mae_30: float | None = None
     first_hit: str | None = None
+    last_price: float | None = None
+    live_return_pct: float | None = None
+    live_mfe_pct: float | None = None
+    live_mae_pct: float | None = None
+    live_outcome: str | None = None
+    last_checked_at: str | None = None
 
 
 class ValidationStore:
@@ -41,7 +47,14 @@ class ValidationStore:
     def _path(self, case_id: str) -> Path:
         return self.root / f"{case_id}.json"
 
-    def record(self, result: ScanResult, engine_version: str, market: str = "KR", session: str = "KR_REGULAR") -> SignalCase | None:
+    def record(
+        self,
+        result: ScanResult,
+        engine_version: str,
+        market: str = "KR",
+        session: str = "KR_REGULAR",
+        limit: int = 10,
+    ) -> SignalCase | None:
         levels = result.levels
         if not result.final_buy or not all((levels.entry, levels.target1, levels.target2, levels.hard_stop)):
             return None
@@ -60,19 +73,49 @@ class ValidationStore:
             session=session,
         )
         path = self._path(case_id)
-        with FileLock(str(path) + ".lock", timeout=3):
+        with FileLock(str(self.root / ".collection.lock"), timeout=3):
+            if path.exists():
+                try:
+                    return SignalCase(**json.loads(path.read_text(encoding="utf-8")))
+                except (OSError, ValueError, TypeError):
+                    return None
+            if len(self.cases(engine_version=engine_version)) >= limit:
+                return None
             if not path.exists():
                 path.write_text(json.dumps(asdict(case), ensure_ascii=False, indent=2), encoding="utf-8")
         return case
 
-    def cases(self) -> list[SignalCase]:
+    def cases(self, engine_version: str | None = None) -> list[SignalCase]:
         results = []
         for path in self.root.glob("*.json"):
             try:
                 results.append(SignalCase(**json.loads(path.read_text(encoding="utf-8"))))
             except (OSError, ValueError, TypeError):
                 continue
-        return results
+        matching = [case for case in results if engine_version is None or case.engine_version == engine_version]
+        return sorted(matching, key=lambda case: case.signaled_at)
+
+    def update_live(self, case: SignalCase, price: float, checked_at: str) -> SignalCase:
+        path = self._path(case.case_id)
+        with FileLock(str(path) + ".lock", timeout=3):
+            if path.exists():
+                try:
+                    case = SignalCase(**json.loads(path.read_text(encoding="utf-8")))
+                except (OSError, ValueError, TypeError):
+                    pass
+            current_return = (price / case.entry - 1) * 100
+            case.last_price = float(price)
+            case.live_return_pct = current_return
+            case.live_mfe_pct = max(case.live_mfe_pct if case.live_mfe_pct is not None else current_return, current_return)
+            case.live_mae_pct = min(case.live_mae_pct if case.live_mae_pct is not None else current_return, current_return)
+            if case.live_outcome is None:
+                if price <= case.hard_stop:
+                    case.live_outcome = "STOP"
+                elif price >= case.target1:
+                    case.live_outcome = "TARGET1"
+            case.last_checked_at = checked_at
+            path.write_text(json.dumps(asdict(case), ensure_ascii=False, indent=2), encoding="utf-8")
+        return case
 
     def score(self, case: SignalCase, future_bars: pd.DataFrame) -> SignalCase:
         if future_bars.empty:
