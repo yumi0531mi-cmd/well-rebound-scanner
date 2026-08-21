@@ -66,7 +66,14 @@ class KISClient:
                 timeout=15,
             )
         if not response.ok:
-            raise KISError(f"KIS 토큰 발급 실패: HTTP {response.status_code}")
+            try:
+                error_body = response.json()
+                detail = str(error_body.get("error_description") or error_body.get("msg1") or error_body.get("error") or "")
+            except (ValueError, AttributeError):
+                detail = ""
+            safe_detail = detail[:240].replace(self.app_key, "***").replace(self.app_secret, "***")
+            suffix = f" · {safe_detail}" if safe_detail else ""
+            raise KISError(f"KIS 토큰 발급 실패: HTTP {response.status_code}{suffix}")
         body = response.json()
         token = str(body.get("access_token") or "")
         if not token:
