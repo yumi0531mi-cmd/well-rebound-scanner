@@ -61,7 +61,7 @@ def candidate_pool(market: Market, session: TradingSession) -> list[Candidate]:
     return client().candidate_union(100) if market == Market.KR else client().overseas_candidate_union(session, 100)
 
 
-@st.cache_data(ttl=3, show_spinner=False)
+@st.cache_data(ttl=1, show_spinner=False)
 def rest_price(market: Market, symbol: str, exchange: str, session: TradingSession) -> tuple[float, float, datetime]:
     if market == Market.KR:
         return client().current_price(symbol)
@@ -80,7 +80,7 @@ def _live_price_content(candidate: Candidate) -> None:
     else:
         try:
             price, change, timestamp = rest_price(candidate.market, candidate.symbol, candidate.exchange, candidate.session)
-            source = "KIS REST 3초 안전 대체"
+            source = "KIS REST 1초 현재가"
         except KISError:
             price, change, timestamp, source = candidate.price, candidate.change_pct, datetime.now(UTC), "순위 조회가"
     st.metric("현재가", price_text(price), f"{change:+.2f}%")

@@ -4,7 +4,7 @@ import asyncio
 import json
 import threading
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import websockets
 
@@ -51,9 +51,15 @@ class RealtimeHub:
             self._thread = threading.Thread(target=lambda: asyncio.run(self._run()), daemon=True, name="wellscan-kis-ws")
             self._thread.start()
 
-    def tick(self, candidate: Candidate) -> LiveTick | None:
+    def tick(self, candidate: Candidate, max_age_seconds: float = 2.0) -> LiveTick | None:
         with self._lock:
-            return self._ticks.get(candidate.key)
+            tick = self._ticks.get(candidate.key)
+        if tick is None:
+            return None
+        # A disconnected socket must never pin the UI to its last received price.
+        if datetime.now(UTC) - tick.timestamp > timedelta(seconds=max_age_seconds):
+            return None
+        return tick
 
     async def _run(self) -> None:
         delay = 1.0
