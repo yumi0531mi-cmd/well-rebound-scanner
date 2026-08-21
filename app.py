@@ -4,7 +4,6 @@ import html
 from datetime import UTC, datetime
 
 import streamlit as st
-from streamlit_autorefresh import st_autorefresh
 
 from wellscan import APP_VERSION, ENGINE_VERSION
 from wellscan.engine import evaluate
@@ -205,8 +204,20 @@ st.caption(
     f"후보풀 {len(pool)} · 모드 통과 {len(filtered)} · 표시 {len(visible)} · "
     f"진입가능 {counts[Stage.FINAL_BUY]} · 진입대기 {counts[Stage.ENTRY_WAIT]} · 데이터수집 {counts[Stage.DATA_WAIT]}"
 )
-for candidate, result in visible:
-    render_result(candidate, result)
+st.session_state["structure_minute"] = minute_bucket
+
+
+@st.fragment(run_every=refresh_seconds)
+def live_cards() -> None:
+    """Update live prices without interrupting history or structure work."""
+    current_minute = int(datetime.now(UTC).timestamp() // 60)
+    if current_minute != st.session_state.get("structure_minute"):
+        st.rerun()
+    for candidate, result in visible:
+        render_result(candidate, result)
+
+
+live_cards()
 
 with st.expander("사후검증·Calibration"):
     for strategy_name in ("TREND_SWING", "RANGE_SWING"):
@@ -219,6 +230,3 @@ with st.expander("사후검증·Calibration"):
 
 if not visible:
     st.warning("현재 모드와 가격 조건을 통과한 후보가 없습니다.")
-
-# The page/current-price path follows the selected interval. structure_results remains cached per completed minute.
-st_autorefresh(interval=refresh_seconds * 1000, key="price-refresh")
