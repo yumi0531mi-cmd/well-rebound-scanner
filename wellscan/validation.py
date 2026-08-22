@@ -48,6 +48,11 @@ class ValidationStore:
     def _path(self, case_id: str) -> Path:
         return self.root / f"{case_id}.json"
 
+    @staticmethod
+    def _instrument_id(symbol: str) -> str:
+        parts = symbol.split(":", 3)
+        return ":".join((parts[0], parts[1], parts[3])) if len(parts) == 4 else symbol
+
     def record(
         self,
         result: ScanResult,
@@ -82,14 +87,21 @@ class ValidationStore:
                     return SignalCase(**json.loads(path.read_text(encoding="utf-8")))
                 except (OSError, ValueError, TypeError):
                     return None
-            matching = self.cases(engine_version=engine_version, market=market, session=session, mode=mode)
+            collected = self.cases(engine_version=engine_version)
             signal_date = result.evaluated_at.date().isoformat()
+            instrument_id = self._instrument_id(result.symbol)
             existing_signal = next(
-                (item for item in matching if item.symbol == result.symbol and item.signaled_at[:10] == signal_date), None
+                (
+                    item for item in collected
+                    if item.market == market
+                    and self._instrument_id(item.symbol) == instrument_id
+                    and item.signaled_at[:10] == signal_date
+                ),
+                None,
             )
             if existing_signal is not None:
                 return existing_signal
-            if len(matching) >= limit:
+            if len(collected) >= limit:
                 return None
             path.write_text(json.dumps(asdict(case), ensure_ascii=False, indent=2), encoding="utf-8")
         return case

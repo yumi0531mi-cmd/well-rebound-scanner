@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
-from datetime import UTC, datetime, time
+from datetime import UTC, date, datetime, time, timedelta
+from functools import lru_cache
 from zoneinfo import ZoneInfo
 
 import pandas as pd
+import pandas_market_calendars as mcal
 
 from .models import Market, TradingSession
 
@@ -21,24 +24,58 @@ class SessionStatus:
     exchange_suffix: str = ""
 
 
+@lru_cache(maxsize=2)
+def _calendar(name: str) -> mcal.MarketCalendar:
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message=".*break_start.*discontinued.*")
+        return mcal.get_calendar(name)
+
+
+@lru_cache(maxsize=1024)
+def _market_hours(name: str, trading_day: date) -> tuple[datetime, datetime] | None:
+    schedule = _calendar(name).schedule(start_date=trading_day, end_date=trading_day)
+    if schedule.empty:
+        return None
+    row = schedule.iloc[0]
+    return row["market_open"].to_pydatetime(), row["market_close"].to_pydatetime()
+
+
+def _is_kr_regular(instant: datetime) -> bool:
+    hours = _market_hours("XKRX", instant.astimezone(KST).date())
+    return hours is not None and hours[0] <= instant < hours[1]
+
+
+def _us_trading_hours(instant: datetime, ny: datetime, clock: time) -> tuple[datetime, datetime] | None:
+    if clock >= time(20, 0):
+        trading_day = ny.date() + timedelta(days=1)
+    elif clock < time(4, 0):
+        trading_day = ny.date()
+    else:
+        trading_day = ny.date()
+    return _market_hours("XNYS", trading_day)
+
+
 def session_status(market: Market, now: datetime | None = None) -> SessionStatus:
     instant = now or datetime.now(UTC)
     if instant.tzinfo is None:
         instant = instant.replace(tzinfo=UTC)
-    kst = instant.astimezone(KST)
     if market == Market.KR:
-        active = kst.weekday() < 5 and time(9, 0) <= kst.time() < time(15, 30)
+        active = _is_kr_regular(instant)
         return SessionStatus(market, TradingSession.KR_REGULAR if active else TradingSession.CLOSED, active, "국내 정규장" if active else "국내 장 마감")
 
     ny = instant.astimezone(NEW_YORK)
     clock = ny.time()
-    if (ny.weekday() in {6, 0, 1, 2, 3} and time(20, 0) <= clock) or (ny.weekday() in {0, 1, 2, 3, 4} and clock < time(4, 0)):
+    hours = _us_trading_hours(instant, ny, clock)
+    if hours is None:
+        return SessionStatus(market, TradingSession.CLOSED, False, "미국 휴장")
+    market_open, market_close = hours
+    if (clock >= time(20, 0) or clock < time(4, 0)) and market_open.date() in {ny.date(), ny.date() + timedelta(days=1)}:
         return SessionStatus(market, TradingSession.US_DAY, True, "미국 데이장", "BA")
     if ny.weekday() < 5 and time(4, 0) <= clock < time(9, 30):
         return SessionStatus(market, TradingSession.US_PRE, True, "미국 프리장")
-    if ny.weekday() < 5 and time(9, 30) <= clock < time(16, 0):
+    if market_open <= instant < market_close:
         return SessionStatus(market, TradingSession.US_REGULAR, True, "미국 정규장")
-    if ny.weekday() < 5 and time(16, 0) <= clock < time(18, 0):
+    if market_close <= instant < market_close + timedelta(hours=2):
         return SessionStatus(market, TradingSession.US_AFTER, True, "미국 애프터장")
     return SessionStatus(market, TradingSession.CLOSED, False, "미국 장 마감")
 

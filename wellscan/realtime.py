@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -11,6 +12,8 @@ import websockets
 from .kis import KISClient
 from .models import Candidate, Market, TradingSession
 from .sessions import session_exchange
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -30,6 +33,20 @@ class RealtimeHub:
         self._thread: threading.Thread | None = None
         self.connected = False
         self.last_error = ""
+        self._connection_attempts = 0
+        self._reconnects = 0
+        self._received_ticks = 0
+
+    def metrics(self) -> dict[str, int | bool | str]:
+        with self._lock:
+            return {
+                "connection_attempts": self._connection_attempts,
+                "reconnects": self._reconnects,
+                "received_ticks": self._received_ticks,
+                "subscriptions": len(self._subscriptions),
+                "connected": self.connected,
+                "last_error": self.last_error,
+            }
 
     def configure(self, candidates: list[Candidate]) -> None:
         cleaned = []
@@ -66,6 +83,10 @@ class RealtimeHub:
         while self._subscriptions:
             try:
                 subscribed = self._subscriptions
+                with self._lock:
+                    self._connection_attempts += 1
+                    if self._connection_attempts > 1:
+                        self._reconnects += 1
                 approval = self.client.websocket_approval_key()
                 async with websockets.connect(
                     "ws://ops.koreainvestment.com:21000", proxy=None, ping_interval=20, ping_timeout=20, open_timeout=10
@@ -83,6 +104,7 @@ class RealtimeHub:
                     self.connected = True
                     self.last_error = ""
                     delay = 1.0
+                    logger.info("realtime_connected attempts=%s reconnects=%s subscriptions=%s", self._connection_attempts, self._reconnects, len(subscribed))
                     while subscribed == self._subscriptions:
                         try:
                             raw = await asyncio.wait_for(socket.recv(), timeout=5)
@@ -98,6 +120,7 @@ class RealtimeHub:
                                     tick = LiveTick(symbol, float(values[2]), datetime.now(UTC), float(values[13]))
                                     with self._lock:
                                         self._ticks[key] = tick
+                                        self._received_ticks += 1
                                 except ValueError:
                                     continue
                         elif text.startswith("0|HDFSCNT0|"):
@@ -109,6 +132,7 @@ class RealtimeHub:
                                     tick = LiveTick(symbol, float(values[11]), datetime.now(UTC), float(values[20]))
                                     with self._lock:
                                         self._ticks[key] = tick
+                                        self._received_ticks += 1
                                 except ValueError:
                                     continue
                         elif "PINGPONG" in text:
@@ -116,5 +140,6 @@ class RealtimeHub:
             except Exception as exc:
                 self.connected = False
                 self.last_error = f"{type(exc).__name__}: {str(exc)[:120]}"
+                logger.warning("realtime_disconnected attempts=%s reconnects=%s error=%s", self._connection_attempts, self._reconnects, self.last_error)
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, 30)
