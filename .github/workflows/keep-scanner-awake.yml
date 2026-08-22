@@ -1,0 +1,27 @@
+name: Keep scanner awake during active sessions
+
+on:
+  schedule:
+    # Korean weekday 09:00 through Saturday 08:50 KST: covers KR regular and all US sessions.
+    - cron: "*/10 0-23 * * 1-5"
+    # Start the Render service before the Korean weekday window begins.
+    - cron: "30,40,50 23 * * 0-4"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: wellscan-keep-awake
+  cancel-in-progress: true
+
+jobs:
+  keep-awake:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Wake Render health endpoint
+        env:
+          SCANNER_HEALTH_URL: https://well-rebound-scanner.onrender.com/_stcore/health
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location --max-time 90 --retry 1 "$SCANNER_HEALTH_URL"
