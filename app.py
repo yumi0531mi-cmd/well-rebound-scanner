@@ -121,7 +121,13 @@ def _confirm_live_breakout(candidate: Candidate, result: ScanResult, live_price:
     conditions["첫 반등고점 돌파"] = True
     conditions["FINAL_BUY"] = True
     confirmed = replace(result, evaluated_at=datetime.now(UTC), stage=Stage.FINAL_BUY, conditions=conditions)
-    validations().record(confirmed, ENGINE_VERSION, candidate.market.value, candidate.session.value)
+    validations().record(
+        confirmed,
+        ENGINE_VERSION,
+        candidate.market.value,
+        candidate.session.value,
+        mode=mode,
+    )
     return confirmed
 
 
