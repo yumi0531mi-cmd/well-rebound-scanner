@@ -214,10 +214,14 @@ class HistoryCache:
         with self._warm_lock:
             self._warm_futures = {key: future for key, future in self._warm_futures.items() if not future.done()}
             for candidate in candidates:
-                if candidate.key not in self._warm_futures:
-                    self._warm_futures[candidate.key] = self._warm_executor.submit(
-                        self.backfill_candidate, client, candidate, self.WARM_TARGET_BARS
-                    )
+                if candidate.key in self._warm_futures:
+                    continue
+                cached = self.load(candidate.symbol, self._namespace(candidate))
+                if len(cached) >= self.WARM_TARGET_BARS:
+                    continue
+                self._warm_futures[candidate.key] = self._warm_executor.submit(
+                    self.backfill_candidate, client, candidate, self.WARM_TARGET_BARS
+                )
 
     def snapshot_metrics(self) -> tuple[BackfillMetrics, ...]:
         return tuple(self._metrics.values())

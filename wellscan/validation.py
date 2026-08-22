@@ -129,6 +129,10 @@ class ValidationStore:
         ]
         return sorted(matching, key=lambda case: case.signaled_at)
 
+    def tracking_cases(self, engine_version: str) -> list[SignalCase]:
+        """Return all unfinished one-time validation cases regardless of the current UI session or mode."""
+        return [case for case in self.cases(engine_version=engine_version) if not case.scored]
+
     def update_live(self, case: SignalCase, price: float, checked_at: str) -> SignalCase:
         path = self._path(case.case_id)
         with FileLock(str(path) + ".lock", timeout=3):

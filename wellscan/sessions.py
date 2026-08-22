@@ -87,17 +87,43 @@ def session_exchange(exchange: str, session: TradingSession) -> str:
 
 
 def filter_session_bars(frame: pd.DataFrame, session: TradingSession) -> pd.DataFrame:
+    """Keep bars belonging to one KIS US session using the same NYSE calendar as the UI gate."""
     if frame.empty or session == TradingSession.KR_REGULAR:
         return frame
-    clocks = pd.Series(frame.index.time, index=frame.index)
-    if session == TradingSession.US_DAY:
-        mask = (clocks >= time(20, 0)) | (clocks < time(4, 0))
-    elif session == TradingSession.US_PRE:
-        mask = (clocks >= time(4, 0)) & (clocks < time(9, 30))
-    elif session == TradingSession.US_REGULAR:
-        mask = (clocks >= time(9, 30)) & (clocks < time(16, 0))
-    elif session == TradingSession.US_AFTER:
-        mask = (clocks >= time(16, 0)) & (clocks < time(18, 0))
-    else:
+    if session == TradingSession.CLOSED:
         return frame.iloc[0:0]
-    return frame.loc[mask.to_numpy()]
+
+    timestamps = pd.DatetimeIndex(frame.index)
+    if timestamps.tz is not None:
+        timestamps = timestamps.tz_convert(NEW_YORK).tz_localize(None)
+    dates = list(timestamps.date)
+    clocks = list(timestamps.time)
+
+    def trading_hours(trading_day: date) -> tuple[time, time] | None:
+        hours = _market_hours("XNYS", trading_day)
+        if hours is None:
+            return None
+        return hours[0].astimezone(NEW_YORK).time(), hours[1].astimezone(NEW_YORK).time()
+
+    mask: list[bool] = []
+    for bar_date, clock in zip(dates, clocks, strict=True):
+        if session == TradingSession.US_DAY:
+            trading_day = bar_date + timedelta(days=1) if clock >= time(20, 0) else bar_date
+            mask.append((clock >= time(20, 0) or clock < time(4, 0)) and trading_hours(trading_day) is not None)
+            continue
+
+        hours = trading_hours(bar_date)
+        if hours is None:
+            mask.append(False)
+            continue
+        market_open, market_close = hours
+        if session == TradingSession.US_PRE:
+            mask.append(time(4, 0) <= clock < market_open)
+        elif session == TradingSession.US_REGULAR:
+            mask.append(market_open <= clock < market_close)
+        elif session == TradingSession.US_AFTER:
+            after_end = (datetime.combine(bar_date, market_close) + timedelta(hours=2)).time()
+            mask.append(market_close <= clock < after_end)
+        else:
+            mask.append(False)
+    return frame.loc[mask]
