@@ -60,3 +60,23 @@ def test_warming_candidate_is_reused_without_second_backfill(tmp_path) -> None:
     assert len(rows) == 1
     assert rows[0][0] == candidate
     assert len(rows[0][1]) == 180
+
+
+def test_warmup_skips_a_cache_that_already_meets_target(tmp_path) -> None:
+    class NeverCalledClient:
+        calls = 0
+
+        def minute_day(self, *args, **kwargs) -> pd.DataFrame:
+            del args, kwargs
+            self.calls += 1
+            raise AssertionError("완료된 워밍업 캐시는 다시 조회하지 않아야 합니다.")
+
+    candidate = Candidate("005930", "삼성전자", 70000, 1, 1, 1)
+    client = NeverCalledClient()
+    cache = HistoryCache(tmp_path)
+    cache.merge(candidate.symbol, minute_frame("2026-08-21 09:00", 1000))
+
+    cache.schedule_warmup(client, (candidate,))  # type: ignore[arg-type]
+
+    assert candidate.key not in cache._warm_futures
+    assert client.calls == 0

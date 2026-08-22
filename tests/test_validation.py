@@ -196,3 +196,51 @@ def test_record_limit_is_global_across_market_session_and_mode(tmp_path) -> None
 
     assert store.record(result, "v-global-cap", market="US", session="US_PRE", mode="급등주") is None
     assert len(store.cases(engine_version="v-global-cap")) == 10
+
+
+def test_tracking_cases_are_global_across_session_and_mode(tmp_path) -> None:
+    store = ValidationStore(tmp_path)
+    pre_case = SignalCase(
+        "us-pre",
+        "US:NAS:US_PRE:TEST",
+        "2026-08-21T11:00:00+00:00",
+        100,
+        102,
+        104,
+        99,
+        "TREND_SWING",
+        "v-tracking",
+        market="US",
+        session="US_PRE",
+        mode="급등주",
+    )
+    regular_case = SignalCase(
+        "us-regular",
+        "US:NAS:US_REGULAR:OTHER",
+        "2026-08-21T14:00:00+00:00",
+        100,
+        102,
+        104,
+        99,
+        "TREND_SWING",
+        "v-tracking",
+        market="US",
+        session="US_REGULAR",
+        mode="일반주",
+    )
+    finished_case = SignalCase(
+        "kr-finished",
+        "KR:KRX:KR_REGULAR:005930",
+        "2026-08-21T09:00:00+00:00",
+        100,
+        102,
+        104,
+        99,
+        "TREND_SWING",
+        "v-tracking",
+        scored=True,
+    )
+    for case in (pre_case, regular_case, finished_case):
+        store._path(case.case_id).write_text(json.dumps(asdict(case)), encoding="utf-8")
+
+    assert [case.case_id for case in store.tracking_cases("v-tracking")] == ["us-pre", "us-regular"]

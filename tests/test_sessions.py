@@ -51,3 +51,12 @@ def test_us_early_close_moves_regular_to_after_session() -> None:
     after = session_status(Market.US, datetime(2026, 11, 27, 18, 30, tzinfo=UTC))
     assert regular.session == TradingSession.US_REGULAR
     assert after.session == TradingSession.US_AFTER
+
+
+def test_us_early_close_after_hours_bars_use_calendar_close() -> None:
+    index = pd.to_datetime(["2026-11-27 12:59", "2026-11-27 13:30", "2026-11-27 15:00"])
+    frame = pd.DataFrame({"close": [1, 2, 3]}, index=index)
+
+    assert filter_session_bars(frame, TradingSession.US_REGULAR)["close"].tolist() == [1]
+    # The existing KIS after-hours policy remains two hours from the actual close: 13:00–15:00 on this date.
+    assert filter_session_bars(frame, TradingSession.US_AFTER)["close"].tolist() == [2]
