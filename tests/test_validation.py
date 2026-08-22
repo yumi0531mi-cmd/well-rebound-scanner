@@ -130,3 +130,69 @@ def test_record_keeps_one_case_per_symbol_per_day(tmp_path) -> None:
     assert later_same_signal is not None
     assert later_same_signal.case_id == first.case_id
     assert len(store.cases(engine_version="v-once", market="US", session="US_REGULAR", mode="일반주")) == 1
+
+
+def test_record_deduplicates_same_us_instrument_across_sessions(tmp_path) -> None:
+    store = ValidationStore(tmp_path)
+    result = ScanResult(
+        symbol="US:NAS:US_PRE:TEST",
+        evaluated_at=datetime(2026, 8, 24, 12, 0, tzinfo=UTC),
+        stage=Stage.FINAL_BUY,
+        strategy=Strategy.TREND_SWING,
+        risk_state=RiskState.NORMAL,
+        score=100,
+        persistence=None,
+        evidence_confidence=None,
+        pattern_fatigue=None,
+        net_swing_pct=None,
+        levels=TradeLevels(entry=100, target1=102, target2=104, hard_stop=99),
+        conditions={"FINAL_BUY": True},
+    )
+
+    first = store.record(result, "v-global", market="US", session="US_PRE", mode="일반주")
+    later = store.record(
+        replace(result, symbol="US:NAS:US_REGULAR:TEST", evaluated_at=datetime(2026, 8, 24, 14, 30, tzinfo=UTC)),
+        "v-global",
+        market="US",
+        session="US_REGULAR",
+        mode="급등주",
+    )
+
+    assert first is not None
+    assert later is not None
+    assert later.case_id == first.case_id
+    assert len(store.cases(engine_version="v-global")) == 1
+
+
+def test_record_limit_is_global_across_market_session_and_mode(tmp_path) -> None:
+    store = ValidationStore(tmp_path)
+    for number in range(10):
+        case = SignalCase(
+            f"kr-{number}",
+            f"KR:KRX:KR_REGULAR:{number:06d}",
+            f"2026-08-21T11:{number:02d}:00+00:00",
+            100,
+            102,
+            104,
+            99,
+            "TREND_SWING",
+            "v-global-cap",
+        )
+        store._path(case.case_id).write_text(json.dumps(asdict(case)), encoding="utf-8")
+    result = ScanResult(
+        symbol="US:NAS:US_PRE:NEW",
+        evaluated_at=datetime(2026, 8, 21, 12, 0, tzinfo=UTC),
+        stage=Stage.FINAL_BUY,
+        strategy=Strategy.TREND_SWING,
+        risk_state=RiskState.NORMAL,
+        score=100,
+        persistence=None,
+        evidence_confidence=None,
+        pattern_fatigue=None,
+        net_swing_pct=None,
+        levels=TradeLevels(entry=100, target1=102, target2=104, hard_stop=99),
+        conditions={"FINAL_BUY": True},
+    )
+
+    assert store.record(result, "v-global-cap", market="US", session="US_PRE", mode="급등주") is None
+    assert len(store.cases(engine_version="v-global-cap")) == 10

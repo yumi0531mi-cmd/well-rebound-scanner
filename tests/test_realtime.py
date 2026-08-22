@@ -27,3 +27,16 @@ def test_tick_accepts_fresh_websocket_price() -> None:
     hub._ticks[candidate.key] = tick
 
     assert hub.tick(candidate) == tick
+
+
+def test_metrics_start_empty_and_without_error() -> None:
+    hub = RealtimeHub(DummyClient())  # type: ignore[arg-type]
+
+    assert hub.metrics() == {
+        "connection_attempts": 0,
+        "reconnects": 0,
+        "received_ticks": 0,
+        "subscriptions": 0,
+        "connected": False,
+        "last_error": "",
+    }

@@ -29,3 +29,25 @@ def test_us_session_bars_are_isolated() -> None:
     assert filter_session_bars(frame, TradingSession.US_PRE)["close"].tolist() == [1]
     assert filter_session_bars(frame, TradingSession.US_REGULAR)["close"].tolist() == [2]
     assert filter_session_bars(frame, TradingSession.US_AFTER)["close"].tolist() == [3]
+
+
+def test_kr_holiday_is_closed() -> None:
+    # 2026-03-02 is the substitute holiday for the Korean Independence Movement Day.
+    status = session_status(Market.KR, datetime(2026, 3, 2, 1, 0, tzinfo=UTC))
+    assert not status.active
+    assert status.session == TradingSession.CLOSED
+
+
+def test_us_holiday_blocks_all_us_sessions() -> None:
+    # Thanksgiving: the NYSE is closed for the regular session and for KIS session scanning.
+    status = session_status(Market.US, datetime(2026, 11, 26, 15, 0, tzinfo=UTC))
+    assert not status.active
+    assert status.session == TradingSession.CLOSED
+
+
+def test_us_early_close_moves_regular_to_after_session() -> None:
+    # The Friday after Thanksgiving closes at 13:00 New York time.
+    regular = session_status(Market.US, datetime(2026, 11, 27, 17, 30, tzinfo=UTC))
+    after = session_status(Market.US, datetime(2026, 11, 27, 18, 30, tzinfo=UTC))
+    assert regular.session == TradingSession.US_REGULAR
+    assert after.session == TradingSession.US_AFTER
