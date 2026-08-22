@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import UTC, datetime
 
 import pandas as pd
@@ -98,3 +98,35 @@ def test_cases_are_filterable_by_market_session_and_mode(tmp_path) -> None:
     cases = store.cases(engine_version="v-isolation", market="US", session="US_PRE", mode="급등주")
 
     assert [case.case_id for case in cases] == ["us-pre-gainer"]
+
+
+def test_record_keeps_one_case_per_symbol_per_day(tmp_path) -> None:
+    store = ValidationStore(tmp_path)
+    result = ScanResult(
+        symbol="US:NAS:US_REGULAR:TEST",
+        evaluated_at=datetime(2026, 8, 24, 14, 30, tzinfo=UTC),
+        stage=Stage.FINAL_BUY,
+        strategy=Strategy.TREND_SWING,
+        risk_state=RiskState.NORMAL,
+        score=100,
+        persistence=None,
+        evidence_confidence=None,
+        pattern_fatigue=None,
+        net_swing_pct=None,
+        levels=TradeLevels(entry=100, target1=102, target2=104, hard_stop=99),
+        conditions={"FINAL_BUY": True},
+    )
+
+    first = store.record(result, "v-once", market="US", session="US_REGULAR", mode="일반주")
+    later_same_signal = store.record(
+        replace(result, evaluated_at=datetime(2026, 8, 24, 14, 31, tzinfo=UTC)),
+        "v-once",
+        market="US",
+        session="US_REGULAR",
+        mode="일반주",
+    )
+
+    assert first is not None
+    assert later_same_signal is not None
+    assert later_same_signal.case_id == first.case_id
+    assert len(store.cases(engine_version="v-once", market="US", session="US_REGULAR", mode="일반주")) == 1
