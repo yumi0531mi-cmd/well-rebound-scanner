@@ -23,13 +23,27 @@ def bars(count: int) -> pd.DataFrame:
     )
 
 
-def test_warmup_threshold_matches_multi_timeframe_requirement(tmp_path) -> None:
+def test_ma60_readiness_is_separate_from_other_structure_readiness(tmp_path) -> None:
     assert MIN_ONE_MINUTE_BARS == 900
-    waiting = evaluate("TEST", bars(899), 110.0, SequenceStore(tmp_path), datetime.now(UTC))
-    ready = evaluate("TEST2", bars(900), 110.0, SequenceStore(tmp_path), datetime.now(UTC))
+    before_ma60 = evaluate("TEST", bars(899), 110.0, SequenceStore(tmp_path), datetime.now(UTC))
+    after_ma60 = evaluate("TEST2", bars(900), 110.0, SequenceStore(tmp_path), datetime.now(UTC))
 
-    assert waiting.stage == Stage.DATA_WAIT
-    assert ready.stage != Stage.DATA_WAIT
+    assert before_ma60.stage != Stage.DATA_WAIT
+    assert before_ma60.diagnostics["transition_ready"] is True
+    assert before_ma60.diagnostics["well_data_ready"] is True
+    assert before_ma60.diagnostics["entry_data_ready"] is True
+    assert after_ma60.diagnostics["ma60_ready"] is True
+
+
+def test_insufficient_transition_data_does_not_write_an_exclusion(tmp_path) -> None:
+    store = SequenceStore(tmp_path)
+    result = evaluate("SHORT", bars(100), 101.0, store, datetime.now(UTC))
+
+    assert result.stage == Stage.CANDIDATE
+    assert store.load("SHORT").stage == Stage.CANDIDATE
+    assert result.diagnostics["transition_ready"] is False
+    assert result.diagnostics["well_data_ready"] is False
+    assert result.diagnostics["entry_data_ready"] is True
 
 
 def test_watch_levels_are_available_before_final_buy(tmp_path) -> None:
