@@ -82,10 +82,16 @@ class ValidationStore:
                     return SignalCase(**json.loads(path.read_text(encoding="utf-8")))
                 except (OSError, ValueError, TypeError):
                     return None
-            if len(self.cases(engine_version=engine_version, market=market, session=session, mode=mode)) >= limit:
+            matching = self.cases(engine_version=engine_version, market=market, session=session, mode=mode)
+            signal_date = result.evaluated_at.date().isoformat()
+            existing_signal = next(
+                (item for item in matching if item.symbol == result.symbol and item.signaled_at[:10] == signal_date), None
+            )
+            if existing_signal is not None:
+                return existing_signal
+            if len(matching) >= limit:
                 return None
-            if not path.exists():
-                path.write_text(json.dumps(asdict(case), ensure_ascii=False, indent=2), encoding="utf-8")
+            path.write_text(json.dumps(asdict(case), ensure_ascii=False, indent=2), encoding="utf-8")
         return case
 
     def cases(
