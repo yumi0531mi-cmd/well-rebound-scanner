@@ -131,6 +131,31 @@ def _confirm_live_breakout(candidate: Candidate, result: ScanResult, live_price:
     return confirmed
 
 
+def _candidate_for_case(case_symbol: str, last_price: float | None, current: dict[str, Candidate]) -> Candidate | None:
+    """Rebuild a tracked candidate only when it has left the visible TOP10."""
+    if case_symbol in current:
+        return current[case_symbol]
+    parts = case_symbol.split(":", 3)
+    if len(parts) != 4:
+        return None
+    try:
+        market = Market(parts[0])
+        session = TradingSession(parts[2])
+    except ValueError:
+        return None
+    return Candidate(
+        symbol=parts[3],
+        name=parts[3],
+        price=float(last_price or 0),
+        change_pct=0.0,
+        volume=0.0,
+        turnover=0.0,
+        market=market,
+        exchange=parts[1],
+        session=session,
+    )
+
+
 def render_result(candidate: Candidate, result: ScanResult) -> None:
     quote = _live_quote(candidate)
     result = _confirm_live_breakout(candidate, result, quote[0])
@@ -214,7 +239,12 @@ else:
     filtered = [candidate for candidate in pool if minimum_price <= candidate.price <= maximum_price and 7 < candidate.change_pct <= 20]
 analysis_count = min(10, len(filtered))
 analysis_candidates = filtered[:analysis_count]
-realtime().configure(analysis_candidates)
+tracked_validation_candidates = [
+    candidate
+    for case in validations().tracking_cases(ENGINE_VERSION)
+    if (candidate := _candidate_for_case(case.symbol, case.last_price, {item.key: item for item in analysis_candidates})) is not None
+]
+realtime().configure(analysis_candidates + tracked_validation_candidates)
 with st.sidebar:
     if realtime().connected:
         st.success("KIS WebSocket 연결됨")
@@ -318,40 +348,10 @@ def live_cards() -> None:
 live_cards()
 
 
-def _candidate_for_case(case_symbol: str, last_price: float | None, current: dict[str, Candidate]) -> Candidate | None:
-    """Rebuild a tracked candidate only when it has left the visible TOP10."""
-    if case_symbol in current:
-        return current[case_symbol]
-    parts = case_symbol.split(":", 3)
-    if len(parts) != 4:
-        return None
-    try:
-        market = Market(parts[0])
-        session = TradingSession(parts[2])
-    except ValueError:
-        return None
-    return Candidate(
-        symbol=parts[3],
-        name=parts[3],
-        price=float(last_price or 0),
-        change_pct=0.0,
-        volume=0.0,
-        turnover=0.0,
-        market=market,
-        exchange=parts[1],
-        session=session,
-    )
-
-
 @st.fragment(run_every=5)
 def refresh_hidden_validation_tracking() -> None:
     """Refresh paper-signal prices without adding a validation panel to the UI."""
-    tracked = validations().cases(
-        engine_version=ENGINE_VERSION,
-        market=market.value,
-        session=status.session.value,
-        mode=mode,
-    )[:10]
+    tracked = validations().tracking_cases(ENGINE_VERSION)[:10]
     current = {candidate.key: candidate for candidate in analysis_candidates}
     for case in tracked:
         candidate = _candidate_for_case(case.symbol, case.last_price, current)
