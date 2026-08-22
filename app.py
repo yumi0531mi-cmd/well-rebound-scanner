@@ -267,12 +267,18 @@ def structure_results(candidates: tuple[Candidate, ...], completed_minute: int) 
         output.append((candidate, result))
     cache.schedule_warmup(client(), candidates)
     metrics = cache.snapshot_metrics()
+    realtime_metrics = realtime().metrics()
     LOGGER.info(
-        "structure_batch candidates=%s cache_hits=%s api_calls=%s elapsed_s=%.3f",
+        "structure_batch candidates=%s cache_hits=%s api_calls=%s elapsed_s=%.3f ws_attempts=%s ws_reconnects=%s ws_ticks=%s ws_connected=%s ws_error=%s",
         len(output),
         sum(item.cache_hit for item in metrics),
         sum(item.api_calls for item in metrics),
         perf_counter() - started,
+        realtime_metrics["connection_attempts"],
+        realtime_metrics["reconnects"],
+        realtime_metrics["received_ticks"],
+        realtime_metrics["connected"],
+        realtime_metrics["last_error"],
     )
     return output
 
