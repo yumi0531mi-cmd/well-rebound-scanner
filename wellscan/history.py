@@ -189,10 +189,18 @@ class HistoryCache:
         """Yield each candidate when ready using bounded network concurrency."""
         if not candidates:
             return
-        worker_count = min(self.MAX_BACKFILL_WORKERS, len(candidates))
+        with self._warm_lock:
+            warming = {key for key, future in self._warm_futures.items() if not future.done()}
+        pending = [candidate for candidate in candidates if candidate.key not in warming]
+        for candidate in candidates:
+            if candidate.key in warming:
+                yield candidate, self.load(candidate.symbol, self._namespace(candidate))
+        if not pending:
+            return
+        worker_count = min(self.MAX_BACKFILL_WORKERS, len(pending))
         with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="history") as executor:
             futures: dict[Future[pd.DataFrame], Candidate] = {
-                executor.submit(self.backfill_candidate, client, candidate, target_bars): candidate for candidate in candidates
+                executor.submit(self.backfill_candidate, client, candidate, target_bars): candidate for candidate in pending
             }
             for future in as_completed(futures):
                 yield futures[future], future.result()
