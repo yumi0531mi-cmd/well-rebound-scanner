@@ -9,9 +9,12 @@ from .indicators import completed_resample, enriched, pivot_points
 from .models import RiskState, ScanResult, Stage, Strategy, TradeLevels, TradingSession
 from .sequence import SequenceStore
 
-# A 15-minute MA60 needs 900 completed one-minute bars.  No signal is emitted
-# until the real session-isolated history reaches this requirement.
+# 15-minute MA60 needs 900 completed one-minute bars. This remains the
+# strict alignment requirement, but is not a global gate for other conditions.
 MIN_ONE_MINUTE_BARS = 900
+TRANSITION_MIN_15M_BARS = 12
+WELL_MIN_5M_BARS = 25
+ENTRY_MIN_3M_BARS = 25
 
 
 def _slope(values: pd.Series, periods: int = 5) -> float:
@@ -55,7 +58,7 @@ def _swing_quality(frame5: pd.DataFrame) -> tuple[float | None, float | None, fl
 
 def _well_rebound(frame5: pd.DataFrame, session: TradingSession | None = None) -> tuple[bool, bool, bool]:
     data = enriched(frame5, session)
-    if len(data) < 25:
+    if len(data) < WELL_MIN_5M_BARS:
         return False, False, False
     last = data.iloc[-1]
     distance_gap = (data.dist5 - data.dist20).abs()
@@ -80,7 +83,7 @@ def _well_rebound(frame5: pd.DataFrame, session: TradingSession | None = None) -
 
 
 def _entry_setup(data: pd.DataFrame) -> tuple[bool, bool, bool, float | None, float | None]:
-    if len(data) < 25:
+    if len(data) < ENTRY_MIN_3M_BARS:
         return False, False, False, None, None
     highs, lows = pivot_points(data.tail(30), 2, 2)
     higher_low = bool(len(lows) >= 2 and float(lows.iloc[-1]) > float(lows.iloc[-2]))
@@ -93,7 +96,7 @@ def _entry_setup(data: pd.DataFrame) -> tuple[bool, bool, bool, float | None, fl
 
 def _trend(frame15: pd.DataFrame, session: TradingSession | None = None) -> tuple[bool, bool, Strategy]:
     data = enriched(frame15, session)
-    if len(data) < 12:
+    if len(data) < TRANSITION_MIN_15M_BARS:
         return False, False, Strategy.NONE
     last = data.iloc[-1]
     aligned = bool(pd.notna(last.ma60) and last.close > last.ma5 > last.ma20 > last.ma60)
@@ -102,6 +105,19 @@ def _trend(frame15: pd.DataFrame, session: TradingSession | None = None) -> tupl
     range_width = (recent_range.high.max() / recent_range.low.min() - 1) * 100
     strategy = Strategy.RANGE_SWING if 0.5 <= range_width <= 5 and not aligned else Strategy.TREND_SWING
     return aligned, transitioning, strategy
+
+
+def _readiness_reasons(frame15: pd.DataFrame, frame5: pd.DataFrame, frame3: pd.DataFrame) -> tuple[str, ...]:
+    reasons: list[str] = []
+    if len(frame15) < TRANSITION_MIN_15M_BARS:
+        reasons.append(f"15분 상승전환 준비: 완료봉 {len(frame15)}/{TRANSITION_MIN_15M_BARS}")
+    if len(frame15) < 60:
+        reasons.append(f"15분 MA60 정배열 미확정: 완료봉 {len(frame15)}/60")
+    if len(frame5) < WELL_MIN_5M_BARS:
+        reasons.append(f"5분 우물 준비: 완료봉 {len(frame5)}/{WELL_MIN_5M_BARS}")
+    if len(frame3) < ENTRY_MIN_3M_BARS:
+        reasons.append(f"3분 진입구조 준비: 완료봉 {len(frame3)}/{ENTRY_MIN_3M_BARS}")
+    return tuple(reasons)
 
 
 def evaluate(
@@ -114,42 +130,30 @@ def evaluate(
 ) -> ScanResult:
     evaluated_at = now or datetime.now(UTC)
     bars = one_minute_bars.copy()
-    if len(bars) < MIN_ONE_MINUTE_BARS:
-        return ScanResult(
-            symbol=symbol,
-            evaluated_at=evaluated_at,
-            stage=Stage.DATA_WAIT,
-            strategy=Strategy.NONE,
-            risk_state=RiskState.NORMAL,
-            score=0,
-            persistence=None,
-            evidence_confidence=None,
-            pattern_fatigue=None,
-            net_swing_pct=None,
-            levels=TradeLevels(),
-            conditions={"900분 완료봉": False},
-            reasons=(f"15분 MA60·5분 우물·3분 진입 준비 계산에 필요한 900분 중 {len(bars)}분 수집",),
-            diagnostics={"bar_count": len(bars), "required_bar_count": MIN_ONE_MINUTE_BARS},
-        )
-
     frame15 = completed_resample(bars, 15)
     frame5 = completed_resample(bars, 5)
     frame3 = completed_resample(bars, 3)
-    aligned, transitioning, strategy = _trend(frame15, session)
-    convergence, stochastic_rebound, macd_turn = _well_rebound(frame5, session)
-    data3 = enriched(frame3, session)
-    higher_low, volume_recovery, vwap_recovery, rebound_high, second_low = _entry_setup(data3)
-    net_swing, persistence, confidence, fatigue = _swing_quality(frame5)
+    transition_ready = len(frame15) >= TRANSITION_MIN_15M_BARS
+    ma60_ready = len(frame15) >= 60
+    well_data_ready = len(frame5) >= WELL_MIN_5M_BARS
+    entry_data_ready = len(frame3) >= ENTRY_MIN_3M_BARS
+    readiness_reasons = _readiness_reasons(frame15, frame5, frame3)
 
-    latest3 = data3.iloc[-1]
+    aligned, transitioning, strategy = _trend(frame15, session) if transition_ready else (False, False, Strategy.NONE)
+    convergence, stochastic_rebound, macd_turn = _well_rebound(frame5, session) if well_data_ready else (False, False, False)
+    data3 = enriched(frame3, session) if entry_data_ready else pd.DataFrame()
+    higher_low, volume_recovery, vwap_recovery, rebound_high, second_low = _entry_setup(data3) if entry_data_ready else (False, False, False, None, None)
+    net_swing, persistence, confidence, fatigue = _swing_quality(frame5) if well_data_ready else (None, None, None, None)
+
     trend_ready = aligned or transitioning
+    latest3 = data3.iloc[-1] if entry_data_ready else None
     breakout = bool(rebound_high and live_price > rebound_high)
-    overheated = bool(latest3.stoch_k >= 85 or live_price > latest3.ema20 * 1.05)
-    missed = bool(rebound_high and live_price > rebound_high + latest3.atr * 1.2)
+    overheated = bool(latest3 is not None and (latest3.stoch_k >= 85 or live_price > latest3.ema20 * 1.05))
+    missed = bool(latest3 is not None and rebound_high and live_price > rebound_high + latest3.atr * 1.2)
     hard_stop = second_low
-    two_close_breakdown = bool(hard_stop and (data3.close.tail(2) < hard_stop).all())
-    hard_exit = bool(hard_stop and live_price <= hard_stop - float(latest3.atr) * 0.35)
-    shakeout = bool(hard_stop and latest3.low < hard_stop <= latest3.close)
+    two_close_breakdown = bool(latest3 is not None and hard_stop and (data3.close.tail(2) < hard_stop).all())
+    hard_exit = bool(latest3 is not None and hard_stop and live_price <= hard_stop - float(latest3.atr) * 0.35)
+    shakeout = bool(latest3 is not None and hard_stop and latest3.low < hard_stop <= latest3.close)
     risk_state = (
         RiskState.HARD_EXIT
         if hard_exit
@@ -163,63 +167,73 @@ def evaluate(
 
     sequence_store = store or SequenceStore()
     cycle = sequence_store.load(symbol)
-    if two_close_breakdown or hard_exit:
-        cycle = sequence_store.register_breakdown(
+    state = cycle
+    # Avoid writing a false exclusion/cooldown before the 15-minute transition
+    # path itself has enough completed bars to be evaluated.
+    if transition_ready:
+        if two_close_breakdown or hard_exit:
+            cycle = sequence_store.register_breakdown(symbol, marker=str(data3.index[-1]), hard_exit=hard_exit, now=evaluated_at)
+        state = sequence_store.advance(
             symbol,
-            marker=str(data3.index[-1]),
-            hard_exit=hard_exit,
+            trend_ready=trend_ready,
+            convergence=convergence,
+            stochastic_rebound=stochastic_rebound,
+            macd_turn=macd_turn,
+            higher_low=higher_low,
+            volume_recovery=volume_recovery,
+            vwap_recovery=vwap_recovery,
+            breakout=breakout,
+            missed=missed or overheated,
+            excluded=excluded,
+            hard_kill=cycle.hard_kill_date == evaluated_at.date().isoformat(),
+            candidate_entry=rebound_high,
+            candidate_hard_stop=hard_stop,
             now=evaluated_at,
         )
-    state = sequence_store.advance(
-        symbol,
-        trend_ready=trend_ready,
-        convergence=convergence,
-        stochastic_rebound=stochastic_rebound,
-        macd_turn=macd_turn,
-        higher_low=higher_low,
-        volume_recovery=volume_recovery,
-        vwap_recovery=vwap_recovery,
-        breakout=breakout,
-        missed=missed or overheated,
-        excluded=excluded,
-        hard_kill=cycle.hard_kill_date == evaluated_at.date().isoformat(),
-        candidate_entry=rebound_high,
-        candidate_hard_stop=hard_stop,
-        now=evaluated_at,
-    )
-    if cycle.hard_kill_date == evaluated_at.date().isoformat():
-        risk_state = RiskState.HARD_KILL
-    elif state.stage == Stage.EXCLUDED and state.cooldown_until and risk_state == RiskState.NORMAL:
-        risk_state = RiskState.COOLDOWN
+        if cycle.hard_kill_date == evaluated_at.date().isoformat():
+            risk_state = RiskState.HARD_KILL
+        elif state.stage == Stage.EXCLUDED and state.cooldown_until and risk_state == RiskState.NORMAL:
+            risk_state = RiskState.COOLDOWN
 
-    confirmed_entry = state.entry_price if state.stage in {Stage.ENTRY_WAIT, Stage.FINAL_BUY} else None
+    confirmed_entry = state.entry_price if transition_ready and state.stage in {Stage.ENTRY_WAIT, Stage.FINAL_BUY} else None
     planned_entry = rebound_high if trend_ready and rebound_high and second_low and second_low < rebound_high else None
     entry = confirmed_entry or planned_entry
     hard_stop = state.entry_hard_stop if confirmed_entry and state.entry_hard_stop else hard_stop
     risk = entry - hard_stop if entry and hard_stop and hard_stop < entry else None
     target1 = entry + risk * 1.5 if risk else None
     target2 = entry + risk * 2.2 if risk else None
-    soft_stop = max(hard_stop, entry - latest3.atr * 0.7) if risk and hard_stop else None
-    support_candidates = [float(latest3.ema9), float(latest3.vwap)]
+    soft_stop = max(hard_stop, entry - float(latest3.atr) * 0.7) if risk and hard_stop and latest3 is not None else None
+    support_candidates = [float(latest3.ema9), float(latest3.vwap)] if latest3 is not None else []
     rebuy = max((value for value in support_candidates if value < live_price), default=None)
-    score_parts = [trend_ready, convergence, stochastic_rebound, macd_turn, higher_low, volume_recovery, vwap_recovery]
-    score = int(round(sum(score_parts) / len(score_parts) * 100))
-    conditions = {
-        "15분 정배열·전환": trend_ready,
-        "5분 이격도 수렴": convergence,
-        "스토캐스틱 우물 반등": stochastic_rebound,
-        "MACD 상승전환": macd_turn,
-        "3분 높은 저점": higher_low,
-        "3분 거래량 증가": volume_recovery,
-        "3분 VWAP 회복": vwap_recovery,
-        "첫 반등고점 돌파": breakout,
-        "FINAL_BUY": state.stage == Stage.FINAL_BUY and risk_state == RiskState.NORMAL,
+
+    conditions: dict[str, bool | None] = {
+        "15분 정배열·전환": trend_ready if transition_ready else None,
+        "5분 이격도 수렴": convergence if well_data_ready else None,
+        "스토캐스틱 우물 반등": stochastic_rebound if well_data_ready else None,
+        "MACD 상승전환": macd_turn if well_data_ready else None,
+        "3분 높은 저점": higher_low if entry_data_ready else None,
+        "3분 거래량 증가": volume_recovery if entry_data_ready else None,
+        "3분 VWAP 회복": vwap_recovery if entry_data_ready else None,
+        "첫 반등고점 돌파": breakout if entry_data_ready else None,
+        "FINAL_BUY": state.stage == Stage.FINAL_BUY and risk_state == RiskState.NORMAL if entry_data_ready else None,
     }
-    reasons = tuple(name for name, passed in conditions.items() if passed) or ("순서 조건 대기",)
+    available_conditions = [value for value in conditions.values() if value is not None]
+    score = int(round(sum(value is True for value in available_conditions) / len(available_conditions) * 100)) if available_conditions else 0
+    all_structure_unavailable = not transition_ready and not well_data_ready and not entry_data_ready
+    stage = Stage.DATA_WAIT if all_structure_unavailable else state.stage
+    if stage == Stage.FINAL_BUY:
+        basis = "FINAL_BUY 확정 반등고점·ATR 구조"
+    elif entry:
+        basis = "관찰가: 3분 최근 반등고점 돌파 시 진입·FINAL_BUY 전 매수 금지"
+    else:
+        basis = readiness_reasons[0] if readiness_reasons else "반등고점·구조 손절점 대기"
+    passed_reasons = tuple(name for name, passed in conditions.items() if passed is True)
+    reasons = readiness_reasons or passed_reasons or ("순서 조건 대기",)
+
     return ScanResult(
         symbol=symbol,
         evaluated_at=evaluated_at,
-        stage=state.stage,
+        stage=stage,
         strategy=strategy,
         risk_state=risk_state,
         score=score,
@@ -227,19 +241,7 @@ def evaluate(
         evidence_confidence=confidence,
         pattern_fatigue=fatigue,
         net_swing_pct=net_swing,
-        levels=TradeLevels(
-            entry=entry,
-            rebuy=rebuy,
-            target1=target1,
-            target2=target2,
-            soft_stop=soft_stop,
-            hard_stop=hard_stop,
-            basis=(
-                "FINAL_BUY 확정 반등고점·ATR 구조"
-                if state.stage == Stage.FINAL_BUY
-                else "관찰가: 3분 최근 반등고점 돌파 시 진입·FINAL_BUY 전 매수 금지"
-            ),
-        ),
+        levels=TradeLevels(entry=entry, rebuy=rebuy, target1=target1, target2=target2, soft_stop=soft_stop, hard_stop=hard_stop, basis=basis),
         conditions=conditions,
         reasons=reasons,
         diagnostics={
@@ -247,14 +249,18 @@ def evaluate(
             "bars_15m": len(frame15),
             "bars_5m": len(frame5),
             "bars_3m": len(frame3),
+            "ma60_ready": ma60_ready,
+            "transition_ready": transition_ready,
+            "well_data_ready": well_data_ready,
+            "entry_data_ready": entry_data_ready,
             "rebound_high": rebound_high,
             "second_higher_low": second_low,
-            "vwap_3m": float(latest3.vwap),
-            "atr_3m": float(latest3.atr),
+            "vwap_3m": float(latest3.vwap) if latest3 is not None else None,
+            "atr_3m": float(latest3.atr) if latest3 is not None else None,
             "overheated": overheated,
             "cycle_breakdowns_today": cycle.breakdown_count,
             "cooldown_until": cycle.cooldown_until,
             "hard_kill_date": cycle.hard_kill_date,
-            "level_status": "confirmed" if state.stage == Stage.FINAL_BUY else "watch",
+            "level_status": "confirmed" if stage == Stage.FINAL_BUY else "watch" if entry else "pending",
         },
     )

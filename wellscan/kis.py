@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
+import random
 import threading
 import time
 from datetime import UTC, datetime, timedelta
@@ -17,6 +19,11 @@ from .models import Candidate, Market, TradingSession
 
 class KISError(RuntimeError):
     pass
+
+
+LOGGER = logging.getLogger(__name__)
+RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
+MAX_RETRIES = 2
 
 
 class KISClient:
@@ -62,8 +69,10 @@ class KISClient:
                     pass
             if not self.configured:
                 raise KISError("KIS_APP_KEY/KIS_APP_SECRET 환경변수가 필요합니다.")
-            response = self.session.post(
+            response = self._request(
+                "POST",
                 f"{self.base_url}/oauth2/tokenP",
+                operation="KIS 토큰 발급",
                 json={"grant_type": "client_credentials", "appkey": self.app_key, "appsecret": self.app_secret},
                 timeout=15,
             )
@@ -92,8 +101,10 @@ class KISClient:
     def websocket_approval_key(self) -> str:
         if self._approval_key and self._approval_expires > datetime.now(UTC):
             return self._approval_key
-        response = self.session.post(
+        response = self._request(
+            "POST",
             f"{self.base_url}/oauth2/Approval",
+            operation="WebSocket 접속키 발급",
             json={"grant_type": "client_credentials", "appkey": self.app_key, "secretkey": self.app_secret},
             timeout=15,
         )
@@ -113,10 +124,37 @@ class KISClient:
                 time.sleep(wait)
             self._last_request = time.monotonic()
 
+    def _request(self, method: str, url: str, *, operation: str, **kwargs: Any) -> requests.Response:
+        """Retry transient transport, rate-limit, and server errors only.
+
+        Headers and bodies are deliberately never logged because they contain
+        KIS credentials or access tokens.
+        """
+        last_error = ""
+        for attempt in range(MAX_RETRIES + 1):
+            self._throttle()
+            try:
+                response = self.session.request(method, url, **kwargs)
+            except (requests.Timeout, requests.ConnectionError) as exc:
+                last_error = type(exc).__name__
+            except requests.RequestException as exc:
+                raise KISError(f"{operation} 요청 오류: {type(exc).__name__}") from exc
+            else:
+                if response.ok or response.status_code not in RETRYABLE_STATUS:
+                    return response
+                last_error = f"HTTP {response.status_code}"
+            if attempt >= MAX_RETRIES:
+                break
+            delay = min(1.5, 0.25 * (2**attempt)) + random.uniform(0, 0.1)
+            LOGGER.warning("KIS retry operation=%s attempt=%s reason=%s delay=%.2fs", operation, attempt + 1, last_error, delay)
+            time.sleep(delay)
+        raise KISError(f"{operation} 일시 오류: {last_error} · 제한 재시도 {MAX_RETRIES + 1}회 종료")
+
     def get(self, path: str, tr_id: str, params: dict[str, str], tr_cont: str = "") -> tuple[dict[str, Any], str]:
-        self._throttle()
-        response = self.session.get(
+        response = self._request(
+            "GET",
             f"{self.base_url}{path}",
+            operation=tr_id,
             headers={
                 "authorization": f"Bearer {self.access_token()}",
                 "appkey": self.app_key,
@@ -130,7 +168,10 @@ class KISClient:
         )
         if not response.ok:
             raise KISError(f"{tr_id} HTTP {response.status_code}")
-        payload = response.json()
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise KISError(f"{tr_id} 데이터 형식 오류") from exc
         if str(payload.get("rt_cd", "0")) != "0":
             raise KISError(str(payload.get("msg1") or f"{tr_id} 응답 오류"))
         return payload, str(response.headers.get("tr_cont") or response.headers.get("TR_CONT") or "")
