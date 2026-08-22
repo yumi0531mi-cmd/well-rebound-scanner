@@ -34,3 +34,29 @@ def test_overseas_warmup_continues_without_tr_cont_header(tmp_path) -> None:
 
     assert len(result) == 240
     assert client.calls == ["", "20260821055900"]
+
+
+def test_warming_candidate_is_reused_without_second_backfill(tmp_path) -> None:
+    from concurrent.futures import Future
+
+    class NeverCalledClient:
+        calls = 0
+
+        def overseas_minutes(self, *args, **kwargs) -> pd.DataFrame:
+            del args, kwargs
+            self.calls += 1
+            raise AssertionError("워밍업 중인 종목은 구조 갱신에서 다시 백필하지 않아야 합니다.")
+
+    candidate = Candidate(
+        "NVDA", "NVIDIA", 100, 1, 1, 1,
+        market=Market.US, exchange="NAS", session=TradingSession.US_PRE,
+    )
+    cache = HistoryCache(tmp_path)
+    cache.merge(candidate.symbol, minute_frame("2026-08-21 06:00", 180), cache._namespace(candidate))
+    cache._warm_futures[candidate.key] = Future()
+
+    rows = list(cache.iter_backfill_candidates(NeverCalledClient(), (candidate,), target_bars=180))  # type: ignore[arg-type]
+
+    assert len(rows) == 1
+    assert rows[0][0] == candidate
+    assert len(rows[0][1]) == 180
