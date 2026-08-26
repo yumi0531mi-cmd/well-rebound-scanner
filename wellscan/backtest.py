@@ -16,7 +16,7 @@ from .sequence import SequenceStore
 LOGGER = logging.getLogger(__name__)
 
 # ── 설정 ──────────────────────────────────────────────
-SIGNAL_WINDOW = (dt_time(9, 10), dt_time(11, 30))   # 이 구간의 데이터만으로 신호 판정 (미래 차단)
+SIGNAL_WINDOW = (dt_time(10, 30), dt_time(14, 30))   # 이 구간의 데이터만으로 신호 판정 (미래 차단)
 TARGET_MODE = "balanced"                             # "high_win" | "balanced" | "aggressive"
 TARGET_MULTIPLE = {"high_win": 0.5, "balanced": 1.0, "aggressive": 1.5}
 STOP_MULTIPLE = 1.0
@@ -55,10 +55,12 @@ def _simulate_day(symbol: str, name: str, bars: pd.DataFrame) -> list[TradeRecor
         price = float(window["close"].iloc[-1])
         if not (cutoff.time() <= window.index[-1].time() <= SIGNAL_WINDOW[1]):
             continue
-        result = evaluate(symbol, window, price, store, session=None)
+            result = evaluate(symbol, window, price, store, session=None)
         entry = result.levels.entry
         stop = result.levels.hard_stop
-        if not taken and result.final_buy and entry and stop and stop < price:
+        trend_ok = result.conditions.get("15분 정배열·전환") is True
+        breakout_ok = result.conditions.get("첫 반등고점 돌파") is True
+        if not taken and trend_ok and breakout_ok and entry and stop and stop < price:
             risk = price - stop
             target = price + risk * TARGET_MULTIPLE[TARGET_MODE]
             records.append(_resolve_trade(
