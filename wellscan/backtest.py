@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from .engine import MIN_ONE_MINUTE_BARS, evaluate
+from .engine import evaluate
 from .kis import KISClient
 from .sequence import SequenceStore
 
@@ -20,7 +20,7 @@ LOGGER = logging.getLogger(__name__)
 SIGNAL_WINDOW = (dt_time(10, 30), dt_time(14, 30))   # 이 구간의 데이터만으로 신호 판정 (미래 차단)
 TARGET_MODE = "balanced"                             # "high_win" | "balanced" | "aggressive"
 TARGET_MULTIPLE = {"high_win": 0.5, "balanced": 1.0, "aggressive": 1.5}
-STOP_MULTIPLE = 1.0
+MIN_WINDOW_BARS = 120   # 신호 판정에 필요한 최소 1분봉 수 (기존 225 → 완화)
 
 
 @dataclass
@@ -45,6 +45,8 @@ def _simulate_day(symbol: str, name: str, bars: pd.DataFrame, stats: dict) -> li
         return records
     bars = bars.copy()
     bars.index = pd.to_datetime(bars.index)
+    LOGGER.info("bars %s %s: count=%d first=%s last=%s",
+                symbol, "day", len(bars), bars.index[0], bars.index[-1])
     cutoff = bars.index[0].replace(hour=SIGNAL_WINDOW[0].hour, minute=SIGNAL_WINDOW[0].minute)
     end_signal = bars.index[-1].replace(hour=SIGNAL_WINDOW[1].hour, minute=SIGNAL_WINDOW[1].minute)
 
@@ -52,7 +54,8 @@ def _simulate_day(symbol: str, name: str, bars: pd.DataFrame, stats: dict) -> li
     store = SequenceStore()  # 종목별 하루 초기화
     taken = False
     evaluated = 0
-    for i in range(MIN_ONE_MINUTE_BARS // 4, len(signal_bars), 5):
+    start = max(MIN_WINDOW_BARS - 1, 0)
+    for i in range(start, len(signal_bars), 5):
         window = signal_bars.iloc[: i + 1]
         price = float(window["close"].iloc[-1])
         if not (cutoff.time() <= window.index[-1].time() <= SIGNAL_WINDOW[1]):
@@ -63,7 +66,7 @@ def _simulate_day(symbol: str, name: str, bars: pd.DataFrame, stats: dict) -> li
             LOGGER.info("diag %s %s: bars1m=%d stage=%s conditions=%s",
                         symbol, window.index[-1].strftime("%H:%M"), len(window),
                         result.stage.value if hasattr(result.stage, "value") else result.stage,
-                        {k: v for k, v in result.conditions.items()})
+                        dict(result.conditions))
         entry = result.levels.entry
         stop = result.levels.hard_stop
         trend_ok = result.conditions.get("15분 정배열·전환") is True
@@ -151,7 +154,7 @@ def run(client: KISClient, days: int = 20, top_n: int = 30, output_dir: Path = P
     report["breakout_hits"] = stats["breakout_hits"]
     report["both_hits"] = stats["both_hits"]
     report["entry_candidates"] = stats["entry_candidates"]
-    report["condition_true_counts"] = {key: count for key, count in stats["condition_true"].items()}
+    report["condition_true_counts"] = dict(stats["condition_true"])
 
     (output_dir / f"trades_{datetime.now(UTC):%Y%m%d_%H%M}.json").write_text(
         json.dumps([t.__dict__ for t in all_trades], ensure_ascii=False, indent=2), encoding="utf-8")
