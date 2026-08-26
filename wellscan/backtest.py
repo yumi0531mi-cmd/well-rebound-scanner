@@ -37,8 +37,8 @@ class TradeRecord:
     minutes_to_exit: int = 0
 
 
-def _simulate_day(symbol: str, name: str, bars: pd.DataFrame) -> list[TradeRecord]:
-    """하루치 1분봉으로: 오전 신호 → 오후 결과 시뮬레이션."""
+def _simulate_day(symbol: str, name: str, bars: pd.DataFrame, stats: dict) -> list[TradeRecord]:
+    """하루치 1분봉으로: 신호 → 결과 시뮬레이션."""
     records: list[TradeRecord] = []
     if bars.empty or len(bars) < 60:
         return records
@@ -60,6 +60,14 @@ def _simulate_day(symbol: str, name: str, bars: pd.DataFrame) -> list[TradeRecor
         stop = result.levels.hard_stop
         trend_ok = result.conditions.get("15분 정배열·전환") is True
         breakout_ok = result.conditions.get("첫 반등고점 돌파") is True
+        if trend_ok:
+            stats["trend_hits"] += 1
+        if breakout_ok:
+            stats["breakout_hits"] += 1
+        if trend_ok and breakout_ok:
+            stats["both_hits"] += 1
+        if trend_ok and breakout_ok and entry and stop:
+            stats["entry_candidates"] += 1
         if not taken and trend_ok and breakout_ok and entry and stop and stop < price:
             risk = price - stop
             target = price + risk * TARGET_MULTIPLE[TARGET_MODE]
@@ -99,7 +107,8 @@ def run(client: KISClient, days: int = 20, top_n: int = 30, output_dir: Path = P
     dates = _recent_trading_days(client, days)
 
     all_trades: list[TradeRecord] = []
-    stats = {"api_errors": 0, "empty_days": 0, "days_with_data": set(), "signals": 0}
+    stats = {"api_errors": 0, "empty_days": 0, "days_with_data": set(), "signals": 0,
+             "trend_hits": 0, "breakout_hits": 0, "both_hits": 0, "entry_candidates": 0}
     for date_str in dates:
         LOGGER.info("=== %s ===", date_str)
         for candidate in candidates:
@@ -114,7 +123,7 @@ def run(client: KISClient, days: int = 20, top_n: int = 30, output_dir: Path = P
                 continue
             stats["days_with_data"].add(date_str)
             before = len(all_trades)
-            all_trades.extend(_simulate_day(candidate.symbol, candidate.name, bars))
+            all_trades.extend(_simulate_day(candidate.symbol, candidate.name, bars, stats))
             if len(all_trades) > before:
                 stats["signals"] += 1
 
@@ -124,6 +133,10 @@ def run(client: KISClient, days: int = 20, top_n: int = 30, output_dir: Path = P
     report["days_with_data"] = len(stats["days_with_data"])
     report["api_errors"] = stats["api_errors"]
     report["empty_responses"] = stats["empty_days"]
+    report["trend_hits"] = stats["trend_hits"]
+    report["breakout_hits"] = stats["breakout_hits"]
+    report["both_hits"] = stats["both_hits"]
+    report["entry_candidates"] = stats["entry_candidates"]
 
     (output_dir / f"trades_{datetime.now(UTC):%Y%m%d_%H%M}.json").write_text(
         json.dumps([t.__dict__ for t in all_trades], ensure_ascii=False, indent=2), encoding="utf-8")
