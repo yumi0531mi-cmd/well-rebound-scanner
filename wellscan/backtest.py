@@ -96,18 +96,33 @@ def run(client: KISClient, days: int = 20, top_n: int = 30, output_dir: Path = P
     candidates = client.candidate_union(100)[:top_n]
     dates = _recent_trading_days(client, days)
 
-    all_trades: list[TradeRecord] = []
+       all_trades: list[TradeRecord] = []
+    stats = {"api_errors": 0, "empty_days": 0, "days_with_data": set(), "signals": 0}
     for date_str in dates:
         LOGGER.info("=== %s ===", date_str)
         for candidate in candidates:
             try:
                 bars = client.minute_day(candidate.symbol, date_str)
-            except Exception as exc:  # 개별 실패는 건너뜀
+            except Exception as exc:
+                stats["api_errors"] += 1
                 LOGGER.warning("skip %s %s: %s", candidate.symbol, date_str, exc)
                 continue
+            if bars.empty or len(bars) < 60:
+                stats["empty_days"] += 1
+                continue
+            stats["days_with_data"].add(date_str)
+            before = len(all_trades)
             all_trades.extend(_simulate_day(candidate.symbol, candidate.name, bars))
+            if len(all_trades) > before:
+                stats["signals"] += 1
 
     report = _summarize(all_trades, days)
+    report["candidates"] = len(candidates)
+    report["days_requested"] = len(dates)
+    report["days_with_data"] = len(stats["days_with_data"])
+    report["api_errors"] = stats["api_errors"]
+    report["empty_responses"] = stats["empty_days"]
+
     (output_dir / f"trades_{datetime.now(UTC):%Y%m%d_%H%M}.json").write_text(
         json.dumps([t.__dict__ for t in all_trades], ensure_ascii=False, indent=2), encoding="utf-8")
     (output_dir / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
