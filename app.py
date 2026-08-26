@@ -42,7 +42,7 @@ if st.query_params.get("admin") == "backtest":
         try:
             from wellscan.backtest import run
 
-            _report = run(client(), days=_days, top_n=_top_n)
+            _report = run(KISClient(), days=_days, top_n=_top_n)
             _status.update(label="✅ 완료!", state="complete")
         except Exception as _exc:
             _status.update(label="❌ 오류 발생", state="error")
