@@ -10,7 +10,7 @@ import pandas as pd
 
 from .engine import MIN_ONE_MINUTE_BARS, evaluate
 from .kis import KISClient
-from .models import Candidate, Stage
+from .models import Candidate
 from .sequence import SequenceStore
 
 LOGGER = logging.getLogger(__name__)
