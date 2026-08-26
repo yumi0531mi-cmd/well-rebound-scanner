@@ -21,6 +21,48 @@ from wellscan.validation import ValidationStore
 LOGGER = logging.getLogger(__name__)
 
 st.set_page_config(page_title="정배열·우물반등 순서 스캐너", page_icon="📈", layout="wide")
+# ── 숨겨진 백테스트 관리자 페이지 (?admin=backtest) ──
+if st.query_params.get("admin") == "backtest":
+    st.title("🔬 백테스트 관리 (비공개)")
+    st.caption("소규모 테스트: 최근 3거래일 × 거래대금 상위 10개 종목")
+    _days = st.slider("조회 거래일 수", 2, 10, 3)
+    _top_n = st.slider("종목 수", 5, 30, 10)
+    if not st.button("▶️ 백테스트 실행"):
+        st.stop()
+    with st.status("백테스트 실행 중... 몇 분 걸릴 수 있습니다.", expanded=True) as _status:
+        _log_area = st.empty()
+        _logs: list[str] = []
+
+        class _Handler(logging.Handler):
+            def emit(self, record):
+                _logs.append(record.getMessage())
+                _log_area.code("\n".join(_logs[-25:]))
+
+        logging.getLogger().addHandler(_Handler())
+        try:
+            from wellscan.backtest import run
+
+            _report = run(client(), days=_days, top_n=_top_n)
+            _status.update(label="✅ 완료!", state="complete")
+        except Exception as _exc:
+            _status.update(label="❌ 오류 발생", state="error")
+            st.error(f"{type(_exc).__name__}: {_exc}")
+            if _logs:
+                with st.expander("상세 로그"):
+                    st.code("\n".join(_logs))
+            st.stop()
+    st.subheader("📊 백테스트 리포트")
+    _cols = st.columns(4)
+    _cols[0].metric("총 매매 수", _report.get("total_trades"))
+    _cols[1].metric("하루 평균", _report.get("trades_per_day"))
+    _cols[2].metric("승률 %", f"{_report.get('win_rate')}%")
+    _cols[3].metric("평균 수익률", f"{_report.get('avg_return_pct')}%")
+    with st.expander("전체 리포트 JSON"):
+        st.json(_report)
+    st.stop()
+# ── 백테스트 관리자 끝 ──
+
+
 st.markdown(
     """
 <style>
