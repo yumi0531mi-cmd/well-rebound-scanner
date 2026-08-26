@@ -46,7 +46,8 @@ class ValidationStore:
         self.root.mkdir(parents=True, exist_ok=True)
 
     def _path(self, case_id: str) -> Path:
-        return self.root / f"{case_id}.json"
+        safe_id = "".join(character if character.isalnum() or character in "._-" else "_" for character in case_id)
+        return self.root / f"{safe_id}.json"
 
     @staticmethod
     def _instrument_id(symbol: str) -> str:

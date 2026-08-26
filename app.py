@@ -20,7 +20,7 @@ from wellscan.validation import ValidationStore
 
 LOGGER = logging.getLogger(__name__)
 
-st.set_page_config(page_title="정배열·우물반등 순서 스캐너", page_icon="📈", layout="wide")
+st.set_page_config(page_title="다중 매매기법 실전 스캐너", page_icon="📈", layout="wide")
 # ── 숨겨진 백테스트 관리자 페이지 (?admin=backtest) ──
 if st.query_params.get("admin") == "backtest":
     st.title("🔬 백테스트 관리 (비공개)")
@@ -141,13 +141,7 @@ def _live_price_content(quote: tuple[float, float, datetime, str]) -> None:
 def _confirm_live_breakout(candidate: Candidate, result: ScanResult, live_price: float) -> ScanResult:
     levels = result.levels
     atr = float(result.diagnostics.get("atr_3m") or 0)
-    if (
-        result.stage != Stage.ENTRY_WAIT
-        or result.risk_state.value != "NORMAL"
-        or not levels.entry
-        or atr <= 0
-        or not (levels.entry < live_price <= levels.entry + atr * 1.2)
-    ):
+    if result.stage != Stage.ENTRY_WAIT or result.risk_state.value != "NORMAL" or not levels.entry or atr <= 0 or not (levels.entry < live_price <= levels.entry + atr * 1.2):
         return result
     state = sequences().advance(
         candidate.key,
@@ -160,7 +154,7 @@ def _confirm_live_breakout(candidate: Candidate, result: ScanResult, live_price:
     if state.stage != Stage.FINAL_BUY:
         return result
     conditions = dict(result.conditions)
-    conditions["첫 반등고점 돌파"] = True
+    conditions["진입가격 도달"] = True
     conditions["FINAL_BUY"] = True
     confirmed = replace(result, evaluated_at=datetime.now(UTC), stage=Stage.FINAL_BUY, conditions=conditions)
     validations().record(
@@ -210,17 +204,25 @@ def render_result(candidate: Candidate, result: ScanResult) -> None:
         )
         _live_price_content(quote)
         summary = st.columns(4)
-        summary[0].metric("순서 점수", f"{result.score}")
-        summary[1].metric("확정 Swing", price_text(result.net_swing_pct) + "%" if result.net_swing_pct else "확정 Swing 부족")
-        summary[2].metric("Persistence", price_text(result.persistence) if result.persistence is not None else "확정 Swing 부족")
-        summary[3].metric("Pattern Fatigue", price_text(result.pattern_fatigue) if result.pattern_fatigue is not None else "확정 Swing 부족")
+        summary[0].metric("전략 적합도", f"{result.score}")
+        summary[1].metric("추세", result.trend_label)
+        summary[2].metric("Swing 폭", price_text(result.net_swing_pct) + "%" if result.net_swing_pct is not None else "미확정")
+        summary[3].metric("해당 기법", f"{len(result.matched_strategies)}개")
         levels = result.levels
         level_columns = st.columns(3)
         entry_label = "확정 진입가" if result.stage == Stage.FINAL_BUY else "관찰 진입가"
         level_columns[0].metric(entry_label, price_text(levels.entry))
         level_columns[1].metric("1차 / 2차", f"{price_text(levels.target1)} / {price_text(levels.target2)}")
         level_columns[2].metric("Soft / Hard Stop", f"{price_text(levels.soft_stop)} / {price_text(levels.hard_stop)}")
-        st.caption(f"재매수가 {price_text(levels.rebuy)} · 산출근거 {levels.basis}")
+        eta_text = (
+            f"진입 약 {levels.entry_eta_minutes}분 · 1차 약 {levels.target1_eta_minutes}분 · 2차 약 {levels.target2_eta_minutes}분"
+            if levels.entry_eta_minutes is not None and levels.target1_eta_minutes is not None and levels.target2_eta_minutes is not None
+            else "예상시간: 변동속도 표본 부족"
+        )
+        st.caption(f"{eta_text} · 재매수가 {price_text(levels.rebuy)}")
+        st.caption(f"산출근거 {levels.basis} · 예상시간은 최근 1분봉 이동속도 기반이며 보장값이 아님")
+        if result.matched_strategies:
+            st.caption("해당 매매기법: " + " · ".join(item.value for item in result.matched_strategies))
         with st.expander("단계 조건·근거"):
             for name, passed in result.conditions.items():
                 st.write(f"{'✅' if passed else '⬜'} {name}")
@@ -230,7 +232,7 @@ def render_result(candidate: Candidate, result: ScanResult) -> None:
 
 
 with st.sidebar:
-    st.title("새 순서 스캐너")
+    st.title("다중전략 스캐너")
     market_label = st.radio("시장", ["국내주식", "미국주식"], horizontal=True)
     market = Market.KR if market_label == "국내주식" else Market.US
     status = session_status(market)
@@ -255,7 +257,7 @@ with st.sidebar:
     st.caption("후보풀: KIS 거래량 TOP100 ∪ 거래대금 TOP100 · 미국 NAS/NYS/AMS 통합")
     st.caption("내부 분석: 상위 10개 · 구조 계산: 새 완료봉 60초 · 현재가: WebSocket 우선")
 
-st.markdown('<div class="hero"><h1>정배열·이격수렴·우물반등 순서 스캐너</h1><p>15분 추세 → 5분 우물 → 3분 진입준비 → FINAL_BUY</p></div>', unsafe_allow_html=True)
+st.markdown('<div class="hero"><h1>다중 매매기법 실전 스캐너</h1><p>차트 유형 분류 → 구조 진입가·손절가·목표가 → 도달 예상시간</p></div>', unsafe_allow_html=True)
 st.markdown(
     f'<div class="version">앱 {APP_VERSION} · 실행 app.py · 엔진 {ENGINE_VERSION} · Python 공통 지표 1개 경로</div>',
     unsafe_allow_html=True,
@@ -282,9 +284,7 @@ else:
 analysis_count = min(10, len(filtered))
 analysis_candidates = filtered[:analysis_count]
 tracked_validation_candidates = [
-    candidate
-    for case in validations().tracking_cases(ENGINE_VERSION)
-    if (candidate := _candidate_for_case(case.symbol, case.last_price, {item.key: item for item in analysis_candidates})) is not None
+    candidate for case in validations().tracking_cases(ENGINE_VERSION) if (candidate := _candidate_for_case(case.symbol, case.last_price, {item.key: item for item in analysis_candidates})) is not None
 ]
 realtime().configure(analysis_candidates + tracked_validation_candidates)
 with st.sidebar:
@@ -294,6 +294,7 @@ with st.sidebar:
         st.warning(f"WebSocket 연결 대기 · {realtime().last_error}")
     else:
         st.caption("KIS WebSocket 연결 시도 중")
+
 
 @st.cache_data(ttl=65, show_spinner=False)
 def structure_results(candidates: tuple[Candidate, ...], completed_minute: int) -> list[tuple[Candidate, ScanResult]]:

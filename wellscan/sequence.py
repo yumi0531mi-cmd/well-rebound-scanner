@@ -82,6 +82,7 @@ class SequenceStore:
         higher_low: bool = False,
         volume_recovery: bool = False,
         vwap_recovery: bool = False,
+        setup_ready: bool = False,
         breakout: bool,
         missed: bool,
         excluded: bool,
@@ -130,6 +131,11 @@ class SequenceStore:
             state.stage = Stage.TREND_READY if trend_ready else Stage.CANDIDATE
         elif breakout and state.entry_price and entry_fresh and state.stage in {Stage.ENTRY_WAIT, Stage.FINAL_BUY}:
             state.stage = Stage.FINAL_BUY
+        elif setup_ready and candidate_entry and candidate_hard_stop:
+            state.stage = Stage.FINAL_BUY if breakout else Stage.ENTRY_WAIT
+            state.entry_wait_at = current_time.isoformat()
+            state.entry_price = candidate_entry
+            state.entry_hard_stop = candidate_hard_stop
         elif entry_sequence_ready and candidate_entry and candidate_hard_stop and (
             well_sequence_ready or (state.stage in {Stage.WELL_FORMING, Stage.ENTRY_WAIT} and well_fresh)
         ):

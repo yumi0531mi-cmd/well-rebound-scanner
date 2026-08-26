@@ -7,6 +7,7 @@ import pandas as pd
 
 from .indicators import completed_resample, enriched, pivot_points
 from .models import RiskState, ScanResult, Stage, Strategy, TradeLevels, TradingSession
+from .opportunities import attach_etas, classify, trend_description
 from .sequence import SequenceStore
 
 # 15-minute MA60 needs 900 completed one-minute bars. This remains the
@@ -39,7 +40,7 @@ def _confirmed_swings(frame5: pd.DataFrame) -> list[tuple[float, float, float]]:
     for first, second in zip(alternating, alternating[1:], strict=False):
         low, high = sorted((first[2], second[2]))
         width = (high / low - 1) * 100 if low > 0 else 0
-        if 0.5 <= width <= 5.0:
+        if width > 0:
             swings.append((low, high, width))
     return swings
 
@@ -62,23 +63,11 @@ def _well_rebound(frame5: pd.DataFrame, session: TradingSession | None = None) -
         return False, False, False
     last = data.iloc[-1]
     distance_gap = (data.dist5 - data.dist20).abs()
-    convergence = bool(
-        98 <= last.dist5 <= 103
-        and 97 <= last.dist20 <= 103
-        and distance_gap.iloc[-1] < distance_gap.iloc[-2] < distance_gap.iloc[-3]
-    )
+    convergence = bool(98 <= last.dist5 <= 103 and 97 <= last.dist20 <= 103 and distance_gap.iloc[-1] < distance_gap.iloc[-2] < distance_gap.iloc[-3])
     prior_low = float(data.stoch_k.iloc[-5:-1].min())
-    stochastic_rebound = bool(
-        prior_low <= 30
-        and last.stoch_k > data.stoch_k.iloc[-2]
-        and last.stoch_k > last.stoch_d
-        and data.stoch_k.iloc[-2] <= data.stoch_d.iloc[-2]
-    )
+    stochastic_rebound = bool(prior_low <= 30 and last.stoch_k > data.stoch_k.iloc[-2] and last.stoch_k > last.stoch_d and data.stoch_k.iloc[-2] <= data.stoch_d.iloc[-2])
     histogram = data.macd_hist
-    macd_turn = bool(
-        (histogram.iloc[-1] > histogram.iloc[-2] > histogram.iloc[-3] and histogram.iloc[-3] < 0)
-        or (histogram.iloc[-1] > 0 >= histogram.iloc[-2])
-    )
+    macd_turn = bool((histogram.iloc[-1] > histogram.iloc[-2] > histogram.iloc[-3] and histogram.iloc[-3] < 0) or (histogram.iloc[-1] > 0 >= histogram.iloc[-2]))
     return convergence, stochastic_rebound, macd_turn
 
 
@@ -101,10 +90,7 @@ def _trend(frame15: pd.DataFrame, session: TradingSession | None = None) -> tupl
     last = data.iloc[-1]
     aligned = bool(pd.notna(last.ma60) and last.close > last.ma5 > last.ma20 > last.ma60)
     transitioning = bool(last.close > last.ema20 and _slope(data.ema9) > 0 and _slope(data.ema20) > 0)
-    recent_range = data.tail(20)
-    range_width = (recent_range.high.max() / recent_range.low.min() - 1) * 100
-    strategy = Strategy.RANGE_SWING if 0.5 <= range_width <= 5 and not aligned else Strategy.TREND_SWING
-    return aligned, transitioning, strategy
+    return aligned, transitioning, Strategy.NONE
 
 
 def _readiness_reasons(frame15: pd.DataFrame, frame5: pd.DataFrame, frame3: pd.DataFrame) -> tuple[str, ...]:
@@ -114,9 +100,9 @@ def _readiness_reasons(frame15: pd.DataFrame, frame5: pd.DataFrame, frame3: pd.D
     if len(frame15) < 60:
         reasons.append(f"15분 MA60 정배열 미확정: 완료봉 {len(frame15)}/60")
     if len(frame5) < WELL_MIN_5M_BARS:
-        reasons.append(f"5분 우물 준비: 완료봉 {len(frame5)}/{WELL_MIN_5M_BARS}")
+        reasons.append(f"5분 전략지표 준비: 완료봉 {len(frame5)}/{WELL_MIN_5M_BARS}")
     if len(frame3) < ENTRY_MIN_3M_BARS:
-        reasons.append(f"3분 진입구조 준비: 완료봉 {len(frame3)}/{ENTRY_MIN_3M_BARS}")
+        reasons.append(f"3분 가격구조 준비: 완료봉 {len(frame3)}/{ENTRY_MIN_3M_BARS}")
     return tuple(reasons)
 
 
@@ -139,31 +125,32 @@ def evaluate(
     entry_data_ready = len(frame3) >= ENTRY_MIN_3M_BARS
     readiness_reasons = _readiness_reasons(frame15, frame5, frame3)
 
-    aligned, transitioning, strategy = _trend(frame15, session) if transition_ready else (False, False, Strategy.NONE)
+    aligned, transitioning, legacy_strategy = _trend(frame15, session) if transition_ready else (False, False, Strategy.NONE)
     convergence, stochastic_rebound, macd_turn = _well_rebound(frame5, session) if well_data_ready else (False, False, False)
     data3 = enriched(frame3, session) if entry_data_ready else pd.DataFrame()
     higher_low, volume_recovery, vwap_recovery, rebound_high, second_low = _entry_setup(data3) if entry_data_ready else (False, False, False, None, None)
     net_swing, persistence, confidence, fatigue = _swing_quality(frame5) if well_data_ready else (None, None, None, None)
 
-    trend_ready = aligned or transitioning
     latest3 = data3.iloc[-1] if entry_data_ready else None
-    breakout = bool(rebound_high and live_price > rebound_high)
+    opportunities = classify(frame15, frame5, frame3, live_price, session) if transition_ready and well_data_ready and entry_data_ready else ()
+    primary = opportunities[0] if opportunities else None
+    strategy = primary.strategy if primary else legacy_strategy
+    trend_label, structural_swing = trend_description(frame15, frame5) if transition_ready and well_data_ready else ("미확정", None)
+    if structural_swing is not None:
+        net_swing = structural_swing
+    trend_ready = bool(opportunities)
+    if primary is not None:
+        rebound_high = primary.entry
+        second_low = primary.hard_stop
+    breakout = bool(primary and live_price >= primary.entry)
     overheated = bool(latest3 is not None and (latest3.stoch_k >= 85 or live_price > latest3.ema20 * 1.05))
     missed = bool(latest3 is not None and rebound_high and live_price > rebound_high + latest3.atr * 1.2)
-    hard_stop = second_low
+    hard_stop = primary.hard_stop if primary else second_low
     two_close_breakdown = bool(latest3 is not None and hard_stop and (data3.close.tail(2) < hard_stop).all())
     hard_exit = bool(latest3 is not None and hard_stop and live_price <= hard_stop - float(latest3.atr) * 0.35)
     shakeout = bool(latest3 is not None and hard_stop and latest3.low < hard_stop <= latest3.close)
-    risk_state = (
-        RiskState.HARD_EXIT
-        if hard_exit
-        else RiskState.REAL_BREAKDOWN
-        if two_close_breakdown
-        else RiskState.SHAKEOUT
-        if shakeout
-        else RiskState.NORMAL
-    )
-    excluded = bool(not trend_ready or two_close_breakdown or hard_exit)
+    risk_state = RiskState.HARD_EXIT if hard_exit else RiskState.REAL_BREAKDOWN if two_close_breakdown else RiskState.SHAKEOUT if shakeout else RiskState.NORMAL
+    excluded = bool(trend_label == "하향" or two_close_breakdown or hard_exit)
 
     sequence_store = store or SequenceStore()
     cycle = sequence_store.load(symbol)
@@ -182,6 +169,7 @@ def evaluate(
             higher_low=higher_low,
             volume_recovery=volume_recovery,
             vwap_recovery=vwap_recovery,
+            setup_ready=primary is not None,
             breakout=breakout,
             missed=missed or overheated,
             excluded=excluded,
@@ -196,40 +184,38 @@ def evaluate(
             risk_state = RiskState.COOLDOWN
 
     confirmed_entry = state.entry_price if transition_ready and state.stage in {Stage.ENTRY_WAIT, Stage.FINAL_BUY} else None
-    planned_entry = rebound_high if trend_ready and rebound_high and second_low and second_low < rebound_high else None
+    planned_entry = primary.entry if primary else None
     entry = confirmed_entry or planned_entry
     hard_stop = state.entry_hard_stop if confirmed_entry and state.entry_hard_stop else hard_stop
-    risk = entry - hard_stop if entry and hard_stop and hard_stop < entry else None
-    target1 = entry + risk * 1.5 if risk else None
-    target2 = entry + risk * 2.2 if risk else None
-    soft_stop = max(hard_stop, entry - float(latest3.atr) * 0.7) if risk and hard_stop and latest3 is not None else None
+    target1 = primary.target1 if primary else None
+    target2 = primary.target2 if primary else None
+    soft_stop = primary.soft_stop if primary else None
     support_candidates = [float(latest3.ema9), float(latest3.vwap)] if latest3 is not None else []
     rebuy = max((value for value in support_candidates if value < live_price), default=None)
 
-    conditions: dict[str, bool | None] = {
-        "15분 정배열·전환": trend_ready if transition_ready else None,
-        "5분 이격도 수렴": convergence if well_data_ready else None,
-        "스토캐스틱 우물 반등": stochastic_rebound if well_data_ready else None,
-        "MACD 상승전환": macd_turn if well_data_ready else None,
-        "3분 높은 저점": higher_low if entry_data_ready else None,
-        "3분 거래량 증가": volume_recovery if entry_data_ready else None,
-        "3분 VWAP 회복": vwap_recovery if entry_data_ready else None,
-        "첫 반등고점 돌파": breakout if entry_data_ready else None,
-        "FINAL_BUY": state.stage == Stage.FINAL_BUY and risk_state == RiskState.NORMAL if entry_data_ready else None,
-    }
+    conditions: dict[str, bool | None] = {f"매매기법: {item.strategy.value}": True for item in opportunities}
+    if primary is not None:
+        conditions.update(primary.conditions)
+    conditions["진입가격 도달"] = breakout if entry_data_ready else None
+    conditions["FINAL_BUY"] = state.stage == Stage.FINAL_BUY and risk_state == RiskState.NORMAL if entry_data_ready else None
     available_conditions = [value for value in conditions.values() if value is not None]
-    score = int(round(sum(value is True for value in available_conditions) / len(available_conditions) * 100)) if available_conditions else 0
+    score = primary.strength if primary else (int(round(sum(value is True for value in available_conditions) / len(available_conditions) * 100)) if available_conditions else 0)
     all_structure_unavailable = not transition_ready and not well_data_ready and not entry_data_ready
     stage = Stage.DATA_WAIT if all_structure_unavailable else state.stage
     if stage == Stage.FINAL_BUY:
-        basis = "FINAL_BUY 확정 반등고점·ATR 구조"
+        basis = f"{strategy.value} 진입 확정 · {primary.basis}" if primary else "진입 확정"
     elif entry:
-        basis = "관찰가: 3분 최근 반등고점 돌파 시 진입·FINAL_BUY 전 매수 금지"
+        basis = f"{strategy.value} 관찰가 · {primary.basis}" if primary else "구조 관찰가"
     else:
         basis = readiness_reasons[0] if readiness_reasons else "반등고점·구조 손절점 대기"
     passed_reasons = tuple(name for name, passed in conditions.items() if passed is True)
     reasons = readiness_reasons or passed_reasons or ("순서 조건 대기",)
 
+    levels = attach_etas(
+        TradeLevels(entry=entry, rebuy=rebuy, target1=target1, target2=target2, soft_stop=soft_stop, hard_stop=hard_stop, basis=basis),
+        bars,
+        live_price,
+    )
     return ScanResult(
         symbol=symbol,
         evaluated_at=evaluated_at,
@@ -241,8 +227,10 @@ def evaluate(
         evidence_confidence=confidence,
         pattern_fatigue=fatigue,
         net_swing_pct=net_swing,
-        levels=TradeLevels(entry=entry, rebuy=rebuy, target1=target1, target2=target2, soft_stop=soft_stop, hard_stop=hard_stop, basis=basis),
+        levels=levels,
         conditions=conditions,
+        trend_label=trend_label,
+        matched_strategies=tuple(item.strategy for item in opportunities),
         reasons=reasons,
         diagnostics={
             "bars_1m": len(bars),
@@ -262,5 +250,6 @@ def evaluate(
             "cooldown_until": cycle.cooldown_until,
             "hard_kill_date": cycle.hard_kill_date,
             "level_status": "confirmed" if stage == Stage.FINAL_BUY else "watch" if entry else "pending",
+            "matched_strategy_count": len(opportunities),
         },
     )

@@ -15,10 +15,8 @@ from .kis import KISClient
 from .sequence import SequenceStore
 
 # ── 설정 ──────────────────────────────────────────────
-SIGNAL_WINDOW = (dt_time(10, 30), dt_time(14, 30))   # 이 구간의 데이터만으로 신호 판정 (미래 차단)
-TARGET_MODE = "balanced"                             # "high_win" | "balanced" | "aggressive"
-TARGET_MULTIPLE = {"high_win": 0.5, "balanced": 1.0, "aggressive": 1.5}
-MIN_WINDOW_BARS = 120   # 신호 판정에 필요한 최소 1분봉 수
+SIGNAL_WINDOW = (dt_time(10, 30), dt_time(14, 30))  # 이 구간의 데이터만으로 신호 판정 (미래 차단)
+MIN_WINDOW_BARS = 120  # 신호 판정에 필요한 최소 1분봉 수
 
 
 @dataclass
@@ -30,7 +28,7 @@ class TradeRecord:
     hard_stop: float
     target: float
     entry_time: str
-    outcome: str            # WIN / LOSS / TIMEOUT
+    outcome: str  # WIN / LOSS / TIMEOUT
     exit_time: str = ""
     return_pct: float = 0.0
     minutes_to_exit: int = 0
@@ -49,7 +47,7 @@ def _simulate_day(symbol: str, name: str, bars: pd.DataFrame, stats: dict) -> li
     bars = bars.copy()
     bars.index = pd.to_datetime(bars.index)
     # ── UTC → KST 변환 (인덱스가 자정 근처에서 시작하면 UTC로 파싱된 것) ──
-    if bars.index[0].time() < dt_time(7, 0):        # 오전 7시 미만 시작이면 UTC로 판단
+    if bars.index[0].time() < dt_time(7, 0):  # 오전 7시 미만 시작이면 UTC로 판단
         bars.index = bars.index + pd.Timedelta(hours=9)
         _say(f"{symbol}: UTC→KST 변환 적용, first={bars.index[0]}")
     _say(f"bars {symbol}: count={len(bars)} first={bars.index[0]} last={bars.index[-1]}")
@@ -74,8 +72,8 @@ def _simulate_day(symbol: str, name: str, bars: pd.DataFrame, stats: dict) -> li
             _say(f"diag {symbol}: bars1m={len(window)} stage={stage} conditions={dict(result.conditions)}")
         entry = result.levels.entry
         stop = result.levels.hard_stop
-        trend_ok = result.conditions.get("15분 정배열·전환") is True
-        breakout_ok = result.conditions.get("첫 반등고점 돌파") is True
+        trend_ok = bool(result.matched_strategies)
+        breakout_ok = result.conditions.get("진입가격 도달") is True
         for key, value in result.conditions.items():
             if value is True:
                 stats.setdefault("condition_true", Counter())[key] += 1
@@ -87,20 +85,27 @@ def _simulate_day(symbol: str, name: str, bars: pd.DataFrame, stats: dict) -> li
             stats["both_hits"] += 1
         if trend_ok and breakout_ok and entry and stop:
             stats["entry_candidates"] += 1
-        if not taken and trend_ok and breakout_ok and entry and stop and stop < price:
-            risk = price - stop
-            target = price + risk * TARGET_MULTIPLE[TARGET_MODE]
-            records.append(_resolve_trade(
-                symbol, name, window, bars.iloc[i + 1 :], price, stop, target,
-                result.symbol, window.index[-1],
-            ))
-            taken = True   # 하루 1종목당 1회만 (중복 방지)
+        target = result.levels.target1
+        if not taken and result.final_buy and entry and stop and target and stop < price:
+            records.append(
+                _resolve_trade(
+                    symbol,
+                    name,
+                    window,
+                    bars.iloc[i + 1 :],
+                    price,
+                    stop,
+                    target,
+                    result.symbol,
+                    window.index[-1],
+                )
+            )
+            taken = True  # 하루 1종목당 1회만 (중복 방지)
         elif taken:
             break
     stats["evaluations"] += evaluated
     if evaluated == 0:
-        _say(f"WARN {symbol}: evaluate 0회 — signal_bars={len(signal_bars)}개, "
-             f"필요 최소 {MIN_WINDOW_BARS}개, 범위 {SIGNAL_WINDOW[0]}~{SIGNAL_WINDOW[1]}")
+        _say(f"WARN {symbol}: evaluate 0회 — signal_bars={len(signal_bars)}개, 필요 최소 {MIN_WINDOW_BARS}개, 범위 {SIGNAL_WINDOW[0]}~{SIGNAL_WINDOW[1]}")
     return records
 
 
@@ -110,17 +115,11 @@ def _resolve_trade(symbol, name, signal_bars, future_bars, entry, stop, target, 
         minutes = int((ts - entry_time).total_seconds() // 60)
         # 보수적 판정: 같은 봉에서 둘 다 닿으면 손절 우선
         if low <= stop:
-            return TradeRecord(symbol, name, str(ts.date()), entry, stop, target,
-                               entry_time.strftime("%H:%M"), "LOSS", ts.strftime("%H:%M"),
-                               (stop / entry - 1) * 100, minutes)
+            return TradeRecord(symbol, name, str(ts.date()), entry, stop, target, entry_time.strftime("%H:%M"), "LOSS", ts.strftime("%H:%M"), (stop / entry - 1) * 100, minutes)
         if high >= target:
-            return TradeRecord(symbol, name, str(ts.date()), entry, stop, target,
-                               entry_time.strftime("%H:%M"), "WIN", ts.strftime("%H:%M"),
-                               (target / entry - 1) * 100, minutes)
+            return TradeRecord(symbol, name, str(ts.date()), entry, stop, target, entry_time.strftime("%H:%M"), "WIN", ts.strftime("%H:%M"), (target / entry - 1) * 100, minutes)
     close = float(future_bars["close"].iloc[-1]) if len(future_bars) else entry
-    return TradeRecord(symbol, name, str(entry_time.date()), entry, stop, target,
-                       entry_time.strftime("%H:%M"), "TIMEOUT", "",
-                       (close / entry - 1) * 100, 0)
+    return TradeRecord(symbol, name, str(entry_time.date()), entry, stop, target, entry_time.strftime("%H:%M"), "TIMEOUT", "", (close / entry - 1) * 100, 0)
 
 
 def run(client: KISClient, days: int = 20, top_n: int = 30, output_dir: Path = Path("backtest_results")) -> dict:
@@ -131,9 +130,18 @@ def run(client: KISClient, days: int = 20, top_n: int = 30, output_dir: Path = P
     _say(f"시작: candidates={len(candidates)} days={len(dates)}")
 
     all_trades: list[TradeRecord] = []
-    stats = {"api_errors": 0, "empty_days": 0, "days_with_data": set(), "signals": 0,
-             "trend_hits": 0, "breakout_hits": 0, "both_hits": 0, "entry_candidates": 0,
-             "evaluations": 0, "condition_true": Counter()}
+    stats = {
+        "api_errors": 0,
+        "empty_days": 0,
+        "days_with_data": set(),
+        "signals": 0,
+        "trend_hits": 0,
+        "breakout_hits": 0,
+        "both_hits": 0,
+        "entry_candidates": 0,
+        "evaluations": 0,
+        "condition_true": Counter(),
+    }
     for date_str in dates:
         for candidate in candidates:
             try:
@@ -164,8 +172,7 @@ def run(client: KISClient, days: int = 20, top_n: int = 30, output_dir: Path = P
     report["entry_candidates"] = stats["entry_candidates"]
     report["condition_true_counts"] = dict(stats["condition_true"])
 
-    (output_dir / f"trades_{datetime.now(UTC):%Y%m%d_%H%M}.json").write_text(
-        json.dumps([t.__dict__ for t in all_trades], ensure_ascii=False, indent=2), encoding="utf-8")
+    (output_dir / f"trades_{datetime.now(UTC):%Y%m%d_%H%M}.json").write_text(json.dumps([t.__dict__ for t in all_trades], ensure_ascii=False, indent=2), encoding="utf-8")
     (output_dir / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     _say(f"완료: {json.dumps(report, ensure_ascii=False)}")
     return report
@@ -188,7 +195,7 @@ def _summarize(trades: list[TradeRecord], days: int) -> dict:
     total_return = sum(t.return_pct for t in trades)
     win_minutes = [t.minutes_to_exit for t in wins]
     return {
-        "mode": TARGET_MODE,
+        "mode": "engine_structural_target1",
         "period_days": days,
         "total_trades": len(trades),
         "trades_per_day": round(len(trades) / max(days, 1), 2),

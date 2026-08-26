@@ -8,8 +8,8 @@ from enum import StrEnum
 class Stage(StrEnum):
     CANDIDATE = "관찰후보"
     TREND_READY = "15분 추세확인"
-    WELL_FORMING = "5분 우물 형성 중"
-    ENTRY_WAIT = "3분 진입대기"
+    WELL_FORMING = "전략 형성 중"
+    ENTRY_WAIT = "진입가 대기"
     FINAL_BUY = "진입 가능"
     MISSED = "타점 지남"
     EXCLUDED = "추세 붕괴 제외"
@@ -17,8 +17,16 @@ class Stage(StrEnum):
 
 
 class Strategy(StrEnum):
-    TREND_SWING = "TREND_SWING"
-    RANGE_SWING = "RANGE_SWING"
+    TREND_CONTINUATION = "상승추세"
+    TREND_PULLBACK = "눌림목"
+    RANGE_REVERSAL = "박스권 반등"
+    BREAKOUT = "거래량 돌파"
+    MOMENTUM_PULLBACK = "급등 후 첫 눌림"
+    VWAP_RECLAIM = "VWAP 회복"
+    OVERSOLD_REVERSAL = "과매도 반등"
+    VOLATILITY_EXPANSION = "변동성 수축 후 확장"
+    TREND_SWING = "상승 스윙"
+    RANGE_SWING = "박스 스윙"
     NONE = "NONE"
 
 
@@ -71,6 +79,9 @@ class TradeLevels:
     target2: float | None = None
     soft_stop: float | None = None
     hard_stop: float | None = None
+    entry_eta_minutes: int | None = None
+    target1_eta_minutes: int | None = None
+    target2_eta_minutes: int | None = None
     basis: str = "구조 미확인"
 
 
@@ -88,6 +99,8 @@ class ScanResult:
     net_swing_pct: float | None
     levels: TradeLevels
     conditions: dict[str, bool | None]
+    trend_label: str = "미확정"
+    matched_strategies: tuple[Strategy, ...] = ()
     reasons: tuple[str, ...] = ()
     diagnostics: dict[str, float | int | str | bool | None] = field(default_factory=dict)
 
