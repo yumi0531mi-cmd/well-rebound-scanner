@@ -3,14 +3,14 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from datetime import UTC, datetime, time as dt_time, timedelta
+from datetime import UTC, datetime, timedelta
+from datetime import time as dt_time
 from pathlib import Path
 
 import pandas as pd
 
 from .engine import MIN_ONE_MINUTE_BARS, evaluate
 from .kis import KISClient
-from .models import Candidate
 from .sequence import SequenceStore
 
 LOGGER = logging.getLogger(__name__)
