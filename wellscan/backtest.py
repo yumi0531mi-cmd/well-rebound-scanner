@@ -55,7 +55,7 @@ def _simulate_day(symbol: str, name: str, bars: pd.DataFrame) -> list[TradeRecor
         price = float(window["close"].iloc[-1])
         if not (cutoff.time() <= window.index[-1].time() <= SIGNAL_WINDOW[1]):
             continue
-            result = evaluate(symbol, window, price, store, session=None)
+        result = evaluate(symbol, window, price, store, session=None)
         entry = result.levels.entry
         stop = result.levels.hard_stop
         trend_ok = result.conditions.get("15분 정배열·전환") is True
