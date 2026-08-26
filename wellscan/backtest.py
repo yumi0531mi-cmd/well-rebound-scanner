@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-import logging
+import sys
 from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -14,13 +14,11 @@ from .engine import evaluate
 from .kis import KISClient
 from .sequence import SequenceStore
 
-LOGGER = logging.getLogger(__name__)
-
 # ── 설정 ──────────────────────────────────────────────
 SIGNAL_WINDOW = (dt_time(10, 30), dt_time(14, 30))   # 이 구간의 데이터만으로 신호 판정 (미래 차단)
 TARGET_MODE = "balanced"                             # "high_win" | "balanced" | "aggressive"
 TARGET_MULTIPLE = {"high_win": 0.5, "balanced": 1.0, "aggressive": 1.5}
-MIN_WINDOW_BARS = 120   # 신호 판정에 필요한 최소 1분봉 수 (기존 225 → 완화)
+MIN_WINDOW_BARS = 120   # 신호 판정에 필요한 최소 1분봉 수
 
 
 @dataclass
@@ -38,6 +36,11 @@ class TradeRecord:
     minutes_to_exit: int = 0
 
 
+def _say(msg: str) -> None:
+    """print로 강제 출력 (로그 레벨 문제 회피)."""
+    print(f"[BACKTEST] {msg}", file=sys.stdout, flush=True)
+
+
 def _simulate_day(symbol: str, name: str, bars: pd.DataFrame, stats: dict) -> list[TradeRecord]:
     """하루치 1분봉으로: 신호 → 결과 시뮬레이션."""
     records: list[TradeRecord] = []
@@ -45,8 +48,12 @@ def _simulate_day(symbol: str, name: str, bars: pd.DataFrame, stats: dict) -> li
         return records
     bars = bars.copy()
     bars.index = pd.to_datetime(bars.index)
-    LOGGER.info("bars %s %s: count=%d first=%s last=%s",
-                symbol, "day", len(bars), bars.index[0], bars.index[-1])
+    # ── UTC → KST 변환 (인덱스가 자정 근처에서 시작하면 UTC로 파싱된 것) ──
+    if bars.index[0].time() < dt_time(7, 0):        # 오전 7시 미만 시작이면 UTC로 판단
+        bars.index = bars.index + pd.Timedelta(hours=9)
+        _say(f"{symbol}: UTC→KST 변환 적용, first={bars.index[0]}")
+    _say(f"bars {symbol}: count={len(bars)} first={bars.index[0]} last={bars.index[-1]}")
+
     cutoff = bars.index[0].replace(hour=SIGNAL_WINDOW[0].hour, minute=SIGNAL_WINDOW[0].minute)
     end_signal = bars.index[-1].replace(hour=SIGNAL_WINDOW[1].hour, minute=SIGNAL_WINDOW[1].minute)
 
@@ -63,10 +70,8 @@ def _simulate_day(symbol: str, name: str, bars: pd.DataFrame, stats: dict) -> li
         result = evaluate(symbol, window, price, store, session=None)
         evaluated += 1
         if evaluated <= 2:  # 종목당 처음 2회의 진단 정보 기록
-            LOGGER.info("diag %s %s: bars1m=%d stage=%s conditions=%s",
-                        symbol, window.index[-1].strftime("%H:%M"), len(window),
-                        result.stage.value if hasattr(result.stage, "value") else result.stage,
-                        dict(result.conditions))
+            stage = result.stage.value if hasattr(result.stage, "value") else result.stage
+            _say(f"diag {symbol}: bars1m={len(window)} stage={stage} conditions={dict(result.conditions)}")
         entry = result.levels.entry
         stop = result.levels.hard_stop
         trend_ok = result.conditions.get("15분 정배열·전환") is True
@@ -93,6 +98,9 @@ def _simulate_day(symbol: str, name: str, bars: pd.DataFrame, stats: dict) -> li
         elif taken:
             break
     stats["evaluations"] += evaluated
+    if evaluated == 0:
+        _say(f"WARN {symbol}: evaluate 0회 — signal_bars={len(signal_bars)}개, "
+             f"필요 최소 {MIN_WINDOW_BARS}개, 범위 {SIGNAL_WINDOW[0]}~{SIGNAL_WINDOW[1]}")
     return records
 
 
@@ -120,19 +128,19 @@ def run(client: KISClient, days: int = 20, top_n: int = 30, output_dir: Path = P
     output_dir.mkdir(exist_ok=True)
     candidates = client.candidate_union(100)[:top_n]
     dates = _recent_trading_days(client, days)
+    _say(f"시작: candidates={len(candidates)} days={len(dates)}")
 
     all_trades: list[TradeRecord] = []
     stats = {"api_errors": 0, "empty_days": 0, "days_with_data": set(), "signals": 0,
              "trend_hits": 0, "breakout_hits": 0, "both_hits": 0, "entry_candidates": 0,
              "evaluations": 0, "condition_true": Counter()}
     for date_str in dates:
-        LOGGER.info("=== %s ===", date_str)
         for candidate in candidates:
             try:
                 bars = client.minute_day(candidate.symbol, date_str)
             except Exception as exc:
                 stats["api_errors"] += 1
-                LOGGER.warning("skip %s %s: %s", candidate.symbol, date_str, exc)
+                _say(f"skip {candidate.symbol} {date_str}: {exc}")
                 continue
             if bars.empty or len(bars) < 60:
                 stats["empty_days"] += 1
@@ -159,7 +167,7 @@ def run(client: KISClient, days: int = 20, top_n: int = 30, output_dir: Path = P
     (output_dir / f"trades_{datetime.now(UTC):%Y%m%d_%H%M}.json").write_text(
         json.dumps([t.__dict__ for t in all_trades], ensure_ascii=False, indent=2), encoding="utf-8")
     (output_dir / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-    LOGGER.info("report: %s", json.dumps(report, ensure_ascii=False))
+    _say(f"완료: {json.dumps(report, ensure_ascii=False)}")
     return report
 
 
