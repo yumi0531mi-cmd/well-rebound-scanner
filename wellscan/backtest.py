@@ -96,7 +96,7 @@ def run(client: KISClient, days: int = 20, top_n: int = 30, output_dir: Path = P
     candidates = client.candidate_union(100)[:top_n]
     dates = _recent_trading_days(client, days)
 
-       all_trades: list[TradeRecord] = []
+    all_trades: list[TradeRecord] = []
     stats = {"api_errors": 0, "empty_days": 0, "days_with_data": set(), "signals": 0}
     for date_str in dates:
         LOGGER.info("=== %s ===", date_str)
