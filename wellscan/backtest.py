@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from datetime import time as dt_time
@@ -50,16 +51,26 @@ def _simulate_day(symbol: str, name: str, bars: pd.DataFrame, stats: dict) -> li
     signal_bars = bars[bars.index <= end_signal]
     store = SequenceStore()  # 종목별 하루 초기화
     taken = False
+    evaluated = 0
     for i in range(MIN_ONE_MINUTE_BARS // 4, len(signal_bars), 5):
         window = signal_bars.iloc[: i + 1]
         price = float(window["close"].iloc[-1])
         if not (cutoff.time() <= window.index[-1].time() <= SIGNAL_WINDOW[1]):
             continue
         result = evaluate(symbol, window, price, store, session=None)
+        evaluated += 1
+        if evaluated <= 2:  # 종목당 처음 2회의 진단 정보 기록
+            LOGGER.info("diag %s %s: bars1m=%d stage=%s conditions=%s",
+                        symbol, window.index[-1].strftime("%H:%M"), len(window),
+                        result.stage.value if hasattr(result.stage, "value") else result.stage,
+                        {k: v for k, v in result.conditions.items()})
         entry = result.levels.entry
         stop = result.levels.hard_stop
         trend_ok = result.conditions.get("15분 정배열·전환") is True
         breakout_ok = result.conditions.get("첫 반등고점 돌파") is True
+        for key, value in result.conditions.items():
+            if value is True:
+                stats.setdefault("condition_true", Counter())[key] += 1
         if trend_ok:
             stats["trend_hits"] += 1
         if breakout_ok:
@@ -78,6 +89,7 @@ def _simulate_day(symbol: str, name: str, bars: pd.DataFrame, stats: dict) -> li
             taken = True   # 하루 1종목당 1회만 (중복 방지)
         elif taken:
             break
+    stats["evaluations"] += evaluated
     return records
 
 
@@ -108,7 +120,8 @@ def run(client: KISClient, days: int = 20, top_n: int = 30, output_dir: Path = P
 
     all_trades: list[TradeRecord] = []
     stats = {"api_errors": 0, "empty_days": 0, "days_with_data": set(), "signals": 0,
-             "trend_hits": 0, "breakout_hits": 0, "both_hits": 0, "entry_candidates": 0}
+             "trend_hits": 0, "breakout_hits": 0, "both_hits": 0, "entry_candidates": 0,
+             "evaluations": 0, "condition_true": Counter()}
     for date_str in dates:
         LOGGER.info("=== %s ===", date_str)
         for candidate in candidates:
@@ -133,10 +146,12 @@ def run(client: KISClient, days: int = 20, top_n: int = 30, output_dir: Path = P
     report["days_with_data"] = len(stats["days_with_data"])
     report["api_errors"] = stats["api_errors"]
     report["empty_responses"] = stats["empty_days"]
+    report["evaluations"] = stats["evaluations"]
     report["trend_hits"] = stats["trend_hits"]
     report["breakout_hits"] = stats["breakout_hits"]
     report["both_hits"] = stats["both_hits"]
     report["entry_candidates"] = stats["entry_candidates"]
+    report["condition_true_counts"] = {key: count for key, count in stats["condition_true"].items()}
 
     (output_dir / f"trades_{datetime.now(UTC):%Y%m%d_%H%M}.json").write_text(
         json.dumps([t.__dict__ for t in all_trades], ensure_ascii=False, indent=2), encoding="utf-8")
