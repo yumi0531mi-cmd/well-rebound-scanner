@@ -142,7 +142,14 @@ def evaluate(
     if primary is not None:
         rebound_high = primary.entry
         second_low = primary.hard_stop
-    breakout = bool(primary and live_price >= primary.entry)
+    completed_entry_confirmation = bool(primary and latest3 is not None and latest3.close >= primary.entry)
+    live_breakout_confirmation = bool(
+        primary
+        and primary.strategy in {Strategy.BREAKOUT, Strategy.VOLATILITY_EXPANSION}
+        and primary.conditions.get("거래량 확장", False)
+        and live_price >= primary.entry
+    )
+    breakout = completed_entry_confirmation or live_breakout_confirmation
     overheated = bool(latest3 is not None and (latest3.stoch_k >= 85 or live_price > latest3.ema20 * 1.05))
     missed = bool(latest3 is not None and rebound_high and live_price > rebound_high + latest3.atr * 1.2)
     hard_stop = primary.hard_stop if primary else second_low

@@ -12,7 +12,7 @@ from wellscan import APP_VERSION, ENGINE_VERSION
 from wellscan.engine import evaluate
 from wellscan.history import HistoryCache
 from wellscan.kis import KISClient, KISError
-from wellscan.models import Candidate, Market, ScanResult, Stage, TradingSession
+from wellscan.models import Candidate, Market, ScanResult, Stage, Strategy, TradingSession
 from wellscan.realtime import RealtimeHub
 from wellscan.sequence import SequenceStore
 from wellscan.sessions import session_exchange, session_status
@@ -141,7 +141,15 @@ def _live_price_content(quote: tuple[float, float, datetime, str]) -> None:
 def _confirm_live_breakout(candidate: Candidate, result: ScanResult, live_price: float) -> ScanResult:
     levels = result.levels
     atr = float(result.diagnostics.get("atr_3m") or 0)
-    if result.stage != Stage.ENTRY_WAIT or result.risk_state.value != "NORMAL" or not levels.entry or atr <= 0 or not (levels.entry < live_price <= levels.entry + atr * 1.2):
+    if (
+        result.strategy not in {Strategy.BREAKOUT, Strategy.VOLATILITY_EXPANSION}
+        or result.stage != Stage.ENTRY_WAIT
+        or result.risk_state.value != "NORMAL"
+        or not result.conditions.get("거래량 확장", False)
+        or not levels.entry
+        or atr <= 0
+        or not (levels.entry < live_price <= levels.entry + atr * 1.2)
+    ):
         return result
     state = sequences().advance(
         candidate.key,
@@ -215,12 +223,12 @@ def render_result(candidate: Candidate, result: ScanResult) -> None:
         level_columns[1].metric("1차 / 2차", f"{price_text(levels.target1)} / {price_text(levels.target2)}")
         level_columns[2].metric("Soft / Hard Stop", f"{price_text(levels.soft_stop)} / {price_text(levels.hard_stop)}")
         eta_text = (
-            f"진입 약 {levels.entry_eta_minutes}분 · 1차 약 {levels.target1_eta_minutes}분 · 2차 약 {levels.target2_eta_minutes}분"
+            f"진입까지 약 {levels.entry_eta_minutes}분 · 진입 후 1차 약 {levels.target1_eta_minutes}분 · 진입 후 2차 약 {levels.target2_eta_minutes}분"
             if levels.entry_eta_minutes is not None and levels.target1_eta_minutes is not None and levels.target2_eta_minutes is not None
             else "예상시간: 변동속도 표본 부족"
         )
         st.caption(f"{eta_text} · 재매수가 {price_text(levels.rebuy)}")
-        st.caption(f"산출근거 {levels.basis} · 예상시간은 최근 1분봉 이동속도 기반이며 보장값이 아님")
+        st.caption(f"산출근거 {levels.basis} · 예상시간은 해당 방향 흐름이 유지될 때만 표시되며 보장값이 아님")
         if result.matched_strategies:
             st.caption("해당 매매기법: " + " · ".join(item.value for item in result.matched_strategies))
         with st.expander("단계 조건·근거"):

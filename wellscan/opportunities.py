@@ -79,12 +79,23 @@ def classify(frame15: pd.DataFrame, frame5: pd.DataFrame, frame3: pd.DataFrame, 
     range_width_atr = (range_high - range_low) / atr if atr > 0 else 0
     compression = bool(data5.atr.tail(5).mean() < data5.atr.tail(20).mean() * 0.82)
     momentum = bool(last15.close > last15.ema20 and data15.close.pct_change(4).iloc[-1] > 0.015)
-    not_overheated = bool(live_price <= last3.ema20 + atr * 2.5 and last5.stoch_k < 88)
+    # ATR/VWAP based extension gates react to the current chart's volatility.
+    # A fixed percentage gate allowed already-extended stocks to be chased.
+    not_overheated = bool(
+        live_price <= last3.ema20 + atr * 1.5
+        and live_price <= last3.vwap + atr * 1.8
+        and last5.stoch_k < 82
+    )
 
     specs: list[tuple[Strategy, dict[str, bool], float, float, str]] = [
         (
             Strategy.TREND_CONTINUATION,
-            {"EMA 상승": ema_up, "정배열": aligned, "VWAP 위": last3.close > last3.vwap, "MACD 개선": macd_up},
+            {
+                "EMA 상승": ema_up,
+                "정배열 또는 MACD 개선": aligned or macd_up,
+                "VWAP 위": last3.close > last3.vwap,
+                "과열 아님": not_overheated,
+            },
             max(resistance, float(last3.high)),
             support,
             "상승 EMA·VWAP·직전 저항 구조",
@@ -146,7 +157,7 @@ def classify(frame15: pd.DataFrame, frame5: pd.DataFrame, frame3: pd.DataFrame, 
     ]
     opportunities: list[Opportunity] = []
     for strategy, conditions, entry, stop_support, basis in specs:
-        required = 2 if strategy in {Strategy.TREND_CONTINUATION, Strategy.TREND_PULLBACK} else 3
+        required = 3
         if strategy in {Strategy.BREAKOUT, Strategy.VOLATILITY_EXPANSION}:
             required = 4
         if sum(conditions.values()) < required:
@@ -184,6 +195,13 @@ def estimate_minutes(one_minute_bars: pd.DataFrame, current: float, destination:
     closes = one_minute_bars.close.astype(float).tail(120)
     moves = closes.diff().abs().dropna()
     if len(moves) < 20:
+        return None
+    recent = closes.tail(12)
+    direction = np.sign(destination - current)
+    directional_progress = float(recent.iloc[-1] - recent.iloc[0]) * direction
+    # ETA is meaningful only while price is actually moving toward the level.
+    # Previously abs() made a falling chart produce a short upside ETA.
+    if direction != 0 and directional_progress <= 0:
         return None
     typical_move = float(moves.median())
     net = abs(float(closes.iloc[-1] - closes.iloc[0]))

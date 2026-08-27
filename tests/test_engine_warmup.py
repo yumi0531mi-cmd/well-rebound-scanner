@@ -51,6 +51,7 @@ def test_watch_levels_are_available_before_final_buy(tmp_path) -> None:
     index = pd.date_range("2026-08-20 09:00", periods=count, freq="min")
     steps = np.arange(count)
     close = 100 + steps * 0.015 + np.sin(steps / 7) * 0.7
+    close[-5:] += np.linspace(0.0, 0.8, 5)
     frame = pd.DataFrame(
         {
             "open": close - 0.05,
