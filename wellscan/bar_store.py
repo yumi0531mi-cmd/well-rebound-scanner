@@ -51,11 +51,14 @@ class CockroachBarStore:
     def _connect(self):
         import psycopg
 
+        root_cert = "/etc/secrets/root.crt"
+        if not os.path.isfile(root_cert):
+            root_cert = "system"
         return psycopg.connect(
             self.database_url,
             autocommit=True,
             connect_timeout=10,
-            sslrootcert="system",
+            sslrootcert=root_cert,
         )
 
     def _ensure_schema(self, connection) -> None:
