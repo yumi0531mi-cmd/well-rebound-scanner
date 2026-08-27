@@ -381,6 +381,13 @@ def structure_results(candidates: tuple[Candidate, ...], completed_minute: int) 
 
 minute_bucket = int(datetime.now(UTC).timestamp() // 60)
 results = structure_results(tuple(analysis_candidates), minute_bucket)
+persistence = history().persistence_status()
+if persistence.configured and persistence.available:
+    st.caption("영구 분봉 저장소: CockroachDB 연결됨 · 종목별 최근 3,000봉")
+elif persistence.configured:
+    st.error(f"영구 분봉 저장소 연결 실패 · 로컬 CSV 임시 사용 · {persistence.last_error or '연결 확인 대기'}")
+else:
+    st.warning("영구 분봉 저장소 미설정 · Render 재시작 시 로컬 분봉이 사라질 수 있습니다.")
 
 stage_priority = {
     Stage.FINAL_BUY: 7,

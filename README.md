@@ -20,14 +20,14 @@ KIS 거래량 TOP100과 거래대금 TOP100 합집합을 후보로 만들고, �
 
 ## 실행
 
-Python 3.11 이상에서 환경변수 `KIS_APP_KEY`, `KIS_APP_SECRET`을 설정한 뒤 실행합니다.
+Python 3.11 이상에서 환경변수 `KIS_APP_KEY`, `KIS_APP_SECRET`을 설정한 뒤 실행합니다. CockroachDB Basic의 General connection string을 `DATABASE_URL`로 설정하면 분봉을 영구 저장합니다.
 
 ```powershell
 python -m pip install -r requirements.txt
 python -m streamlit run app.py
 ```
 
-Render에서는 저장소 루트의 `render.yaml`을 Blueprint로 배포하고 위 두 비밀값만 입력합니다. Render는 배포 전에 전체 `pytest`와 `ruff` 검사를 실행하므로 검사 실패 코드는 기동하지 않습니다. `SUPABASE_URL`, `SUPABASE_KEY`는 사용하지 않습니다.
+Render에서는 저장소 루트의 `render.yaml`을 Blueprint로 배포하고 위 세 비밀값을 입력합니다. Render는 배포 전에 전체 `pytest`와 `ruff` 검사를 실행하므로 검사 실패 코드는 기동하지 않습니다. `SUPABASE_URL`, `SUPABASE_KEY`는 사용하지 않습니다.
 
 ## 무료 모바일 접속 대안
 
@@ -36,7 +36,7 @@ Windows PC를 켜둘 수 있다면 `start_mobile_server.ps1`을 실행해 로컬
 ## 데이터와 안전장치
 
 - 15분 MA60 정배열은 완료 15분봉 60개가 필요하므로 통상 900개의 실제 1분봉 전까지는 미확정으로 유지하며, 임의값을 만들지 않습니다. 각 전략은 필요한 완료봉이 확보되면 독립적으로 계산합니다.
-- 신호 단계, 분봉 캐시, 사후검증 자료는 `.scanner_data` 아래에만 저장하며 국내/미국·거래소·세션별로 분리합니다.
+- 분봉은 CockroachDB를 영구 원본으로 사용하고 `.scanner_data/history` CSV는 실행 중 L1 캐시로만 사용합니다. `DATABASE_URL`이 없거나 DB가 실패하면 로컬 캐시를 유지하되 화면에 저장소 상태를 표시합니다.
 - 미국 분봉은 한 번에 최대 120개인 공식 조회를 연속 조회하고, 부족하면 다음 실행에서 더 오래된 구간을 누적합니다. 초기 구조 판단에 필요한 180개를 먼저 확보하고, MA60 정배열 판정용 1000개 워밍업은 별도로 이어갑니다.
 - SHAKEOUT, REAL_BREAKDOWN, HARD_EXIT, 15분 Cooldown, 일 3회 붕괴 Hard Kill을 구분합니다.
 - 5·15·30분 MFE/MAE와 목표/손절 선도달을 기록합니다. 같은 봉에서 둘 다 닿으면 보수적으로 손절 우선입니다.

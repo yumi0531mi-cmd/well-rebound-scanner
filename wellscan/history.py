@@ -12,6 +12,7 @@ from typing import Any
 import pandas as pd
 from filelock import FileLock
 
+from .bar_store import CockroachBarStore, StoreStatus
 from .indicators import normalize_bars
 from .kis import KISClient
 from .models import Candidate, Market
@@ -42,13 +43,16 @@ class HistoryCache:
     INITIAL_READY_BARS = 180
     WARM_TARGET_BARS = 1000
 
-    def __init__(self, root: str | Path = ".scanner_data/history"):
+    def __init__(self, root: str | Path = ".scanner_data/history", durable_store: CockroachBarStore | None = None):
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
         self._metrics: dict[str, BackfillMetrics] = {}
         self._warm_lock = threading.Lock()
         self._warm_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="history-warm")
         self._warm_futures: dict[str, Future[pd.DataFrame]] = {}
+        self._durable_store = durable_store if durable_store is not None else CockroachBarStore.from_environment()
+        self._durable_loaded: set[tuple[str, str]] = set()
+        self._durable_frames: dict[tuple[str, str], pd.DataFrame] = {}
 
     def path(self, symbol: str, namespace: str = "KR-KRX-KR_REGULAR") -> Path:
         safe = namespace.replace(":", "-").replace("/", "-")
@@ -60,11 +64,19 @@ class HistoryCache:
 
     def load(self, symbol: str, namespace: str = "KR-KRX-KR_REGULAR") -> pd.DataFrame:
         path = self.path(symbol, namespace)
-        if not path.exists():
-            return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
         try:
-            frame = pd.read_csv(path, index_col="timestamp", parse_dates=["timestamp"])
-            return normalize_bars(frame)
+            local = pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
+            if path.exists():
+                local = normalize_bars(pd.read_csv(path, index_col="timestamp", parse_dates=["timestamp"]))
+            durable_key = (namespace, symbol.upper())
+            if self._durable_store is not None and durable_key not in self._durable_loaded:
+                remote = self._durable_store.load(namespace, symbol)
+                self._durable_loaded.add(durable_key)
+                self._durable_frames[durable_key] = remote
+            remote = self._durable_frames.get(durable_key)
+            if remote is not None and not remote.empty:
+                local = remote.copy() if local.empty else normalize_bars(pd.concat([local, remote])).tail(3000)
+            return local
         except (OSError, ValueError, KeyError):
             return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
 
@@ -81,7 +93,15 @@ class HistoryCache:
             temporary = path.with_suffix(".tmp")
             combined.to_csv(temporary, index_label="timestamp")
             temporary.replace(path)
+        if self._durable_store is not None:
+            self._durable_store.upsert(namespace, symbol, incoming)
+            self._durable_frames[(namespace, symbol.upper())] = combined
         return combined
+
+    def persistence_status(self) -> StoreStatus:
+        if self._durable_store is None:
+            return StoreStatus(False, False, "로컬 CSV", "DATABASE_URL 미설정")
+        return self._durable_store.status()
 
     def _domestic_backfill(
         self, client: KISClient, symbol: str, cached: pd.DataFrame, target_bars: int, max_days: int
