@@ -83,6 +83,17 @@ class CockroachBarStore:
             )
         self._initialized = True
 
+    def probe(self) -> bool:
+        """Verify connectivity and create the table even when no candidates exist."""
+        try:
+            with self._lock, self._connect() as connection:
+                self._ensure_schema(connection)
+            self._available, self._last_error = True, ""
+            return True
+        except Exception as exc:
+            self._record_error(exc)
+            return False
+
     def load(self, namespace: str, symbol: str, limit: int = MAX_BARS_PER_SYMBOL) -> pd.DataFrame:
         try:
             with self._lock, self._connect() as connection:

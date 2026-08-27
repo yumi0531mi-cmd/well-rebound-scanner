@@ -53,6 +53,9 @@ class HistoryCache:
         self._durable_store = durable_store if durable_store is not None else CockroachBarStore.from_environment()
         self._durable_loaded: set[tuple[str, str]] = set()
         self._durable_frames: dict[tuple[str, str], pd.DataFrame] = {}
+        probe = getattr(self._durable_store, "probe", None)
+        if callable(probe):
+            probe()
 
     def path(self, symbol: str, namespace: str = "KR-KRX-KR_REGULAR") -> Path:
         safe = namespace.replace(":", "-").replace("/", "-")
