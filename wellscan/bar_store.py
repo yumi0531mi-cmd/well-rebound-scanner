@@ -20,7 +20,7 @@ def _render_safe_database_url(database_url: str) -> str:
     parts = urlsplit(database_url.strip())
     query = dict(parse_qsl(parts.query, keep_blank_values=True))
     root_cert = query.get("sslrootcert", "")
-    if root_cert and root_cert != "system" and not os.path.isfile(root_cert):
+    if root_cert and root_cert != "system":
         query["sslrootcert"] = "system"
     return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
 
