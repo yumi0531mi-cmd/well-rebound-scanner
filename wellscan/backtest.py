@@ -7,6 +7,7 @@ import math
 
 import pandas as pd
 
+from wellscan.engine import evaluate
 from wellscan.history import HistoryCache
 from wellscan.kis import KISClient
 from wellscan.models import Market
