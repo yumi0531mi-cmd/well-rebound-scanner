@@ -1,207 +1,143 @@
+"""소규모 백테스트: 최근 N거래일 분봉 리플레이"""
+
 from __future__ import annotations
 
-import json
-import sys
-from collections import Counter
-from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
-from datetime import time as dt_time
-from pathlib import Path
+import logging
+import math
 
 import pandas as pd
 
-from .engine import evaluate
-from .kis import KISClient
-from .sequence import SequenceStore
+from wellscan.engine import evaluate
+from wellscan.history import HistoryCache
+from wellscan.kis import KISClient
+from wellscan.models import Market, Stage
+from wellscan.sequence import SequenceStore
 
-# ── 설정 ──────────────────────────────────────────────
-SIGNAL_WINDOW = (dt_time(10, 30), dt_time(14, 30))  # 이 구간의 데이터만으로 신호 판정 (미래 차단)
-MIN_WINDOW_BARS = 120  # 신호 판정에 필요한 최소 1분봉 수
+LOGGER = logging.getLogger(__name__)
 
-
-@dataclass
-class TradeRecord:
-    symbol: str
-    name: str
-    date: str
-    entry_price: float
-    hard_stop: float
-    target: float
-    entry_time: str
-    outcome: str  # WIN / LOSS / TIMEOUT
-    exit_time: str = ""
-    return_pct: float = 0.0
-    minutes_to_exit: int = 0
+FEE = 0.0005         # 수수료 (매수/매도 각각)
+SLIPPAGE = 0.001     # 슬리피지 편도
+TAX_KR = 0.0018      # 국내 매도 거래세
+MAX_HOLD_BARS = 780  # 최대 보유: 약 2거래일 분봉
+WARMUP_BARS = 180    # 구조 판정 최소 표본 (HistoryCache.INITIAL_READY_BARS와 동일)
+WINDOW = 1000        # evaluate에 넘길 최대 봉 수
 
 
-def _say(msg: str) -> None:
-    """print로 강제 출력 (로그 레벨 문제 회피)."""
-    print(f"[BACKTEST] {msg}", file=sys.stdout, flush=True)
+def _net_return(entry: float, exit_price: float, market: Market) -> float:
+    gross = (exit_price - entry) / entry
+    cost = FEE * 2 + SLIPPAGE * 2
+    if market == Market.KR:
+        cost += TAX_KR
+    return round((gross - cost) * 100, 2)
 
 
-def _simulate_day(symbol: str, name: str, bars: pd.DataFrame, stats: dict) -> list[TradeRecord]:
-    """하루치 1분봉으로: 신호 → 결과 시뮬레이션."""
-    records: list[TradeRecord] = []
-    if bars.empty or len(bars) < 60:
-        return records
-    bars = bars.copy()
-    bars.index = pd.to_datetime(bars.index)
-    # ── UTC → KST 변환 (인덱스가 자정 근처에서 시작하면 UTC로 파싱된 것) ──
-    if bars.index[0].time() < dt_time(7, 0):  # 오전 7시 미만 시작이면 UTC로 판단
-        bars.index = bars.index + pd.Timedelta(hours=9)
-        _say(f"{symbol}: UTC→KST 변환 적용, first={bars.index[0]}")
-    _say(f"bars {symbol}: count={len(bars)} first={bars.index[0]} last={bars.index[-1]}")
+def _simulate_exit(
+    bars: pd.DataFrame,
+    entry_idx: int,
+    target1: float | None,
+    hard_stop: float | None,
+) -> tuple[int, float, str]:
+    """진입 다음 봉부터 목표가(익절)/하드스탑(손절) 도달 확인. 보수적으로 손절 우선."""
+    end = min(entry_idx + MAX_HOLD_BARS, len(bars) - 1)
+    for i in range(entry_idx + 1, end + 1):
+        low = float(bars.iloc[i]["low"])
+        high = float(bars.iloc[i]["high"])
+        if hard_stop is not None and math.isfinite(hard_stop) and hard_stop > 0 and low <= hard_stop:
+            return i, hard_stop, "STOP"
+        if target1 is not None and math.isfinite(target1) and target1 > 0 and high >= target1:
+            return i, target1, "TARGET1"
+    return end, float(bars.iloc[end]["close"]), "TIMEOUT"
 
-    cutoff = bars.index[0].replace(hour=SIGNAL_WINDOW[0].hour, minute=SIGNAL_WINDOW[0].minute)
-    end_signal = bars.index[-1].replace(hour=SIGNAL_WINDOW[1].hour, minute=SIGNAL_WINDOW[1].minute)
 
-    signal_bars = bars[bars.index <= end_signal]
-    store = SequenceStore()  # 종목별 하루 초기화
-    taken = False
-    evaluated = 0
-    start = max(MIN_WINDOW_BARS - 1, 0)
-    for i in range(start, len(signal_bars), 5):
-        window = signal_bars.iloc[: i + 1]
-        price = float(window["close"].iloc[-1])
-        if not (cutoff.time() <= window.index[-1].time() <= SIGNAL_WINDOW[1]):
+def run(client: KISClient, days: int = 3, top_n: int = 10) -> dict:
+    del days  # 후보풀이 현재 랭킹 기반이라 기간은 참고용으로만 표시
+    cache = HistoryCache()
+    store = SequenceStore()
+
+    # ── 후보풀: 스캐너와 동일하게 확보 (국내, 최소 1,000원 이상) ──
+    pool = client.candidate_union(100)
+    candidates = [c for c in pool if c.market == Market.KR and c.price >= 1000][:top_n]
+
+    LOGGER.info("backtest start top_n=%s", len(candidates))
+
+    trades: list[dict] = []
+
+    for candidate in candidates:
+        try:
+            bars = cache.backfill_candidate(client, candidate, target_bars=1200)
+        except Exception as exc:
+            LOGGER.warning("history fail %s: %s", candidate.symbol, exc)
             continue
-        result = evaluate(symbol, window, price, store, session=None)
-        evaluated += 1
-        if evaluated <= 2:  # 종목당 처음 2회의 진단 정보 기록
-            stage = result.stage.value if hasattr(result.stage, "value") else result.stage
-            _say(f"diag {symbol}: bars1m={len(window)} stage={stage} conditions={dict(result.conditions)}")
-        entry = result.levels.entry
-        stop = result.levels.hard_stop
-        trend_ok = bool(result.matched_strategies)
-        breakout_ok = result.conditions.get("진입가격 도달") is True
-        for key, value in result.conditions.items():
-            if value is True:
-                stats.setdefault("condition_true", Counter())[key] += 1
-        if trend_ok:
-            stats["trend_hits"] += 1
-        if breakout_ok:
-            stats["breakout_hits"] += 1
-        if trend_ok and breakout_ok:
-            stats["both_hits"] += 1
-        if trend_ok and breakout_ok and entry and stop:
-            stats["entry_candidates"] += 1
-        target = result.levels.target1
-        if not taken and result.final_buy and entry and stop and target and stop < price:
-            records.append(
-                _resolve_trade(
-                    symbol,
-                    name,
-                    window,
-                    bars.iloc[i + 1 :],
-                    price,
-                    stop,
-                    target,
-                    result.symbol,
-                    window.index[-1],
+        if len(bars) < WARMUP_BARS + 10:
+            LOGGER.info("skip %s bars=%s", candidate.symbol, len(bars))
+            continue
+
+        timestamps = bars.index.tolist()
+        position: dict | None = None
+        i = WARMUP_BARS
+
+        while i < len(bars):
+            # ── 보유 중: 청산 처리 후 신호 탐색 재개 ──
+            if position is not None:
+                exit_idx, exit_price, reason = _simulate_exit(
+                    bars, position["entry_idx"], position["target1"], position["hard_stop"]
                 )
-            )
-            taken = True  # 하루 1종목당 1회만 (중복 방지)
-        elif taken:
-            break
-    stats["evaluations"] += evaluated
-    if evaluated == 0:
-        _say(f"WARN {symbol}: evaluate 0회 — signal_bars={len(signal_bars)}개, 필요 최소 {MIN_WINDOW_BARS}개, 범위 {SIGNAL_WINDOW[0]}~{SIGNAL_WINDOW[1]}")
-    return records
+                ret = _net_return(position["entry_price"], exit_price, candidate.market)
+                trades.append({
+                    "symbol": candidate.symbol,
+                    "name": candidate.name,
+                    "strategy": position["strategy"],
+                    "entry_at": str(timestamps[position["entry_idx"]]),
+                    "exit_at": str(timestamps[exit_idx]),
+                    "entry": round(position["entry_price"], 2),
+                    "exit": round(exit_price, 2),
+                    "hold_bars": exit_idx - position["entry_idx"],
+                    "result": reason,
+                    "return_pct": ret,
+                })
+                LOGGER.info("trade %s %s %.2f%%", candidate.symbol, reason, ret)
+                i = exit_idx + 2  # 청산 봉 다음부터 재탐색 (겹치는 신호 무시)
+                position = None
+                continue
 
-
-def _resolve_trade(symbol, name, signal_bars, future_bars, entry, stop, target, _, entry_time) -> TradeRecord:
-    for ts, row in future_bars.iterrows():
-        low, high = float(row["low"]), float(row["high"])
-        minutes = int((ts - entry_time).total_seconds() // 60)
-        # 보수적 판정: 같은 봉에서 둘 다 닿으면 손절 우선
-        if low <= stop:
-            return TradeRecord(symbol, name, str(ts.date()), entry, stop, target, entry_time.strftime("%H:%M"), "LOSS", ts.strftime("%H:%M"), (stop / entry - 1) * 100, minutes)
-        if high >= target:
-            return TradeRecord(symbol, name, str(ts.date()), entry, stop, target, entry_time.strftime("%H:%M"), "WIN", ts.strftime("%H:%M"), (target / entry - 1) * 100, minutes)
-    close = float(future_bars["close"].iloc[-1]) if len(future_bars) else entry
-    return TradeRecord(symbol, name, str(entry_time.date()), entry, stop, target, entry_time.strftime("%H:%M"), "TIMEOUT", "", (close / entry - 1) * 100, 0)
-
-
-def run(client: KISClient, days: int = 20, top_n: int = 30, output_dir: Path = Path("backtest_results")) -> dict:
-    """최근 N거래일 × 거래대금 상위 종목 백테스트 실행."""
-    output_dir.mkdir(exist_ok=True)
-    candidates = client.candidate_union(100)[:top_n]
-    dates = _recent_trading_days(client, days)
-    _say(f"시작: candidates={len(candidates)} days={len(dates)}")
-
-    all_trades: list[TradeRecord] = []
-    stats = {
-        "api_errors": 0,
-        "empty_days": 0,
-        "days_with_data": set(),
-        "signals": 0,
-        "trend_hits": 0,
-        "breakout_hits": 0,
-        "both_hits": 0,
-        "entry_candidates": 0,
-        "evaluations": 0,
-        "condition_true": Counter(),
-    }
-    for date_str in dates:
-        for candidate in candidates:
+            # ── 포지션 없음: 과거 시점까지 잘라 판정 ──
+            window = bars.iloc[max(0, i - WINDOW):i]
+            price = float(bars.iloc[i]["close"])
             try:
-                bars = client.minute_day(candidate.symbol, date_str)
+                result = evaluate(candidate.key, window, price, store, session=candidate.session)
             except Exception as exc:
-                stats["api_errors"] += 1
-                _say(f"skip {candidate.symbol} {date_str}: {exc}")
+                LOGGER.debug("evaluate fail %s @%s: %s", candidate.symbol, i, exc)
+                i += 1
                 continue
-            if bars.empty or len(bars) < 60:
-                stats["empty_days"] += 1
-                continue
-            stats["days_with_data"].add(date_str)
-            before = len(all_trades)
-            all_trades.extend(_simulate_day(candidate.symbol, candidate.name, bars, stats))
-            if len(all_trades) > before:
-                stats["signals"] += 1
 
-    report = _summarize(all_trades, days)
-    report["candidates"] = len(candidates)
-    report["days_requested"] = len(dates)
-    report["days_with_data"] = len(stats["days_with_data"])
-    report["api_errors"] = stats["api_errors"]
-    report["empty_responses"] = stats["empty_days"]
-    report["evaluations"] = stats["evaluations"]
-    report["trend_hits"] = stats["trend_hits"]
-    report["breakout_hits"] = stats["breakout_hits"]
-    report["both_hits"] = stats["both_hits"]
-    report["entry_candidates"] = stats["entry_candidates"]
-    report["condition_true_counts"] = dict(stats["condition_true"])
+            # final_buy 프로퍼티 = FINAL_BUY 단계 + NORMAL 위험상태 모두 통과
+            if result.final_buy and result.levels.entry:
+                entry_idx = min(i + 1, len(bars) - 1)
+                if entry_idx > i:  # 진입할 다음 봉이 실제로 있을 때만
+                    position = {
+                        "entry_idx": entry_idx,
+                        "entry_price": float(bars.iloc[entry_idx]["open"]),  # 다음 봉 시가 진입
+                        "target1": result.levels.target1,
+                        "hard_stop": result.levels.hard_stop,
+                        "strategy": result.strategy.value,
+                    }
+                    i = entry_idx
+                    continue
+            i += 1
 
-    (output_dir / f"trades_{datetime.now(UTC):%Y%m%d_%H%M}.json").write_text(json.dumps([t.__dict__ for t in all_trades], ensure_ascii=False, indent=2), encoding="utf-8")
-    (output_dir / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-    _say(f"완료: {json.dumps(report, ensure_ascii=False)}")
-    return report
+        LOGGER.info("done %s", candidate.symbol)
 
-
-def _recent_trading_days(client: KISClient, count: int) -> list[str]:
-    """일봉 조회가 없으므로 최근 영업일 날짜 목록 생성."""
-    days: list[str] = []
-    current = datetime.now(UTC).date()
-    while len(days) < count:
-        current -= timedelta(days=1)
-        if current.weekday() < 5:  # 주말 제외
-            days.append(current.isoformat().replace("-", ""))
-    return list(reversed(days))
-
-
-def _summarize(trades: list[TradeRecord], days: int) -> dict:
-    wins = [t for t in trades if t.outcome == "WIN"]
-    losses = [t for t in trades if t.outcome == "LOSS"]
-    total_return = sum(t.return_pct for t in trades)
-    win_minutes = [t.minutes_to_exit for t in wins]
-    return {
-        "mode": "engine_structural_target1",
+    n = len(trades)
+    wins = sum(t["return_pct"] > 0 for t in trades)
+    report = {
         "period_days": days,
-        "total_trades": len(trades),
-        "trades_per_day": round(len(trades) / max(days, 1), 2),
-        "win_rate": round(len(wins) / max(len(wins) + len(losses), 1) * 100, 1),
-        "avg_return_pct": round(total_return / max(len(trades), 1), 3),
-        "total_return_pct": round(total_return, 2),
-        "avg_win_minutes": round(sum(win_minutes) / max(len(win_minutes), 1)),
-        "timeouts": len(trades) - len(wins) - len(losses),
+        "total_trades": n,
+        "trades_per_day": round(n / max(days, 1), 2),
+        "win_rate": round(wins / n * 100, 1) if n else 0.0,
+        "avg_return_pct": round(sum(t["return_pct"] for t in trades) / n, 2) if n else 0.0,
+        "best_trade": max((t["return_pct"] for t in trades), default=None),
+        "worst_trade": min((t["return_pct"] for t in trades), default=None),
+        "trades": trades,
     }
+    LOGGER.info("backtest done total=%s win=%s avg=%s", n, report["win_rate"], report["avg_return_pct"])
+    return report
