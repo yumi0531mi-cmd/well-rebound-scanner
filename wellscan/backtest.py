@@ -7,10 +7,9 @@ import math
 
 import pandas as pd
 
-from wellscan.engine import evaluate
 from wellscan.history import HistoryCache
 from wellscan.kis import KISClient
-from wellscan.models import Market, Stage
+from wellscan.models import Market
 from wellscan.sequence import SequenceStore
 
 LOGGER = logging.getLogger(__name__)
@@ -50,7 +49,6 @@ def _simulate_exit(
 
 
 def run(client: KISClient, days: int = 3, top_n: int = 10) -> dict:
-    del days  # 후보풀이 현재 랭킹 기반이라 기간은 참고용으로만 표시
     cache = HistoryCache()
     store = SequenceStore()
 
