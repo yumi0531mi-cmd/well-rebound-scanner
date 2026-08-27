@@ -24,7 +24,7 @@ st.set_page_config(page_title="다중 매매기법 실전 스캐너", page_icon=
 # ── 숨겨진 백테스트 관리자 페이지 (?admin=backtest) ──
 if st.query_params.get("admin") == "backtest":
     st.title("🔬 백테스트 관리 (비공개)")
-    st.caption("소규모 테스트: 최근 3거래일 × 거래대금 상위 10개 종목")
+    st.caption("국내 정규장 1분봉 워크포워드 · 실시간 스캐너와 동일한 전략엔진")
     _days = st.slider("조회 거래일 수", 2, 10, 3)
     _top_n = st.slider("종목 수", 5, 30, 10)
     if not st.button("▶️ 백테스트 실행"):
@@ -38,7 +38,8 @@ if st.query_params.get("admin") == "backtest":
                 _logs.append(record.getMessage())
                 _log_area.code("\n".join(_logs[-25:]))
 
-        logging.getLogger().addHandler(_Handler())
+        _handler = _Handler()
+        logging.getLogger().addHandler(_handler)
         try:
             from wellscan.backtest import run
 
@@ -51,12 +52,26 @@ if st.query_params.get("admin") == "backtest":
                 with st.expander("상세 로그"):
                     st.code("\n".join(_logs))
             st.stop()
+        finally:
+            logging.getLogger().removeHandler(_handler)
     st.subheader("📊 백테스트 리포트")
     _cols = st.columns(4)
     _cols[0].metric("총 매매 수", _report.get("total_trades"))
     _cols[1].metric("하루 평균", _report.get("trades_per_day"))
-    _cols[2].metric("승률 %", f"{_report.get('win_rate')}%")
-    _cols[3].metric("평균 수익률", f"{_report.get('avg_return_pct')}%")
+    _win_rate = _report.get("win_rate")
+    _average = _report.get("avg_return_pct")
+    _cols[2].metric("승률", f"{_win_rate}%" if _win_rate is not None else "표본 없음")
+    _cols[3].metric("평균 순수익률", f"{_average}%" if _average is not None else "표본 없음")
+    if _report.get("errors"):
+        st.warning(f"일부 종목 데이터 오류 {len(_report['errors'])}건 — 아래 오류표를 확인하세요.")
+        st.dataframe(_report["errors"], use_container_width=True)
+    st.caption(_report.get("assumptions", {}).get("bias_warning", ""))
+    if _report.get("strategy_summary"):
+        st.subheader("전략별 결과")
+        st.dataframe(_report["strategy_summary"], use_container_width=True)
+    if _report.get("trades"):
+        st.subheader("거래별 결과")
+        st.dataframe(_report["trades"], use_container_width=True)
     with st.expander("전체 리포트 JSON"):
         st.json(_report)
     st.stop()
