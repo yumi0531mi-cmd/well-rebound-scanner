@@ -196,7 +196,7 @@ def render_result(candidate: Candidate, result: ScanResult) -> None:
     quote = _live_quote(candidate)
     result = _confirm_live_breakout(candidate, result, quote[0])
     stage_class = "good" if result.stage == Stage.FINAL_BUY else "bad" if result.stage in {Stage.EXCLUDED, Stage.MISSED} else "wait"
-    with st.container(border=True, key=f"card-{candidate.key}"):
+    with st.container(border=True):
         st.markdown(
             f'<div class="symbol">{html.escape(candidate.symbol)} · {html.escape(candidate.name)}</div>'
             f'<div class="stage {stage_class}">{html.escape(result.stage.value)} · {result.strategy.value}</div>',
