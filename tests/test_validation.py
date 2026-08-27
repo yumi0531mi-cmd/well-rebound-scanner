@@ -2,13 +2,26 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, replace
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 import pandas as pd
 import pytest
 
 from wellscan.models import RiskState, ScanResult, Stage, Strategy, TradeLevels
 from wellscan.validation import SignalCase, ValidationStore
+
+
+class FakeSignalStore:
+    def __init__(self, loaded: list[dict] | None = None) -> None:
+        self.loaded = loaded or []
+        self.saved: list[tuple] = []
+
+    def load_signal_cases(self):
+        return self.loaded
+
+    def save_signal_case(self, case_id, engine_version, signaled_at, payload):
+        self.saved.append((case_id, engine_version, signaled_at, payload))
+        return True
 
 
 def test_target_and_stop_same_bar_is_conservatively_stop(tmp_path) -> None:
@@ -34,7 +47,31 @@ def test_live_validation_tracks_return_extremes_and_first_outcome(tmp_path) -> N
     assert later_loss.live_return_pct == pytest.approx(-1.5)
     assert later_loss.live_mfe_pct == pytest.approx(2.5)
     assert later_loss.live_mae_pct == pytest.approx(-1.5)
-    assert later_loss.live_outcome == "TARGET1"
+    assert later_loss.live_outcome == "TARGET1_STOP"
+
+
+def test_live_validation_advances_from_target1_to_target2(tmp_path) -> None:
+    store = ValidationStore(tmp_path)
+    case = SignalCase("two-targets", "005930", "2026-08-21T09:00:00+00:00", 100, 102, 104, 99, "눌림목", "v2")
+    store._path(case.case_id).write_text(json.dumps(asdict(case)), encoding="utf-8")
+
+    first = store.update_live(case, 102.2, "2026-08-21T09:05:00+00:00")
+    second = store.update_live(first, 104.1, "2026-08-21T09:10:00+00:00")
+
+    assert store.live_status(first) == "1차 목표 도달 · 2차 대기"
+    assert store.live_status(second) == "2차 목표 도달"
+    assert store.tracking_cases("v2") == []
+
+
+def test_daily_cases_use_each_markets_trading_date(tmp_path) -> None:
+    store = ValidationStore(tmp_path)
+    kr_case = SignalCase("kr-day", "KR:KRX:KR_REGULAR:005930", "2026-08-21T15:30:00+00:00", 100, 102, 104, 99, "눌림목", "daily", market="KR")
+    us_case = SignalCase("us-day", "US:NAS:US_REGULAR:AAPL", "2026-08-22T01:00:00+00:00", 100, 102, 104, 99, "눌림목", "daily", market="US")
+    for case in (kr_case, us_case):
+        store._path(case.case_id).write_text(json.dumps(asdict(case)), encoding="utf-8")
+
+    assert [case.case_id for case in store.daily_cases("daily", "KR", date(2026, 8, 22))] == ["kr-day"]
+    assert [case.case_id for case in store.daily_cases("daily", "US", date(2026, 8, 21))] == ["us-day"]
 
 
 def test_record_stops_at_exactly_ten_cases_per_engine(tmp_path) -> None:
@@ -164,7 +201,7 @@ def test_record_deduplicates_same_us_instrument_across_sessions(tmp_path) -> Non
     assert len(store.cases(engine_version="v-global")) == 1
 
 
-def test_record_limit_is_global_across_market_session_and_mode(tmp_path) -> None:
+def test_record_daily_limit_is_shared_across_market_session_and_mode(tmp_path) -> None:
     store = ValidationStore(tmp_path)
     for number in range(10):
         case = SignalCase(
@@ -194,7 +231,7 @@ def test_record_limit_is_global_across_market_session_and_mode(tmp_path) -> None
         conditions={"FINAL_BUY": True},
     )
 
-    assert store.record(result, "v-global-cap", market="US", session="US_PRE", mode="급등주") is None
+    assert store.record(result, "v-global-cap", market="US", session="US_PRE", mode="급등주", limit=10) is None
     assert len(store.cases(engine_version="v-global-cap")) == 10
 
 
@@ -244,3 +281,28 @@ def test_tracking_cases_are_global_across_session_and_mode(tmp_path) -> None:
         store._path(case.case_id).write_text(json.dumps(asdict(case)), encoding="utf-8")
 
     assert [case.case_id for case in store.tracking_cases("v-tracking")] == ["us-pre", "us-regular"]
+
+
+def test_durable_cases_are_restored_and_updates_are_upserted(tmp_path) -> None:
+    remote_case = SignalCase(
+        "remote",
+        "KR:KRX:KR_REGULAR:005930",
+        "2026-08-21T09:00:00+00:00",
+        100,
+        102,
+        104,
+        99,
+        "TREND_SWING",
+        "v-db",
+        display_name="삼성전자",
+    )
+    durable = FakeSignalStore([asdict(remote_case)])
+    store = ValidationStore(tmp_path, durable_store=durable)  # type: ignore[arg-type]
+
+    restored = store.cases(engine_version="v-db")
+    updated = store.update_live(restored[0], 102.5, "2026-08-21T09:05:00+00:00")
+
+    assert restored[0].display_name == "삼성전자"
+    assert updated.live_outcome == "TARGET1"
+    assert durable.saved[-1][0] == "remote"
+    assert durable.saved[-1][3]["live_outcome"] == "TARGET1"

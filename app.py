@@ -18,7 +18,7 @@ from wellscan.models import Candidate, Market, ScanResult, Stage, Strategy, Trad
 from wellscan.realtime import RealtimeHub
 from wellscan.sequence import SequenceStore
 from wellscan.sessions import session_exchange, session_status
-from wellscan.validation import ValidationStore
+from wellscan.validation import SignalCase, ValidationStore
 
 LOGGER = logging.getLogger(__name__)
 
@@ -191,6 +191,7 @@ def _confirm_live_breakout(candidate: Candidate, result: ScanResult, live_price:
         candidate.market.value,
         candidate.session.value,
         mode=mode,
+        display_name=candidate.name,
     )
     return confirmed
 
@@ -236,6 +237,22 @@ def _action_command(result: ScanResult) -> str:
     if result.stage == Stage.ENTRY_WAIT:
         return "지금 매수 금지 · 진입가격과 확인 조건 충족 대기"
     return "관찰만 · 진입 가능 또는 진입 대기로 승격될 때까지 매수 금지"
+
+
+def _tracking_rows(cases: list[SignalCase]) -> list[dict[str, str]]:
+    return [
+        {
+            "상태": validations().live_status(case),
+            "종목": case.display_name or case.symbol.split(":")[-1],
+            "진입가": price_text(case.entry),
+            "현재가": price_text(case.last_price),
+            "1차": price_text(case.target1),
+            "2차": price_text(case.target2),
+            "Hard Stop": price_text(case.hard_stop),
+            "신호시각": case.signaled_at[11:16],
+        }
+        for case in cases
+    ]
 
 
 def render_result(candidate: Candidate, result: ScanResult, *, actionable: bool = False) -> None:
@@ -387,6 +404,7 @@ def structure_results(candidates: tuple[Candidate, ...], completed_minute: int) 
                 candidate.market.value,
                 candidate.session.value,
                 mode=mode,
+                display_name=candidate.name,
             )
         for case in validations().cases():
             if case.symbol == candidate.key and case.market == candidate.market.value and case.session == candidate.session.value and not case.scored:
@@ -479,6 +497,15 @@ def live_cards() -> None:
         st.subheader("관찰후보")
         for candidate, result in watch_results:
             render_result(candidate, result)
+    daily = validations().daily_cases(ENGINE_VERSION, market.value)
+    ongoing = [case for case in daily if case.live_outcome in {None, "TARGET1"}]
+    closed = [case for case in daily if case.live_outcome in {"TARGET2", "STOP", "TARGET1_STOP"}]
+    if ongoing:
+        st.subheader("자동 추적 진행 중")
+        st.dataframe(_tracking_rows(ongoing), hide_index=True, use_container_width=True)
+    if closed:
+        with st.expander(f"오늘 종료 기록 · {len(closed)}개", expanded=False):
+            st.dataframe(_tracking_rows(closed), hide_index=True, use_container_width=True)
 
 
 live_cards()
@@ -487,7 +514,7 @@ live_cards()
 @st.fragment(run_every=5)
 def refresh_hidden_validation_tracking() -> None:
     """Refresh paper-signal prices without adding a validation panel to the UI."""
-    tracked = validations().tracking_cases(ENGINE_VERSION)[:10]
+    tracked = validations().tracking_cases(ENGINE_VERSION)[:100]
     current = {candidate.key: candidate for candidate in analysis_candidates}
     for case in tracked:
         candidate = _candidate_for_case(case.symbol, case.last_price, current)

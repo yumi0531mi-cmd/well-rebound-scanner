@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 import threading
 from dataclasses import dataclass
+from datetime import datetime
+from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import pandas as pd
@@ -13,6 +16,7 @@ from .indicators import normalize_bars
 LOGGER = logging.getLogger(__name__)
 TABLE_NAME = "scanner_minute_bars"
 AUTH_TABLE_NAME = "scanner_auth_cache"
+SIGNAL_TABLE_NAME = "scanner_signal_cases"
 MAX_BARS_PER_SYMBOL = 3000
 
 
@@ -84,6 +88,17 @@ class CockroachBarStore:
             )
             cursor.execute(
                 f"""
+                CREATE TABLE IF NOT EXISTS {SIGNAL_TABLE_NAME} (
+                    case_id STRING PRIMARY KEY,
+                    engine_version STRING NOT NULL,
+                    signaled_at TIMESTAMPTZ NOT NULL,
+                    payload JSONB NOT NULL,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+                """
+            )
+            cursor.execute(
+                f"""
                 CREATE TABLE IF NOT EXISTS {AUTH_TABLE_NAME} (
                     cache_key STRING PRIMARY KEY,
                     secret_value STRING NOT NULL,
@@ -136,6 +151,59 @@ class CockroachBarStore:
                             updated_at = now()
                         """,
                         (cache_key, secret_value, expires_at.to_pydatetime()),
+                    )
+            self._available, self._last_error = True, ""
+            return True
+        except Exception as exc:
+            self._record_error(exc)
+            return False
+
+    def load_signal_cases(self, engine_version: str | None = None, limit: int = 500) -> list[dict[str, Any]]:
+        try:
+            with self._lock, self._connect() as connection:
+                self._ensure_schema(connection)
+                with connection.cursor() as cursor:
+                    if engine_version is None:
+                        cursor.execute(
+                            f"SELECT payload FROM {SIGNAL_TABLE_NAME} ORDER BY signaled_at DESC LIMIT %s",
+                            (limit,),
+                        )
+                    else:
+                        cursor.execute(
+                            f"SELECT payload FROM {SIGNAL_TABLE_NAME} WHERE engine_version = %s "
+                            "ORDER BY signaled_at DESC LIMIT %s",
+                            (engine_version, limit),
+                        )
+                    rows = cursor.fetchall()
+            self._available, self._last_error = True, ""
+            payloads: list[dict[str, Any]] = []
+            for row in rows:
+                payload = row[0]
+                if isinstance(payload, str):
+                    payload = json.loads(payload)
+                if isinstance(payload, dict):
+                    payloads.append(dict(payload))
+            return payloads
+        except Exception as exc:
+            self._record_error(exc)
+            return []
+
+    def save_signal_case(self, case_id: str, engine_version: str, signaled_at: datetime, payload: dict[str, Any]) -> bool:
+        from psycopg.types.json import Jsonb
+
+        try:
+            with self._lock, self._connect() as connection:
+                self._ensure_schema(connection)
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        f"""
+                        INSERT INTO {SIGNAL_TABLE_NAME} (case_id, engine_version, signaled_at, payload)
+                        VALUES (%s, %s, %s, %s)
+                        ON CONFLICT (case_id) DO UPDATE SET
+                            payload = excluded.payload,
+                            updated_at = now()
+                        """,
+                        (case_id, engine_version, signaled_at, Jsonb(payload)),
                     )
             self._available, self._last_error = True, ""
             return True
