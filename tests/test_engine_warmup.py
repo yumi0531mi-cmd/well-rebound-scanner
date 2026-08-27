@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 import numpy as np
 import pandas as pd
 
-from wellscan.engine import MIN_ONE_MINUTE_BARS, evaluate
+from wellscan.engine import MIN_ONE_MINUTE_BARS, evaluate, valid_long_targets
 from wellscan.models import Stage
 from wellscan.sequence import SequenceStore
 
@@ -21,6 +21,13 @@ def bars(count: int) -> pd.DataFrame:
         },
         index=index,
     )
+
+
+def test_long_targets_never_allow_negative_or_reversed_reward() -> None:
+    assert valid_long_targets(100, 102, 105) is True
+    assert valid_long_targets(100, 99, 105) is False
+    assert valid_long_targets(100, 102, 101) is False
+    assert valid_long_targets(100, None, None) is False
 
 
 def test_ma60_readiness_is_separate_from_other_structure_readiness(tmp_path) -> None:

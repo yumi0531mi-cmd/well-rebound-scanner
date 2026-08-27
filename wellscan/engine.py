@@ -18,6 +18,11 @@ WELL_MIN_5M_BARS = 25
 ENTRY_MIN_3M_BARS = 25
 
 
+def valid_long_targets(entry: float | None, target1: float | None, target2: float | None) -> bool:
+    """A long-only signal must have strictly increasing entry and targets."""
+    return bool(entry and target1 and target2 and 0 < entry < target1 < target2)
+
+
 def _slope(values: pd.Series, periods: int = 5) -> float:
     sample = values.dropna().tail(periods)
     if len(sample) < periods or float(sample.iloc[-1]) == 0:
@@ -197,6 +202,10 @@ def evaluate(
     target1 = primary.target1 if primary else None
     target2 = primary.target2 if primary else None
     soft_stop = primary.soft_stop if primary else None
+    invalid_long_targets = entry is not None and not valid_long_targets(entry, target1, target2)
+    if invalid_long_targets:
+        target1 = None
+        target2 = None
     support_candidates = [float(latest3.ema9), float(latest3.vwap)] if latest3 is not None else []
     rebuy = max((value for value in support_candidates if value < live_price), default=None)
 
@@ -204,11 +213,14 @@ def evaluate(
     if primary is not None:
         conditions.update(primary.conditions)
     conditions["진입가격 도달"] = breakout if entry_data_ready else None
-    conditions["FINAL_BUY"] = state.stage == Stage.FINAL_BUY and risk_state == RiskState.NORMAL if entry_data_ready else None
+    conditions["상승 목표구조 유효"] = not invalid_long_targets if entry is not None else None
     available_conditions = [value for value in conditions.values() if value is not None]
     score = primary.strength if primary else (int(round(sum(value is True for value in available_conditions) / len(available_conditions) * 100)) if available_conditions else 0)
     all_structure_unavailable = not transition_ready and not well_data_ready and not entry_data_ready
     stage = Stage.DATA_WAIT if all_structure_unavailable else state.stage
+    if invalid_long_targets and stage in {Stage.ENTRY_WAIT, Stage.FINAL_BUY}:
+        stage = Stage.MISSED
+    conditions["FINAL_BUY"] = stage == Stage.FINAL_BUY and risk_state == RiskState.NORMAL if entry_data_ready else None
     if stage == Stage.FINAL_BUY:
         basis = f"{strategy.value} 진입 확정 · {primary.basis}" if primary else "진입 확정"
     elif entry:
