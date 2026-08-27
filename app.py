@@ -9,6 +9,8 @@ from time import perf_counter
 import streamlit as st
 
 from wellscan import APP_VERSION, ENGINE_VERSION
+from wellscan.candidates import MAX_ANALYSIS_CANDIDATES
+from wellscan.candidates import analysis_candidates as select_analysis_candidates
 from wellscan.engine import evaluate
 from wellscan.history import HistoryCache
 from wellscan.kis import KISClient, KISError
@@ -84,8 +86,11 @@ st.markdown(
 .block-container{max-width:1500px;padding:1rem 1rem 3rem}.hero h1{font-size:clamp(1.65rem,4vw,2.6rem);margin:0}.hero p{color:#64748b}
 .version{font-size:.8rem;color:#64748b;border:1px solid #dbe3ee;border-radius:10px;padding:.45rem .65rem;margin:.4rem 0 1rem}
 .symbol{font-size:1.25rem;font-weight:850}.stage{font-size:.9rem;font-weight:750}.good{color:#137a43}.wait{color:#9a6700}.bad{color:#b4232d}
+.action-tile{border:1px solid #dbe3ee;border-radius:12px;padding:.75rem;background:#fff}
+.action-tile.buy{border-color:#2f9e66;background:#f2fbf6}.action-tile.waiting{border-color:#e0a800;background:#fffaf0}
+.action-title{font-size:1.05rem;font-weight:850}.action-line{font-size:.9rem;margin-top:.25rem}.action-command{font-weight:800;margin-top:.5rem}
 [data-testid="stMetric"]{border:1px solid #dbe3ee;border-radius:12px;padding:.55rem;background:#f8fafc}
-@media(max-width:700px){.block-container{padding:.6rem}.hero h1{font-size:1.55rem}}
+@media(max-width:700px){.block-container{padding:.6rem}.hero h1{font-size:1.55rem}.action-tile{padding:.65rem}[data-testid="stMetric"]{padding:.4rem}}
 </style>
 """,
     unsafe_allow_html=True,
@@ -215,9 +220,47 @@ def _candidate_for_case(case_symbol: str, last_price: float | None, current: dic
     )
 
 
-def render_result(candidate: Candidate, result: ScanResult) -> None:
+def _entry_distance_text(live_price: float, entry: float | None) -> str:
+    if not entry or live_price <= 0:
+        return "진입가 미확인"
+    distance = (entry - live_price) / live_price * 100
+    if abs(distance) < 0.05:
+        return "진입가 도달"
+    direction = "상승" if distance > 0 else "하락"
+    return f"진입가까지 {direction} {abs(distance):.2f}%"
+
+
+def _action_command(result: ScanResult) -> str:
+    if result.stage == Stage.FINAL_BUY:
+        return "현재 진입구간 · 구조 확인 후 분할진입 검토"
+    if result.stage == Stage.ENTRY_WAIT:
+        return "지금 매수 금지 · 진입가격과 확인 조건 충족 대기"
+    return "관찰만 · 진입 가능 또는 진입 대기로 승격될 때까지 매수 금지"
+
+
+def render_result(candidate: Candidate, result: ScanResult, *, actionable: bool = False) -> None:
     quote = _live_quote(candidate)
     result = _confirm_live_breakout(candidate, result, quote[0])
+    levels = result.levels
+    if actionable:
+        tile_class = "buy" if result.stage == Stage.FINAL_BUY else "waiting"
+        status_text = "지금 진입 가능" if result.stage == Stage.FINAL_BUY else "진입 대기"
+        st.markdown(
+            f'<div class="action-tile {tile_class}">'
+            f'<div class="action-title">{html.escape(candidate.symbol)} · {html.escape(candidate.name)}</div>'
+            f'<div class="stage {"good" if tile_class == "buy" else "wait"}">{status_text} · {html.escape(result.strategy.value)}</div>'
+            f'<div class="action-line">현재가 {price_text(quote[0])} · 진입구간 {price_text(levels.entry)}</div>'
+            f'<div class="action-line">{_entry_distance_text(quote[0], levels.entry)}</div>'
+            f'<div class="action-line">손절 {price_text(levels.hard_stop)} · 1차 {price_text(levels.target1)} · 2차 {price_text(levels.target2)}</div>'
+            f'<div class="action-command">{_action_command(result)}</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+        st.caption(
+            f"데이터 {quote[2].strftime('%H:%M:%S')} UTC · {quote[3]} · "
+            f"구조 무효: Hard Stop {price_text(levels.hard_stop)}"
+        )
+        return
     stage_class = "good" if result.stage == Stage.FINAL_BUY else "bad" if result.stage in {Stage.EXCLUDED, Stage.MISSED} else "wait"
     with st.container(border=True):
         st.markdown(
@@ -278,7 +321,10 @@ with st.sidebar:
         )
         maximum_price = st.number_input("최대 가격(USD)", 1.0, 10000.0, 500.0, 5.0)
     st.caption("후보풀: KIS 거래량 TOP100 ∪ 거래대금 TOP100 · 미국 NAS/NYS/AMS 통합")
-    st.caption("내부 분석: 상위 10개 · 구조 계산: 새 완료봉 60초 · 현재가: WebSocket 우선")
+    st.caption(
+        f"내부 분석: 모드 통과 종목 최대 {MAX_ANALYSIS_CANDIDATES}개 · "
+        "구조 계산: 새 완료봉 60초 · 현재가: WebSocket 우선"
+    )
 
 st.markdown('<div class="hero"><h1>다중 매매기법 실전 스캐너</h1><p>차트 유형 분류 → 구조 진입가·손절가·목표가 → 도달 예상시간</p></div>', unsafe_allow_html=True)
 st.markdown(
@@ -304,8 +350,7 @@ if mode == "일반주":
     filtered = [candidate for candidate in pool if minimum_price <= candidate.price <= maximum_price and 0 <= candidate.change_pct <= 7]
 else:
     filtered = [candidate for candidate in pool if minimum_price <= candidate.price <= maximum_price and 7 < candidate.change_pct <= 20]
-analysis_count = min(10, len(filtered))
-analysis_candidates = filtered[:analysis_count]
+analysis_candidates = select_analysis_candidates(filtered)
 tracked_validation_candidates = [
     candidate for case in validations().tracking_cases(ENGINE_VERSION) if (candidate := _candidate_for_case(case.symbol, case.last_price, {item.key: item for item in analysis_candidates})) is not None
 ]
@@ -399,7 +444,11 @@ stage_priority = {
     Stage.MISSED: 1,
     Stage.EXCLUDED: 0,
 }
-visible = sorted(results, key=lambda item: (stage_priority[item[1].stage], item[1].score), reverse=True)[:display_count]
+ordered = sorted(results, key=lambda item: (stage_priority[item[1].stage], item[1].score), reverse=True)
+final_buy_results = [item for item in ordered if item[1].stage == Stage.FINAL_BUY]
+entry_wait_results = [item for item in ordered if item[1].stage == Stage.ENTRY_WAIT]
+watch_results = [item for item in ordered if item[1].stage not in {Stage.FINAL_BUY, Stage.ENTRY_WAIT}][:display_count]
+visible = final_buy_results + entry_wait_results + watch_results
 counts = {stage: sum(result.stage == stage for _, result in results) for stage in Stage}
 st.caption(
     f"후보풀 {len(pool)} · 모드 통과 {len(filtered)} · 내부 분석 {len(results)} · 표시 {len(visible)} · "
@@ -414,8 +463,22 @@ def live_cards() -> None:
     current_minute = int(datetime.now(UTC).timestamp() // 60)
     if current_minute != st.session_state.get("structure_minute"):
         st.rerun()
-    for candidate, result in visible:
-        render_result(candidate, result)
+    buy_names = " · ".join(candidate.name for candidate, _ in final_buy_results) or "없음"
+    wait_names = " · ".join(candidate.name for candidate, _ in entry_wait_results) or "없음"
+    st.markdown(f"**지금 진입 가능:** {html.escape(buy_names)}")
+    st.markdown(f"**진입 대기:** {html.escape(wait_names)}")
+    if final_buy_results:
+        st.subheader("지금 진입 가능")
+        for candidate, result in final_buy_results:
+            render_result(candidate, result, actionable=True)
+    if entry_wait_results:
+        st.subheader("진입 대기 · 지금 매수 금지")
+        for candidate, result in entry_wait_results:
+            render_result(candidate, result, actionable=True)
+    if watch_results:
+        st.subheader("관찰후보")
+        for candidate, result in watch_results:
+            render_result(candidate, result)
 
 
 live_cards()
