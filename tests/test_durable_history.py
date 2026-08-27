@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from wellscan.bar_store import StoreStatus
+from wellscan.bar_store import StoreStatus, _render_safe_database_url
 from wellscan.history import HistoryCache
 
 
@@ -28,6 +28,16 @@ class FakeDurableStore:
 
     def status(self) -> StoreStatus:
         return StoreStatus(True, True, "CockroachDB", "")
+
+
+def test_missing_copied_ca_path_uses_system_trust_store() -> None:
+    url = "postgresql://user:secret@example.com:26257/defaultdb?sslmode=verify-full&sslrootcert=%2Fopt%2Frender%2F.postgresql%2Froot.crt"
+
+    normalized = _render_safe_database_url(url)
+
+    assert "sslmode=verify-full" in normalized
+    assert "sslrootcert=system" in normalized
+    assert "secret" in normalized
 
 
 def test_remote_history_restores_empty_local_cache(tmp_path) -> None:

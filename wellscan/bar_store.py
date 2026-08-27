@@ -4,6 +4,7 @@ import logging
 import os
 import threading
 from dataclasses import dataclass
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import pandas as pd
 
@@ -12,6 +13,16 @@ from .indicators import normalize_bars
 LOGGER = logging.getLogger(__name__)
 TABLE_NAME = "scanner_minute_bars"
 MAX_BARS_PER_SYMBOL = 3000
+
+
+def _render_safe_database_url(database_url: str) -> str:
+    """Use the container trust store when a copied Cockroach URL names a local CA file."""
+    parts = urlsplit(database_url.strip())
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+    root_cert = query.get("sslrootcert", "")
+    if root_cert and root_cert != "system" and not os.path.isfile(root_cert):
+        query["sslrootcert"] = "system"
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
 
 
 @dataclass(frozen=True)
@@ -26,7 +37,7 @@ class CockroachBarStore:
     """Durable minute-bar store; local CSV remains an L1 cache."""
 
     def __init__(self, database_url: str):
-        self.database_url = database_url.strip()
+        self.database_url = _render_safe_database_url(database_url)
         self._lock = threading.Lock()
         self._initialized = False
         self._available = False
