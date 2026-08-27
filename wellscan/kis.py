@@ -13,6 +13,7 @@ import pandas as pd
 import requests
 from filelock import FileLock
 
+from .bar_store import CockroachBarStore
 from .models import Candidate, Market, TradingSession
 
 
@@ -23,7 +24,7 @@ class KISError(RuntimeError):
 class KISClient:
     """Read-only KIS client for rankings, current price and minute history."""
 
-    def __init__(self, cache_root: str | Path = ".scanner_data/auth"):
+    def __init__(self, cache_root: str | Path = ".scanner_data/auth", auth_store: CockroachBarStore | None = None):
         self.app_key = os.getenv("KIS_APP_KEY", "").strip()
         self.app_secret = os.getenv("KIS_APP_SECRET", "").strip()
         self.base_url = os.getenv("KIS_BASE_URL", "https://openapi.koreainvestment.com:9443").rstrip("/")
@@ -34,6 +35,7 @@ class KISClient:
         self._last_request = 0.0
         self._approval_key = ""
         self._approval_expires = datetime.min.replace(tzinfo=UTC)
+        self._auth_store = auth_store if auth_store is not None else CockroachBarStore.from_environment()
 
     @property
     def configured(self) -> bool:
@@ -61,6 +63,18 @@ class KISClient:
                         return str(payload["access_token"])
                 except (OSError, ValueError, KeyError, TypeError):
                     pass
+            if self._auth_store is not None:
+                durable = self._auth_store.load_auth("kis_access_token")
+                if durable is not None:
+                    token, expiry_value = durable
+                    expiry = expiry_value.to_pydatetime()
+                    if expiry > datetime.now(UTC) + timedelta(minutes=10):
+                        temporary = path.with_suffix(".tmp")
+                        temporary.write_text(
+                            json.dumps({"access_token": token, "expires_at": expiry.isoformat()}), encoding="utf-8"
+                        )
+                        temporary.replace(path)
+                        return token
             if not self.configured:
                 raise KISError("KIS_APP_KEY/KIS_APP_SECRET 환경변수가 필요합니다.")
             response = self.session.post(
@@ -83,16 +97,24 @@ class KISClient:
             raise KISError("KIS 토큰 응답에 access_token이 없습니다.")
         expires_in = max(int(body.get("expires_in") or 86400) - 600, 600)
         temporary = path.with_suffix(".tmp")
-        temporary.write_text(
-            json.dumps({"access_token": token, "expires_at": (datetime.now(UTC) + timedelta(seconds=expires_in)).isoformat()}),
-            encoding="utf-8",
-        )
+        expiry = datetime.now(UTC) + timedelta(seconds=expires_in)
+        temporary.write_text(json.dumps({"access_token": token, "expires_at": expiry.isoformat()}), encoding="utf-8")
         temporary.replace(path)
+        if self._auth_store is not None:
+            self._auth_store.save_auth("kis_access_token", token, pd.Timestamp(expiry))
         return token
 
     def websocket_approval_key(self) -> str:
         if self._approval_key and self._approval_expires > datetime.now(UTC):
             return self._approval_key
+        if self._auth_store is not None:
+            durable = self._auth_store.load_auth("kis_websocket_approval")
+            if durable is not None:
+                key, expiry_value = durable
+                expiry = expiry_value.to_pydatetime()
+                if expiry > datetime.now(UTC) + timedelta(minutes=10):
+                    self._approval_key, self._approval_expires = key, expiry
+                    return key
         response = self.session.post(
             f"{self.base_url}/oauth2/Approval",
             json={"grant_type": "client_credentials", "appkey": self.app_key, "secretkey": self.app_secret},
@@ -105,6 +127,8 @@ class KISClient:
             raise KISError("WebSocket 접속키가 비어 있습니다.")
         self._approval_key = key
         self._approval_expires = datetime.now(UTC) + timedelta(hours=23)
+        if self._auth_store is not None:
+            self._auth_store.save_auth("kis_websocket_approval", key, pd.Timestamp(self._approval_expires))
         return key
 
     def _throttle(self) -> None:

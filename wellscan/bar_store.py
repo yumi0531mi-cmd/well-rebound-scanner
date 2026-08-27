@@ -12,6 +12,7 @@ from .indicators import normalize_bars
 
 LOGGER = logging.getLogger(__name__)
 TABLE_NAME = "scanner_minute_bars"
+AUTH_TABLE_NAME = "scanner_auth_cache"
 MAX_BARS_PER_SYMBOL = 3000
 
 
@@ -81,6 +82,16 @@ class CockroachBarStore:
                 )
                 """
             )
+            cursor.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS {AUTH_TABLE_NAME} (
+                    cache_key STRING PRIMARY KEY,
+                    secret_value STRING NOT NULL,
+                    expires_at TIMESTAMPTZ NOT NULL,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+                """
+            )
         self._initialized = True
 
     def probe(self) -> bool:
@@ -88,6 +99,44 @@ class CockroachBarStore:
         try:
             with self._lock, self._connect() as connection:
                 self._ensure_schema(connection)
+            self._available, self._last_error = True, ""
+            return True
+        except Exception as exc:
+            self._record_error(exc)
+            return False
+
+    def load_auth(self, cache_key: str) -> tuple[str, pd.Timestamp] | None:
+        try:
+            with self._lock, self._connect() as connection:
+                self._ensure_schema(connection)
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        f"SELECT secret_value, expires_at FROM {AUTH_TABLE_NAME} WHERE cache_key = %s",
+                        (cache_key,),
+                    )
+                    row = cursor.fetchone()
+            self._available, self._last_error = True, ""
+            return (str(row[0]), pd.Timestamp(row[1])) if row else None
+        except Exception as exc:
+            self._record_error(exc)
+            return None
+
+    def save_auth(self, cache_key: str, secret_value: str, expires_at: pd.Timestamp) -> bool:
+        try:
+            with self._lock, self._connect() as connection:
+                self._ensure_schema(connection)
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        f"""
+                        INSERT INTO {AUTH_TABLE_NAME} (cache_key, secret_value, expires_at)
+                        VALUES (%s, %s, %s)
+                        ON CONFLICT (cache_key) DO UPDATE SET
+                            secret_value = excluded.secret_value,
+                            expires_at = excluded.expires_at,
+                            updated_at = now()
+                        """,
+                        (cache_key, secret_value, expires_at.to_pydatetime()),
+                    )
             self._available, self._last_error = True, ""
             return True
         except Exception as exc:
