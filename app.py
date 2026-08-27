@@ -236,7 +236,11 @@ def _action_command(result: ScanResult) -> str:
         return "현재 진입구간 · 구조 확인 후 분할진입 검토"
     if result.stage == Stage.ENTRY_WAIT:
         return "지금 매수 금지 · 진입가격과 확인 조건 충족 대기"
-    return "관찰만 · 진입 가능 또는 진입 대기로 승격될 때까지 매수 금지"
+    return "관찰만 · 현재 진입 조건 충족 또는 진입 대기로 승격될 때까지 매수 금지"
+
+
+def _stage_text(stage: Stage) -> str:
+    return "현재 진입 조건 충족" if stage == Stage.FINAL_BUY else stage.value
 
 
 def _tracking_rows(cases: list[SignalCase]) -> list[dict[str, str]]:
@@ -261,7 +265,7 @@ def render_result(candidate: Candidate, result: ScanResult, *, actionable: bool 
     levels = result.levels
     if actionable:
         tile_class = "buy" if result.stage == Stage.FINAL_BUY else "waiting"
-        status_text = "지금 진입 가능" if result.stage == Stage.FINAL_BUY else "진입 대기"
+        status_text = _stage_text(result.stage)
         st.markdown(
             f'<div class="action-tile {tile_class}">'
             f'<div class="action-title">{html.escape(candidate.symbol)} · {html.escape(candidate.name)}</div>'
@@ -282,7 +286,7 @@ def render_result(candidate: Candidate, result: ScanResult, *, actionable: bool 
     with st.container(border=True):
         st.markdown(
             f'<div class="symbol">{html.escape(candidate.symbol)} · {html.escape(candidate.name)}</div>'
-            f'<div class="stage {stage_class}">{html.escape(result.stage.value)} · {result.strategy.value}</div>',
+            f'<div class="stage {stage_class}">{html.escape(_stage_text(result.stage))} · {result.strategy.value}</div>',
             unsafe_allow_html=True,
         )
         _live_price_content(quote)
@@ -470,7 +474,7 @@ visible = final_buy_results + entry_wait_results + watch_results
 counts = {stage: sum(result.stage == stage for _, result in results) for stage in Stage}
 st.caption(
     f"후보풀 {len(pool)} · 모드 통과 {len(filtered)} · 내부 분석 {len(results)} · 표시 {len(visible)} · "
-    f"진입가능 {counts[Stage.FINAL_BUY]} · 진입대기 {counts[Stage.ENTRY_WAIT]} · 데이터수집 {counts[Stage.DATA_WAIT]}"
+    f"현재 진입 조건 충족 {counts[Stage.FINAL_BUY]} · 진입대기 {counts[Stage.ENTRY_WAIT]} · 데이터수집 {counts[Stage.DATA_WAIT]}"
 )
 st.session_state["structure_minute"] = minute_bucket
 
@@ -483,10 +487,10 @@ def live_cards() -> None:
         st.rerun()
     buy_names = " · ".join(candidate.name for candidate, _ in final_buy_results) or "없음"
     wait_names = " · ".join(candidate.name for candidate, _ in entry_wait_results) or "없음"
-    st.markdown(f"**지금 진입 가능:** {html.escape(buy_names)}")
+    st.markdown(f"**현재 진입 조건 충족:** {html.escape(buy_names)}")
     st.markdown(f"**진입 대기:** {html.escape(wait_names)}")
     if final_buy_results:
-        st.subheader("지금 진입 가능")
+        st.subheader("현재 진입 조건 충족")
         for candidate, result in final_buy_results:
             render_result(candidate, result, actionable=True)
     if entry_wait_results:
