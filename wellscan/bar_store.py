@@ -51,7 +51,12 @@ class CockroachBarStore:
     def _connect(self):
         import psycopg
 
-        return psycopg.connect(self.database_url, autocommit=True, connect_timeout=10)
+        return psycopg.connect(
+            self.database_url,
+            autocommit=True,
+            connect_timeout=10,
+            sslrootcert="system",
+        )
 
     def _ensure_schema(self, connection) -> None:
         if self._initialized:
