@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import threading
 from collections.abc import Iterator
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
@@ -18,6 +19,8 @@ from .kis import KISClient
 from .models import Candidate, Market
 from .sessions import filter_session_bars, session_exchange
 
+LOGGER = logging.getLogger(__name__)
+
 
 @dataclass(frozen=True)
 class BackfillMetrics:
@@ -31,6 +34,7 @@ class BackfillMetrics:
     load_seconds: float
     api_seconds: float
     total_seconds: float
+    error: str = ""
 
     def diagnostics(self) -> dict[str, Any]:
         return asdict(self)
@@ -226,7 +230,26 @@ class HistoryCache:
                 executor.submit(self.backfill_candidate, client, candidate, target_bars): candidate for candidate in pending
             }
             for future in as_completed(futures):
-                yield futures[future], future.result()
+                candidate = futures[future]
+                try:
+                    yield candidate, future.result()
+                except Exception as exc:
+                    LOGGER.warning(
+                        "history_backfill_failed symbol=%s error=%s",
+                        candidate.key,
+                        exc,
+                    )
+                    self._metrics[candidate.key] = BackfillMetrics(
+                        symbol=candidate.key,
+                        cache_hit=False,
+                        cached_before=0,
+                        cached_after=0,
+                        api_calls=0,
+                        load_seconds=0.0,
+                        api_seconds=0.0,
+                        total_seconds=0.0,
+                        error=f"{type(exc).__name__}: {exc}",
+                    )
 
     def schedule_warmup(self, client: KISClient, candidates: tuple[Candidate, ...]) -> None:
         """Continue the MA60 cache warm-up after each candidate has an initial card.

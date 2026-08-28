@@ -491,8 +491,19 @@ def build_scan_snapshot(
         )
         is not None
     ]
-    realtime().configure(loaded_analysis + tracked)
     loaded_results = structure_results(tuple(loaded_analysis), completed_minute, selected_mode)
+    result_by_key = {candidate.key: result for candidate, result in loaded_results}
+    realtime_priority = sorted(
+        loaded_analysis,
+        key=lambda candidate: (
+            result_by_key.get(candidate.key) is not None
+            and result_by_key[candidate.key].stage in {Stage.FINAL_BUY, Stage.ENTRY_WAIT},
+            result_by_key.get(candidate.key) is not None
+            and result_by_key[candidate.key].stage == Stage.FINAL_BUY,
+        ),
+        reverse=True,
+    )
+    realtime().configure(realtime_priority + tracked)
     return ScanSnapshot(
         tuple(loaded_pool),
         tuple(loaded_filtered),

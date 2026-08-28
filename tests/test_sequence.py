@@ -6,6 +6,42 @@ from wellscan.models import Stage
 from wellscan.sequence import SequenceStore
 
 
+class FakeDurableSequenceStore:
+    def __init__(self) -> None:
+        self.states: dict[str, dict[str, object]] = {}
+
+    def load_sequence_state(self, symbol: str):
+        payload = self.states.get(symbol.upper())
+        return dict(payload) if payload else None
+
+    def save_sequence_state(self, symbol: str, payload: dict[str, object]) -> bool:
+        self.states[symbol.upper()] = dict(payload)
+        return True
+
+
+def test_sequence_restores_from_durable_store_after_local_loss(tmp_path) -> None:
+    durable = FakeDurableSequenceStore()
+    now = datetime(2026, 8, 21, 1, 0, tzinfo=UTC)
+    first = SequenceStore(tmp_path / "first", durable_store=durable)  # type: ignore[arg-type]
+    first.advance(
+        "NVDA",
+        trend_ready=True,
+        setup_ready=True,
+        breakout=False,
+        missed=False,
+        excluded=False,
+        candidate_entry=101,
+        candidate_hard_stop=99,
+        now=now,
+    )
+
+    restored = SequenceStore(tmp_path / "after-restart", durable_store=durable).load("NVDA")  # type: ignore[arg-type]
+
+    assert restored.stage == Stage.ENTRY_WAIT
+    assert restored.entry_price == 101
+    assert restored.entry_hard_stop == 99
+
+
 def test_ordered_sequence_and_final_buy_persistence(tmp_path) -> None:
     store = SequenceStore(tmp_path)
     now = datetime(2026, 8, 21, 1, 0, tzinfo=UTC)

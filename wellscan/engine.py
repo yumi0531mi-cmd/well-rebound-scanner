@@ -14,6 +14,7 @@ from .sequence import SequenceStore
 # strict alignment requirement, but is not a global gate for other conditions.
 MIN_ONE_MINUTE_BARS = 900
 TRANSITION_MIN_15M_BARS = 12
+OPPORTUNITY_MIN_15M_BARS = 20
 WELL_MIN_5M_BARS = 25
 ENTRY_MIN_3M_BARS = 25
 
@@ -102,6 +103,8 @@ def _readiness_reasons(frame15: pd.DataFrame, frame5: pd.DataFrame, frame3: pd.D
     reasons: list[str] = []
     if len(frame15) < TRANSITION_MIN_15M_BARS:
         reasons.append(f"15분 상승전환 준비: 완료봉 {len(frame15)}/{TRANSITION_MIN_15M_BARS}")
+    elif len(frame15) < OPPORTUNITY_MIN_15M_BARS:
+        reasons.append(f"15분 전략분류 준비: 완료봉 {len(frame15)}/{OPPORTUNITY_MIN_15M_BARS}")
     if len(frame15) < 60:
         reasons.append(f"15분 MA60 정배열 미확정: 완료봉 {len(frame15)}/60")
     if len(frame5) < WELL_MIN_5M_BARS:
@@ -125,6 +128,7 @@ def evaluate(
     frame5 = completed_resample(bars, 5)
     frame3 = completed_resample(bars, 3)
     transition_ready = len(frame15) >= TRANSITION_MIN_15M_BARS
+    opportunity_data_ready = len(frame15) >= OPPORTUNITY_MIN_15M_BARS
     ma60_ready = len(frame15) >= 60
     well_data_ready = len(frame5) >= WELL_MIN_5M_BARS
     entry_data_ready = len(frame3) >= ENTRY_MIN_3M_BARS
@@ -137,7 +141,7 @@ def evaluate(
     net_swing, persistence, confidence, fatigue = _swing_quality(frame5) if well_data_ready else (None, None, None, None)
 
     latest3 = data3.iloc[-1] if entry_data_ready else None
-    opportunities = classify(frame15, frame5, frame3, live_price, session) if transition_ready and well_data_ready and entry_data_ready else ()
+    opportunities = classify(frame15, frame5, frame3, live_price, session) if opportunity_data_ready and well_data_ready and entry_data_ready else ()
     primary = opportunities[0] if opportunities else None
     strategy = primary.strategy if primary else legacy_strategy
     trend_label, structural_swing = trend_description(frame15, frame5) if transition_ready and well_data_ready else ("미확정", None)
@@ -258,6 +262,7 @@ def evaluate(
             "bars_3m": len(frame3),
             "ma60_ready": ma60_ready,
             "transition_ready": transition_ready,
+            "opportunity_data_ready": opportunity_data_ready,
             "well_data_ready": well_data_ready,
             "entry_data_ready": entry_data_ready,
             "rebound_high": rebound_high,
