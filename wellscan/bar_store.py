@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import threading
 from dataclasses import dataclass
 from datetime import datetime
+from time import monotonic
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -18,6 +20,11 @@ TABLE_NAME = "scanner_minute_bars"
 AUTH_TABLE_NAME = "scanner_auth_cache"
 SIGNAL_TABLE_NAME = "scanner_signal_cases"
 MAX_BARS_PER_SYMBOL = 3000
+DB_RETRY_COOLDOWN_SECONDS = 60
+
+
+class StoreCooldownError(RuntimeError):
+    """Internal fast-fail while a failed database connection is cooling down."""
 
 
 def _render_safe_database_url(database_url: str) -> str:
@@ -47,6 +54,7 @@ class CockroachBarStore:
         self._initialized = False
         self._available = False
         self._last_error = ""
+        self._retry_after = 0.0
 
     @classmethod
     def from_environment(cls) -> CockroachBarStore | None:
@@ -56,15 +64,19 @@ class CockroachBarStore:
     def _connect(self):
         import psycopg
 
+        if monotonic() < self._retry_after:
+            raise StoreCooldownError("database retry cooldown active")
         root_cert = "/etc/secrets/root.crt"
         if not os.path.isfile(root_cert):
             root_cert = "system"
-        return psycopg.connect(
+        connection = psycopg.connect(
             self.database_url,
             autocommit=True,
             connect_timeout=10,
             sslrootcert=root_cert,
         )
+        self._retry_after = 0.0
+        return connection
 
     def _ensure_schema(self, connection) -> None:
         if self._initialized:
@@ -275,9 +287,15 @@ class CockroachBarStore:
             return False
 
     def _record_error(self, exc: Exception) -> None:
+        if isinstance(exc, StoreCooldownError):
+            return
         self._available = False
-        self._last_error = f"{type(exc).__name__}: {exc}"[:300]
-        LOGGER.error("CockroachDB minute-bar store failed: %s", type(exc).__name__)
+        error_text = " ".join(str(exc).split())
+        error_text = re.sub(r"(?i)(password\s*=\s*)\S+", r"\1***", error_text)
+        error_text = re.sub(r"(?i)(postgres(?:ql)?://[^:/\s]+:)[^@\s]+@", r"\1***@", error_text)
+        self._last_error = f"{type(exc).__name__}: {error_text}"[:300]
+        self._retry_after = monotonic() + DB_RETRY_COOLDOWN_SECONDS
+        LOGGER.error("CockroachDB minute-bar store failed: %s", self._last_error)
 
     def status(self) -> StoreStatus:
         return StoreStatus(True, self._available, "CockroachDB", self._last_error)

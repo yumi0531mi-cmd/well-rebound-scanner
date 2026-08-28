@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from wellscan.bar_store import StoreStatus, _render_safe_database_url
+from wellscan.bar_store import CockroachBarStore, StoreCooldownError, StoreStatus, _render_safe_database_url
 from wellscan.history import HistoryCache
 
 
@@ -38,6 +38,21 @@ def test_missing_copied_ca_path_uses_system_trust_store() -> None:
     assert "sslmode=verify-full" in normalized
     assert "sslrootcert=system" in normalized
     assert "secret" in normalized
+
+
+def test_database_failure_uses_cooldown_and_redacts_password() -> None:
+    store = CockroachBarStore("postgresql://user:secret@example.com:26257/defaultdb")
+
+    store._record_error(RuntimeError("connection postgresql://user:secret@example.com failed password=secret"))
+
+    assert "secret" not in store.status().last_error
+    assert "***" in store.status().last_error
+    try:
+        store._connect()
+    except StoreCooldownError:
+        pass
+    else:
+        raise AssertionError("cooldown must prevent an immediate reconnect")
 
 
 def test_remote_history_restores_empty_local_cache(tmp_path) -> None:
