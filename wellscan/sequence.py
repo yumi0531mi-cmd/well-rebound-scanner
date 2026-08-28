@@ -41,10 +41,15 @@ class SequenceStore:
         self,
         root: str | Path = ".scanner_data/sequences",
         durable_store: CockroachBarStore | None = None,
+        use_environment: bool = True,
     ):
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
-        self._durable_store = durable_store if durable_store is not None else CockroachBarStore.from_environment()
+        self._durable_store = (
+            durable_store
+            if durable_store is not None
+            else CockroachBarStore.from_environment() if use_environment else None
+        )
 
     def _path(self, symbol: str) -> Path:
         clean = "".join(character for character in symbol.upper() if character.isalnum() or character in "._-")
