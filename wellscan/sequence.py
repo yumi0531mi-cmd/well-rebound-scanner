@@ -7,6 +7,7 @@ from pathlib import Path
 
 from filelock import FileLock
 
+from .bar_store import CockroachBarStore
 from .models import Stage
 
 
@@ -36,9 +37,14 @@ class SequenceState:
 class SequenceStore:
     """Persist ordered signal progress without sharing state with another scanner."""
 
-    def __init__(self, root: str | Path = ".scanner_data/sequences"):
+    def __init__(
+        self,
+        root: str | Path = ".scanner_data/sequences",
+        durable_store: CockroachBarStore | None = None,
+    ):
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
+        self._durable_store = durable_store if durable_store is not None else CockroachBarStore.from_environment()
 
     def _path(self, symbol: str) -> Path:
         clean = "".join(character for character in symbol.upper() if character.isalnum() or character in "._-")
@@ -46,16 +52,23 @@ class SequenceStore:
 
     def load(self, symbol: str) -> SequenceState:
         path = self._path(symbol)
-        if not path.exists():
-            return SequenceState(symbol=symbol.upper())
+        payload = None
         try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
+            if path.exists():
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            elif self._durable_store is not None:
+                payload = self._durable_store.load_sequence_state(symbol)
+            if not isinstance(payload, dict):
+                return SequenceState(symbol=symbol.upper())
             payload["stage"] = Stage(payload.get("stage", Stage.CANDIDATE))
-            return SequenceState(**payload)
+            state = SequenceState(**payload)
+            if not path.exists():
+                self._save_local(state)
+            return state
         except (OSError, ValueError, TypeError):
             return SequenceState(symbol=symbol.upper())
 
-    def save(self, state: SequenceState) -> None:
+    def _save_local(self, state: SequenceState) -> dict[str, object]:
         path = self._path(state.symbol)
         with FileLock(str(path) + ".lock", timeout=3):
             temporary = path.with_suffix(".tmp")
@@ -63,6 +76,12 @@ class SequenceStore:
             payload["stage"] = state.stage.value
             temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
             temporary.replace(path)
+        return payload
+
+    def save(self, state: SequenceState) -> None:
+        payload = self._save_local(state)
+        if self._durable_store is not None:
+            self._durable_store.save_sequence_state(state.symbol, payload)
 
     @staticmethod
     def _parse(value: str) -> datetime | None:

@@ -10,7 +10,7 @@ class Stage(StrEnum):
     TREND_READY = "15분 추세확인"
     WELL_FORMING = "전략 형성 중"
     ENTRY_WAIT = "진입가 대기"
-    FINAL_BUY = "진입 가능"
+    FINAL_BUY = "진입신호 발생"
     MISSED = "타점 지남"
     EXCLUDED = "추세 붕괴 제외"
     DATA_WAIT = "데이터 수집 중"

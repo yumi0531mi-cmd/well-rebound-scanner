@@ -19,6 +19,7 @@ LOGGER = logging.getLogger(__name__)
 TABLE_NAME = "scanner_minute_bars"
 AUTH_TABLE_NAME = "scanner_auth_cache"
 SIGNAL_TABLE_NAME = "scanner_signal_cases"
+SEQUENCE_TABLE_NAME = "scanner_sequence_states"
 MAX_BARS_PER_SYMBOL = 3000
 DB_RETRY_COOLDOWN_SECONDS = 60
 
@@ -119,7 +120,58 @@ class CockroachBarStore:
                 )
                 """
             )
+            cursor.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS {SEQUENCE_TABLE_NAME} (
+                    symbol STRING PRIMARY KEY,
+                    payload JSONB NOT NULL,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+                """
+            )
         self._initialized = True
+
+    def load_sequence_state(self, symbol: str) -> dict[str, Any] | None:
+        try:
+            with self._lock, self._connect() as connection:
+                self._ensure_schema(connection)
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        f"SELECT payload FROM {SEQUENCE_TABLE_NAME} WHERE symbol = %s",
+                        (symbol.upper(),),
+                    )
+                    row = cursor.fetchone()
+            self._available, self._last_error = True, ""
+            if not row:
+                return None
+            payload = json.loads(row[0]) if isinstance(row[0], str) else row[0]
+            return dict(payload) if isinstance(payload, dict) else None
+        except Exception as exc:
+            self._record_error(exc)
+            return None
+
+    def save_sequence_state(self, symbol: str, payload: dict[str, Any]) -> bool:
+        from psycopg.types.json import Jsonb
+
+        try:
+            with self._lock, self._connect() as connection:
+                self._ensure_schema(connection)
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        f"""
+                        INSERT INTO {SEQUENCE_TABLE_NAME} (symbol, payload)
+                        VALUES (%s, %s)
+                        ON CONFLICT (symbol) DO UPDATE SET
+                            payload = excluded.payload,
+                            updated_at = now()
+                        """,
+                        (symbol.upper(), Jsonb(payload)),
+                    )
+            self._available, self._last_error = True, ""
+            return True
+        except Exception as exc:
+            self._record_error(exc)
+            return False
 
     def probe(self) -> bool:
         """Verify connectivity and create the table even when no candidates exist."""

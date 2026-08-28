@@ -28,6 +28,11 @@ def _last_pivots(data: pd.DataFrame) -> tuple[list[float], list[float]]:
     return [float(value) for value in highs.tail(5)], [float(value) for value in lows.tail(5)]
 
 
+def _recent(condition: pd.Series, bars: int) -> bool:
+    """Return whether an event occurred inside its strategy-specific validity window."""
+    return bool(condition.fillna(False).tail(bars).any())
+
+
 def _levels(
     strategy: Strategy,
     entry: float,
@@ -70,12 +75,19 @@ def classify(frame15: pd.DataFrame, frame5: pd.DataFrame, frame3: pd.DataFrame, 
     atr = float(last3.atr)
     ema_up = bool(last15.ema9 > last15.ema20 and data15.ema20.iloc[-1] > data15.ema20.iloc[-4])
     aligned = bool(pd.notna(last15.ma60) and last15.close > last15.ma5 > last15.ma20 > last15.ma60)
-    volume_expansion = bool(last3.volume_ratio >= 1.25)
-    macd_up = bool(last5.macd_hist > data5.macd_hist.iloc[-2])
-    stoch_turn = bool(last5.stoch_k > last5.stoch_d and last5.stoch_k > data5.stoch_k.iloc[-2])
+    # Event conditions may form over adjacent completed bars. Their numeric
+    # thresholds stay unchanged; only their documented validity windows differ.
+    volume_expansion = _recent(data3.volume_ratio >= 1.25, 3)  # 9 minutes
+    macd_up = _recent(data5.macd_hist.diff() > 0, 4)  # 20 minutes
+    stoch_turn = _recent((data5.stoch_k > data5.stoch_d) & (data5.stoch_k.diff() > 0), 4)  # 20 minutes
     near_support = bool(live_price <= support + atr * 0.8)
-    vwap_reclaim = bool(last3.close > last3.vwap and data3.close.iloc[-2] <= data3.vwap.iloc[-2])
-    breakout = bool(live_price >= resistance and volume_expansion)
+    vwap_reclaim = _recent(
+        (data3.close > data3.vwap) & (data3.close.shift(1) <= data3.vwap.shift(1)),
+        3,
+    )  # 9 minutes
+    # Breakout, support and overheat are current-state gates and are never
+    # accepted solely because they were true on an earlier bar.
+    breakout = bool(live_price >= resistance)
     range_width_atr = (range_high - range_low) / atr if atr > 0 else 0
     compression = bool(data5.atr.tail(5).mean() < data5.atr.tail(20).mean() * 0.82)
     momentum = bool(last15.close > last15.ema20 and data15.close.pct_change(4).iloc[-1] > 0.015)

@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import html
 import logging
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
+from functools import partial
 from time import perf_counter
 
 import streamlit as st
 
 from wellscan import APP_VERSION, ENGINE_VERSION
+from wellscan.background import SnapshotCoordinator
 from wellscan.candidates import MAX_ANALYSIS_CANDIDATES
 from wellscan.candidates import analysis_candidates as select_analysis_candidates
 from wellscan.engine import evaluate
@@ -22,7 +24,12 @@ from wellscan.validation import SignalCase, ValidationStore
 
 LOGGER = logging.getLogger(__name__)
 
-st.set_page_config(page_title="다중 매매기법 실전 스캐너", page_icon="📈", layout="wide")
+st.set_page_config(
+    page_title="다중 매매기법 실전 스캐너",
+    page_icon="📈",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
 # ── 숨겨진 백테스트 관리자 페이지 (?admin=backtest) ──
 if st.query_params.get("admin") == "backtest":
     st.title("🔬 백테스트 관리 (비공개)")
@@ -90,7 +97,13 @@ st.markdown(
 .action-tile.buy{border-color:#2f9e66;background:#f2fbf6}.action-tile.waiting{border-color:#e0a800;background:#fffaf0}
 .action-title{font-size:1.05rem;font-weight:850}.action-line{font-size:.9rem;margin-top:.25rem}.action-command{font-weight:800;margin-top:.5rem}
 [data-testid="stMetric"]{border:1px solid #dbe3ee;border-radius:12px;padding:.55rem;background:#f8fafc}
-@media(max-width:700px){.block-container{padding:.6rem}.hero h1{font-size:1.55rem}.action-tile{padding:.65rem}[data-testid="stMetric"]{padding:.4rem}}
+@media(max-width:700px){
+  .block-container{padding:3.35rem .55rem 2rem}.hero h1{font-size:1.35rem}.hero p{font-size:.82rem;margin:.2rem 0}
+  .version{font-size:.7rem;margin:.3rem 0 .55rem}.action-tile{padding:.58rem;border-radius:10px;margin-bottom:.35rem}
+  .action-title{font-size:.98rem}.action-line{font-size:.82rem}.action-command{font-size:.84rem;margin-top:.35rem}
+  [data-testid="stMetric"]{padding:.35rem}[data-testid="stMetricLabel"]{font-size:.7rem}
+  [data-testid="stSidebar"]{min-width:min(86vw,320px);max-width:min(86vw,320px)}
+}
 </style>
 """,
     unsafe_allow_html=True,
@@ -122,7 +135,11 @@ def validations() -> ValidationStore:
     return ValidationStore()
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_resource
+def scan_coordinator() -> SnapshotCoordinator[ScanSnapshot]:
+    return SnapshotCoordinator()
+
+
 def candidate_pool(market: Market, session: TradingSession) -> list[Candidate]:
     return client().candidate_union(100) if market == Market.KR else client().overseas_candidate_union(session, 100)
 
@@ -353,29 +370,14 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-pool: list[Candidate] = []
 if not client().configured:
     st.error("KIS_APP_KEY와 KIS_APP_SECRET 환경변수가 필요합니다.")
     st.stop()
 
-try:
-    if not status.active:
-        st.warning(f"{status.label}입니다. 세션 밖의 오래된 가격으로 신규 매수 신호를 만들지 않습니다.")
-        st.stop()
-    pool = candidate_pool(market, status.session)
-except KISError as exc:
-    st.error(f"KIS 후보풀 수신 실패: {exc}")
+if not status.active:
+    st.warning(f"{status.label}입니다. 세션 밖의 오래된 가격으로 신규 매수 신호를 만들지 않습니다.")
     st.stop()
 
-if mode == "일반주":
-    filtered = [candidate for candidate in pool if minimum_price <= candidate.price <= maximum_price and 0 <= candidate.change_pct <= 7]
-else:
-    filtered = [candidate for candidate in pool if minimum_price <= candidate.price <= maximum_price and 7 < candidate.change_pct <= 20]
-analysis_candidates = select_analysis_candidates(filtered)
-tracked_validation_candidates = [
-    candidate for case in validations().tracking_cases(ENGINE_VERSION) if (candidate := _candidate_for_case(case.symbol, case.last_price, {item.key: item for item in analysis_candidates})) is not None
-]
-realtime().configure(analysis_candidates + tracked_validation_candidates)
 with st.sidebar:
     if realtime().connected:
         st.success("KIS WebSocket 연결됨")
@@ -385,8 +387,9 @@ with st.sidebar:
         st.caption("KIS WebSocket 연결 시도 중")
 
 
-@st.cache_data(ttl=65, show_spinner=False)
-def structure_results(candidates: tuple[Candidate, ...], completed_minute: int) -> list[tuple[Candidate, ScanResult]]:
+def structure_results(
+    candidates: tuple[Candidate, ...], completed_minute: int, selected_mode: str
+) -> list[tuple[Candidate, ScanResult]]:
     del completed_minute
     started = perf_counter()
     output: list[tuple[Candidate, ScanResult]] = []
@@ -407,7 +410,7 @@ def structure_results(candidates: tuple[Candidate, ...], completed_minute: int) 
                 ENGINE_VERSION,
                 candidate.market.value,
                 candidate.session.value,
-                mode=mode,
+                mode=selected_mode,
                 display_name=candidate.name,
             )
         for case in validations().cases():
@@ -446,8 +449,114 @@ def structure_results(candidates: tuple[Candidate, ...], completed_minute: int) 
     return output
 
 
+@dataclass(frozen=True)
+class ScanSnapshot:
+    pool: tuple[Candidate, ...]
+    filtered: tuple[Candidate, ...]
+    analysis_candidates: tuple[Candidate, ...]
+    results: tuple[tuple[Candidate, ScanResult], ...]
+
+
+def build_scan_snapshot(
+    selected_market: Market,
+    selected_session: TradingSession,
+    selected_mode: str,
+    selected_minimum: float,
+    selected_maximum: float,
+    completed_minute: int,
+) -> ScanSnapshot:
+    loaded_pool = candidate_pool(selected_market, selected_session)
+    if selected_mode == "일반주":
+        loaded_filtered = [
+            candidate
+            for candidate in loaded_pool
+            if selected_minimum <= candidate.price <= selected_maximum and 0 <= candidate.change_pct <= 7
+        ]
+    else:
+        loaded_filtered = [
+            candidate
+            for candidate in loaded_pool
+            if selected_minimum <= candidate.price <= selected_maximum and 7 < candidate.change_pct <= 20
+        ]
+    loaded_analysis = select_analysis_candidates(loaded_filtered)
+    tracked = [
+        candidate
+        for case in validations().tracking_cases(ENGINE_VERSION)
+        if (
+            candidate := _candidate_for_case(
+                case.symbol,
+                case.last_price,
+                {item.key: item for item in loaded_analysis},
+            )
+        )
+        is not None
+    ]
+    loaded_results = structure_results(tuple(loaded_analysis), completed_minute, selected_mode)
+    result_by_key = {candidate.key: result for candidate, result in loaded_results}
+    realtime_priority = sorted(
+        loaded_analysis,
+        key=lambda candidate: (
+            result_by_key.get(candidate.key) is not None
+            and result_by_key[candidate.key].stage in {Stage.FINAL_BUY, Stage.ENTRY_WAIT},
+            result_by_key.get(candidate.key) is not None
+            and result_by_key[candidate.key].stage == Stage.FINAL_BUY,
+        ),
+        reverse=True,
+    )
+    realtime().configure(realtime_priority + tracked)
+    return ScanSnapshot(
+        tuple(loaded_pool),
+        tuple(loaded_filtered),
+        tuple(loaded_analysis),
+        tuple(loaded_results),
+    )
+
+
 minute_bucket = int(datetime.now(UTC).timestamp() // 60)
-results = structure_results(tuple(analysis_candidates), minute_bucket)
+scan_key = (market.value, status.session.value, mode, float(minimum_price), float(maximum_price))
+snapshot_loader = partial(
+    build_scan_snapshot,
+    market,
+    status.session,
+    mode,
+    float(minimum_price),
+    float(maximum_price),
+    minute_bucket,
+)
+scan_state = scan_coordinator().request(scan_key, minute_bucket, snapshot_loader)
+
+if scan_state.snapshot is None:
+    st.info("백그라운드에서 후보와 차트를 분석 중입니다. 이 화면은 그대로 두면 자동으로 결과가 표시됩니다.")
+    if scan_state.error:
+        st.error(f"스캔 실패 · {scan_state.error}")
+
+    @st.fragment(run_every=1)
+    def wait_for_first_snapshot() -> None:
+        pending = scan_coordinator().request(scan_key, minute_bucket, snapshot_loader)
+        if pending.snapshot is not None:
+            st.rerun()
+        st.caption("화면은 멈추지 않았습니다 · 최초 데이터 준비 중")
+
+    wait_for_first_snapshot()
+    st.stop()
+
+snapshot = scan_state.snapshot
+pool = list(snapshot.pool)
+filtered = list(snapshot.filtered)
+analysis_candidates = list(snapshot.analysis_candidates)
+results = list(snapshot.results)
+if scan_state.running:
+    st.caption("새 1분봉 구조를 백그라운드에서 계산 중 · 직전 결과와 현재가는 계속 표시됩니다.")
+
+    @st.fragment(run_every=1)
+    def poll_snapshot_refresh() -> None:
+        refreshed = scan_coordinator().request(scan_key, minute_bucket, snapshot_loader)
+        if not refreshed.running:
+            st.rerun()
+
+    poll_snapshot_refresh()
+if scan_state.error:
+    st.warning(f"새 구조 갱신 실패 · 직전 결과 유지 · {scan_state.error}")
 persistence = history().persistence_status()
 if persistence.configured and persistence.available:
     st.caption("영구 분봉 저장소: CockroachDB 연결됨 · 종목별 최근 3,000봉")
