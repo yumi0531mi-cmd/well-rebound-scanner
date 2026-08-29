@@ -42,6 +42,14 @@ def test_sequence_restores_from_durable_store_after_local_loss(tmp_path) -> None
     assert restored.entry_hard_stop == 99
 
 
+def test_backtest_sequence_can_disable_environment_database(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("DATABASE_URL", "postgresql://must-not-be-used")
+
+    store = SequenceStore(tmp_path, use_environment=False)
+
+    assert store._durable_store is None
+
+
 def test_ordered_sequence_and_final_buy_persistence(tmp_path) -> None:
     store = SequenceStore(tmp_path)
     now = datetime(2026, 8, 21, 1, 0, tzinfo=UTC)

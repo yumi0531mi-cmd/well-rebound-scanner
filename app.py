@@ -33,7 +33,8 @@ st.set_page_config(
 # ── 숨겨진 백테스트 관리자 페이지 (?admin=backtest) ──
 if st.query_params.get("admin") == "backtest":
     st.title("🔬 백테스트 관리 (비공개)")
-    st.caption("국내 정규장 1분봉 워크포워드 · 실시간 스캐너와 동일한 전략엔진")
+    st.caption("정규장 1분봉 워크포워드 · 실시간 스캐너와 동일한 전략엔진")
+    _market_label = st.radio("시장", ["국내주식", "미국주식"], horizontal=True)
     _days = st.slider("조회 거래일 수", 2, 10, 3)
     _top_n = st.slider("종목 수", 5, 30, 10)
     if not st.button("▶️ 백테스트 실행"):
@@ -52,7 +53,8 @@ if st.query_params.get("admin") == "backtest":
         try:
             from wellscan.backtest import run
 
-            _report = run(KISClient(), days=_days, top_n=_top_n)
+            _market = Market.KR if _market_label == "국내주식" else Market.US
+            _report = run(KISClient(), days=_days, top_n=_top_n, market=_market)
             _status.update(label="✅ 완료!", state="complete")
         except Exception as _exc:
             _status.update(label="❌ 오류 발생", state="error")

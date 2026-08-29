@@ -43,3 +43,28 @@ def test_target1_then_target2_uses_half_position_each() -> None:
 
 def test_costs_are_deducted_from_flat_trade() -> None:
     assert round(_net_return(100, 100, Market.KR), 2) == -0.48
+
+
+def test_two_soft_stop_closes_exit_without_waiting_for_hard_stop() -> None:
+    frame = bars(
+        [
+            (100, 101, 99, 100),
+            (100, 100, 97, 98),
+            (98, 99, 96, 97),
+            (97, 105, 96, 104),
+        ]
+    )
+
+    result = _simulate_exit(frame, 0, 100, 103, 106, 99, 95)
+
+    assert result["result"] == "SOFT_STOP"
+    assert result["weighted_exit"] == 97
+
+
+def test_position_is_closed_at_session_end_not_carried_overnight() -> None:
+    frame = bars([(100, 101, 99, 100), (100, 101, 99, 100.5), (100.5, 101, 100, 100.8)])
+
+    result = _simulate_exit(frame, 0, 100, 110, 120, 95, 90)
+
+    assert result["result"] == "SESSION_CLOSE"
+    assert result["exit_idx"] == 2
