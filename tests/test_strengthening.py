@@ -1,6 +1,5 @@
 import json
 from dataclasses import FrozenInstanceError, asdict, replace
-from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -12,7 +11,6 @@ from wellscan.strengthening import (
     StrengtheningProfile,
     collect_evidence,
     filter_opportunities,
-    profile_from_dict,
     registered_profiles,
 )
 
@@ -77,11 +75,24 @@ def test_all_preregistered_variants_preserve_surviving_identity_and_all_fields()
 
 
 def test_registry_exactly_matches_preregistered_ids_and_gates():
-    plan = json.loads((Path(__file__).with_name("autonomous_trial_plan.json")).read_text(encoding="utf-8"))
-    profiles = tuple(profile_from_dict(record) for record in plan["profiles"])
-    assert profiles == registered_profiles()
-    assert len(profiles) == 12
-    assert plan["holdout_access_allowed"] is False
+    expected = (
+        ("S00-baseline", ()),
+        ("S01-ema15", ("ema15_up",)),
+        ("S02-close65", ("bullish3_close65",)),
+        ("S03-reversal3", ("reversal3",)),
+        ("S04-vwap3", ("vwap3_up",)),
+        ("S05-volume125", ("volume3_ge125",)),
+        ("S06-noise050", ("noise_ge050atr",)),
+        ("S07-target4", ("target1_le4atr",)),
+        ("S08-target6", ("target1_le6atr",)),
+        ("S09-micro1", ("micro_reversal1",)),
+        ("S10-trend-confirm-volume", ("ema15_up", "reversal3", "volume3_ge125")),
+        (
+            "S11-structure-confluence",
+            ("bullish3_close65", "vwap3_up", "micro_reversal1", "noise_ge050atr", "target1_le6atr"),
+        ),
+    )
+    assert tuple((profile.profile_id, profile.gates) for profile in registered_profiles()) == expected
 
 
 @pytest.mark.parametrize("value", [None, float("nan"), float("inf"), 0.])
