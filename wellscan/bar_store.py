@@ -28,6 +28,10 @@ class StoreCooldownError(RuntimeError):
     """Internal fast-fail while a failed database connection is cooling down."""
 
 
+class StoreUnavailableError(RuntimeError):
+    """A configured durable store could not complete the requested operation."""
+
+
 def _render_safe_database_url(database_url: str) -> str:
     """Use the container trust store when a copied Cockroach URL names a local CA file."""
     parts = urlsplit(database_url.strip())
@@ -145,10 +149,12 @@ class CockroachBarStore:
             if not row:
                 return None
             payload = json.loads(row[0]) if isinstance(row[0], str) else row[0]
-            return dict(payload) if isinstance(payload, dict) else None
+            if not isinstance(payload, dict):
+                raise ValueError("영구 신호 상태 payload가 JSON 객체가 아닙니다")
+            return dict(payload)
         except Exception as exc:
             self._record_error(exc)
-            return None
+            raise StoreUnavailableError(self._last_error or "영구 신호 상태 읽기 실패") from exc
 
     def save_sequence_state(self, symbol: str, payload: dict[str, Any]) -> bool:
         from psycopg.types.json import Jsonb
@@ -171,7 +177,7 @@ class CockroachBarStore:
             return True
         except Exception as exc:
             self._record_error(exc)
-            return False
+            raise StoreUnavailableError(self._last_error or "영구 신호 상태 저장 실패") from exc
 
     def probe(self) -> bool:
         """Verify connectivity and create the table even when no candidates exist."""
@@ -198,7 +204,7 @@ class CockroachBarStore:
             return (str(row[0]), pd.Timestamp(row[1])) if row else None
         except Exception as exc:
             self._record_error(exc)
-            return None
+            raise StoreUnavailableError(self._last_error or "영구 인증정보 읽기 실패") from exc
 
     def save_auth(self, cache_key: str, secret_value: str, expires_at: pd.Timestamp) -> bool:
         try:
@@ -220,7 +226,7 @@ class CockroachBarStore:
             return True
         except Exception as exc:
             self._record_error(exc)
-            return False
+            raise StoreUnavailableError(self._last_error or "영구 인증정보 저장 실패") from exc
 
     def load_signal_cases(self, engine_version: str | None = None, limit: int = 500) -> list[dict[str, Any]]:
         try:
@@ -245,12 +251,13 @@ class CockroachBarStore:
                 payload = row[0]
                 if isinstance(payload, str):
                     payload = json.loads(payload)
-                if isinstance(payload, dict):
-                    payloads.append(dict(payload))
+                if not isinstance(payload, dict):
+                    raise ValueError("영구 모의신호 payload가 JSON 객체가 아닙니다")
+                payloads.append(dict(payload))
             return payloads
         except Exception as exc:
             self._record_error(exc)
-            return []
+            raise StoreUnavailableError(self._last_error or "영구 모의신호 읽기 실패") from exc
 
     def save_signal_case(self, case_id: str, engine_version: str, signaled_at: datetime, payload: dict[str, Any]) -> bool:
         from psycopg.types.json import Jsonb
@@ -273,7 +280,7 @@ class CockroachBarStore:
             return True
         except Exception as exc:
             self._record_error(exc)
-            return False
+            raise StoreUnavailableError(self._last_error or "영구 모의신호 저장 실패") from exc
 
     def load(self, namespace: str, symbol: str, limit: int = MAX_BARS_PER_SYMBOL) -> pd.DataFrame:
         try:
@@ -294,15 +301,20 @@ class CockroachBarStore:
             if not rows:
                 return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
             frame = pd.DataFrame(rows, columns=["timestamp", "open", "high", "low", "close", "volume"]).set_index("timestamp")
+            timezone = "Asia/Seoul" if namespace.startswith("KR-") else "America/New_York"
+            frame.index = pd.to_datetime(frame.index, utc=True).tz_convert(timezone).tz_localize(None)
             return normalize_bars(frame)
         except Exception as exc:
             self._record_error(exc)
-            return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
+            raise StoreUnavailableError(self._last_error or "영구 분봉 읽기 실패") from exc
 
     def upsert(self, namespace: str, symbol: str, incoming: pd.DataFrame) -> bool:
         data = normalize_bars(incoming).tail(MAX_BARS_PER_SYMBOL)
         if data.empty:
             return True
+        if data.index.tz is None:
+            timezone = "Asia/Seoul" if namespace.startswith("KR-") else "America/New_York"
+            data.index = data.index.tz_localize(timezone, ambiguous="raise", nonexistent="raise")
         records = [
             (namespace, symbol.upper(), pd.Timestamp(timestamp).to_pydatetime(), float(row.open), float(row.high), float(row.low), float(row.close), float(row.volume))
             for timestamp, row in data.iterrows()
@@ -336,7 +348,7 @@ class CockroachBarStore:
             return True
         except Exception as exc:
             self._record_error(exc)
-            return False
+            raise StoreUnavailableError(self._last_error or "영구 분봉 저장 실패") from exc
 
     def _record_error(self, exc: Exception) -> None:
         if isinstance(exc, StoreCooldownError):

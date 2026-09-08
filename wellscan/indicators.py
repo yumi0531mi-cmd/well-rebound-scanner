@@ -10,6 +10,27 @@ from .models import TradingSession
 OHLCV = ("open", "high", "low", "close", "volume")
 
 
+class IndicatorCache:
+    """Three-frame cache for one sequential symbol evaluation stream.
+
+    Reuse only exact frame/session equality, including the sliding window's
+    left edge. No timestamp-only cache, approximate equality, or skipped checks.
+    """
+
+    def __init__(self):
+        self._frames: dict[int, tuple[TradingSession | None, pd.DataFrame, pd.DataFrame]] = {}
+
+    def enrich(self, minutes: int, frame: pd.DataFrame, session: TradingSession | None) -> pd.DataFrame:
+        if minutes not in {3, 5, 15}:
+            raise ValueError("unsupported cached timeframe")
+        cached = self._frames.get(minutes)
+        if cached is None or cached[0] != session or not cached[1].equals(frame):
+            result = enriched(frame, session)
+            cached = (session, frame.copy(deep=True), result)
+            self._frames[minutes] = cached
+        return cached[2].copy(deep=True)
+
+
 def normalize_bars(frame: pd.DataFrame) -> pd.DataFrame:
     data = frame.copy()
     data.columns = [str(column).lower() for column in data.columns]
@@ -17,10 +38,24 @@ def normalize_bars(frame: pd.DataFrame) -> pd.DataFrame:
     if missing:
         raise ValueError(f"분봉 필수 열 누락: {', '.join(missing)}")
     for column in OHLCV:
-        data[column] = pd.to_numeric(data[column], errors="coerce")
-    data = data.dropna(subset=list(OHLCV)).sort_index()
+        if not pd.api.types.is_numeric_dtype(data[column]):
+            data[column] = pd.to_numeric(data[column], errors="coerce")
+    if not data.empty:
+        if not isinstance(data.index, pd.DatetimeIndex) or data.index.hasnans:
+            raise ValueError("분봉 시간 인덱스 오류")
+        # Same validation, one numeric array instead of repeated DataFrame
+        # selection/reduction: profiling showed this boundary dominating CPU.
+        values = data[list(OHLCV)].to_numpy(dtype=float, na_value=np.nan)
+        opening, high, low, close, volume = values.T
+        valid = np.isfinite(values).all(axis=1)
+        valid &= (values[:, :4] > 0).all(axis=1) & (volume >= 0)
+        valid &= (high >= np.maximum(np.maximum(opening, close), low))
+        valid &= (low <= np.minimum(np.minimum(opening, close), high))
+        if not valid.all():
+            raise ValueError(f"분봉 OHLCV 오류: {int((~valid).sum())}개 행")
+    data = data.sort_index()
     data = data[~data.index.duplicated(keep="last")]
-    return data[(data.high >= data.low) & (data.close > 0) & (data.volume >= 0)]
+    return data
 
 
 def completed_resample(frame: pd.DataFrame, minutes: int, now: pd.Timestamp | None = None) -> pd.DataFrame:
@@ -31,6 +66,8 @@ def completed_resample(frame: pd.DataFrame, minutes: int, now: pd.Timestamp | No
     grouped = data.resample(f"{minutes}min", label="right", closed="left").agg(
         {"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"}
     ).dropna()
+    counts = data.close.resample(f"{minutes}min", label="right", closed="left").count()
+    grouped = grouped.loc[counts.reindex(grouped.index) == minutes]
     last_timestamp = data.index[-1]
     if not isinstance(last_timestamp, pd.Timestamp):
         last_timestamp = pd.Timestamp(last_timestamp)
@@ -87,13 +124,22 @@ def enriched(frame: pd.DataFrame, session: TradingSession | None = None) -> pd.D
 
 
 def pivot_points(frame: pd.DataFrame, left: int = 2, right: int = 2) -> tuple[pd.Series, pd.Series]:
+    if not isinstance(left, int) or not isinstance(right, int) or left < 0 or right < 0:
+        raise ValueError("pivot confirmation widths must be nonnegative integers")
     data = normalize_bars(frame)
-    high_mask = pd.Series(True, index=data.index)
-    low_mask = pd.Series(True, index=data.index)
+    # Equivalent strict comparisons, without allocating shifted Series for
+    # every side of every pivot. Preserve validation and right confirmation.
+    high, low = data.high.to_numpy(), data.low.to_numpy()
+    high_mask = np.ones(len(data), dtype=bool)
+    low_mask = np.ones(len(data), dtype=bool)
     for offset in range(1, left + 1):
-        high_mask &= data.high > data.high.shift(offset)
-        low_mask &= data.low < data.low.shift(offset)
+        high_mask[:offset] = False
+        low_mask[:offset] = False
+        high_mask[offset:] &= high[offset:] > high[:-offset]
+        low_mask[offset:] &= low[offset:] < low[:-offset]
     for offset in range(1, right + 1):
-        high_mask &= data.high > data.high.shift(-offset)
-        low_mask &= data.low < data.low.shift(-offset)
+        high_mask[-offset:] = False
+        low_mask[-offset:] = False
+        high_mask[:-offset] &= high[:-offset] > high[offset:]
+        low_mask[:-offset] &= low[:-offset] < low[offset:]
     return data.high[high_mask], data.low[low_mask]

@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
+
 import pytest
 
 from wellscan.kis import KISClient, KISError
@@ -58,3 +62,33 @@ def test_auth_error_is_not_retried(tmp_path, monkeypatch) -> None:
         client.get("/test", "TEST", {})
 
     assert session.calls == 1
+
+
+def test_shared_requests_session_is_not_used_concurrently(tmp_path) -> None:
+    class SlowSession:
+        def __init__(self) -> None:
+            self.active = 0
+            self.max_active = 0
+            self.lock = threading.Lock()
+
+        def request(self, *_args, **_kwargs) -> Response:
+            with self.lock:
+                self.active += 1
+                self.max_active = max(self.max_active, self.active)
+            try:
+                time.sleep(0.01)
+                return Response(200, {"rt_cd": "0", "output": {}})
+            finally:
+                with self.lock:
+                    self.active -= 1
+
+    client = KISClient(tmp_path)
+    session = SlowSession()
+    client.session = session  # type: ignore[assignment]
+    client.access_token = lambda: "safe-token"  # type: ignore[method-assign]
+    client._throttle = lambda: None  # type: ignore[method-assign]
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        list(executor.map(lambda _: client.get("/test", "TEST", {}), range(8)))
+
+    assert session.max_active == 1

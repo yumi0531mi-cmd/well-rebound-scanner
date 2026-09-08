@@ -19,10 +19,10 @@ def test_analysis_expands_beyond_old_top_ten_without_reordering() -> None:
     assert [item.symbol for item in selected] == [item.symbol for item in source]
 
 
-def test_analysis_limit_is_bounded_at_seventy() -> None:
-    selected = analysis_candidates(candidates(100))
+def test_analysis_limit_is_bounded_at_three_hundred() -> None:
+    selected = analysis_candidates(candidates(400))
 
-    assert len(selected) == MAX_ANALYSIS_CANDIDATES == 70
+    assert len(selected) == MAX_ANALYSIS_CANDIDATES == 300
 
 
 def test_analysis_limit_must_be_positive() -> None:

@@ -5,7 +5,7 @@ import threading
 from collections.abc import Iterator
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
-from datetime import date, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from time import perf_counter
 from typing import Any
@@ -17,7 +17,7 @@ from .bar_store import CockroachBarStore, StoreStatus
 from .indicators import normalize_bars
 from .kis import KISClient
 from .models import Candidate, Market
-from .sessions import filter_session_bars, session_exchange
+from .sessions import KST, filter_session_bars, kr_session_window, session_exchange
 
 LOGGER = logging.getLogger(__name__)
 
@@ -51,6 +51,8 @@ class HistoryCache:
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
         self._metrics: dict[str, BackfillMetrics] = {}
+        self._state_lock = threading.RLock()
+        self._backfill_locks: dict[str, threading.Lock] = {}
         self._warm_lock = threading.Lock()
         self._warm_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="history-warm")
         self._warm_futures: dict[str, Future[pd.DataFrame]] = {}
@@ -69,30 +71,58 @@ class HistoryCache:
     def _namespace(candidate: Candidate) -> str:
         return "KR-KRX-KR_REGULAR" if candidate.market == Market.KR else f"US-{candidate.exchange}-{candidate.session.value}"
 
+    @staticmethod
+    def _canonical_bars(frame: pd.DataFrame, namespace: str) -> pd.DataFrame:
+        """Use naive exchange-local timestamps at every L1/L2 merge boundary."""
+        data = normalize_bars(frame)
+        if data.empty or data.index.tz is None:
+            return data
+        timezone = "Asia/Seoul" if namespace.startswith("KR-") else "America/New_York"
+        data.index = data.index.tz_convert(timezone).tz_localize(None)
+        return normalize_bars(data)
+
     def load(self, symbol: str, namespace: str = "KR-KRX-KR_REGULAR") -> pd.DataFrame:
         path = self.path(symbol, namespace)
         try:
             local = pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
             if path.exists():
-                local = normalize_bars(pd.read_csv(path, index_col="timestamp", parse_dates=["timestamp"]))
+                local = self._canonical_bars(
+                    pd.read_csv(path, index_col="timestamp", parse_dates=["timestamp"]), namespace
+                )
             durable_key = (namespace, symbol.upper())
-            if self._durable_store is not None and durable_key not in self._durable_loaded:
-                remote = self._durable_store.load(namespace, symbol)
-                self._durable_loaded.add(durable_key)
-                self._durable_frames[durable_key] = remote
-            remote = self._durable_frames.get(durable_key)
+            with self._state_lock:
+                durable_missing = durable_key not in self._durable_loaded
+            if self._durable_store is not None and durable_missing:
+                remote = self._canonical_bars(self._durable_store.load(namespace, symbol), namespace)
+                if not self._durable_store.status().available:
+                    raise RuntimeError("영구 분봉 읽기 실패: " + self._durable_store.status().last_error)
+                with self._state_lock:
+                    self._durable_loaded.add(durable_key)
+                    existing_remote = self._durable_frames.get(durable_key)
+                    self._durable_frames[durable_key] = (
+                        remote
+                        if existing_remote is None or existing_remote.empty
+                        else normalize_bars(
+                            pd.concat([self._canonical_bars(existing_remote, namespace), remote])
+                        ).tail(3000)
+                    )
+            with self._state_lock:
+                remote = self._durable_frames.get(durable_key)
+                remote = None if remote is None else remote.copy()
             if remote is not None and not remote.empty:
-                local = remote.copy() if local.empty else normalize_bars(pd.concat([local, remote])).tail(3000)
+                local = remote.copy() if local.empty else normalize_bars(pd.concat([remote, local])).tail(3000)
             return local
-        except (OSError, ValueError, KeyError):
-            return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
+        except (OSError, ValueError, KeyError) as exc:
+            raise RuntimeError(f"분봉 캐시 읽기 실패: {namespace}:{symbol}") from exc
 
     def metrics(self, candidate: Candidate) -> BackfillMetrics | None:
-        return self._metrics.get(candidate.key)
+        with self._state_lock:
+            return self._metrics.get(candidate.key)
 
     def merge(self, symbol: str, incoming: pd.DataFrame, namespace: str = "KR-KRX-KR_REGULAR") -> pd.DataFrame:
         path = self.path(symbol, namespace)
         path.parent.mkdir(parents=True, exist_ok=True)
+        incoming = self._canonical_bars(incoming, namespace)
         with FileLock(str(path) + ".lock", timeout=5):
             existing = self.load(symbol, namespace)
             combined = incoming.copy() if existing.empty else pd.concat([existing, incoming])
@@ -101,8 +131,17 @@ class HistoryCache:
             combined.to_csv(temporary, index_label="timestamp")
             temporary.replace(path)
         if self._durable_store is not None:
-            self._durable_store.upsert(namespace, symbol, incoming)
-            self._durable_frames[(namespace, symbol.upper())] = combined
+            saved = self._durable_store.upsert(namespace, symbol, incoming)
+            if saved is not True:
+                raise RuntimeError("영구 분봉 저장소가 성공을 확인하지 않았습니다")
+            durable_key = (namespace, symbol.upper())
+            with self._state_lock:
+                current = self._durable_frames.get(durable_key)
+                self._durable_frames[durable_key] = (
+                    combined
+                    if current is None or current.empty
+                    else normalize_bars(pd.concat([current, combined])).tail(3000)
+                )
         return combined
 
     def persistence_status(self) -> StoreStatus:
@@ -118,19 +157,24 @@ class HistoryCache:
         api_calls = 0
         api_seconds = 0.0
         started = perf_counter()
-        newest = client.minute_day(symbol, date.today().strftime("%Y%m%d"))
+        # Render containers run in UTC.  The domestic API business date must
+        # follow the exchange clock or a Korean morning deployment requests
+        # yesterday and leaves the completed-bar freshness gate permanently
+        # stale until UTC midnight.
+        today = datetime.now(KST).date()
+        newest = client.minute_day(symbol, today.strftime("%Y%m%d"))
         api_seconds += perf_counter() - started
         api_calls += 1
         if not newest.empty:
             cached = self.merge(symbol, newest, namespace)
         if len(cached) >= target_bars:
             return cached, api_calls, api_seconds
-        cursor = date.today() if cached.empty else pd.Timestamp(cached.index.min()).date() - timedelta(days=1)
+        cursor = today - timedelta(days=1) if cached.empty else pd.Timestamp(cached.index.min()).date() - timedelta(days=1)
         fetched_days = 0
         while len(cached) < target_bars and fetched_days < max_days:
-            if cursor.weekday() < 5:
+            if kr_session_window(cursor) is not None:
                 started = perf_counter()
-                older = client.minute_day(symbol, cursor.strftime("%Y%m%d"))
+                older = client.minute_day(symbol, cursor.strftime("%Y%m%d"), full_day=True)
                 api_seconds += perf_counter() - started
                 api_calls += 1
                 if not older.empty:
@@ -188,6 +232,14 @@ class HistoryCache:
         return cached, api_calls, api_seconds
 
     def backfill_candidate(self, client: KISClient, candidate: Candidate, target_bars: int = 1000) -> pd.DataFrame:
+        with self._state_lock:
+            candidate_lock = self._backfill_locks.setdefault(candidate.key, threading.Lock())
+        with candidate_lock:
+            return self._backfill_candidate_locked(client, candidate, target_bars)
+
+    def _backfill_candidate_locked(
+        self, client: KISClient, candidate: Candidate, target_bars: int
+    ) -> pd.DataFrame:
         started = perf_counter()
         namespace = self._namespace(candidate)
         load_started = perf_counter()
@@ -198,16 +250,17 @@ class HistoryCache:
             result, api_calls, api_seconds = self._domestic_backfill(client, candidate.symbol, cached, target_bars, max_days=3)
         else:
             result, api_calls, api_seconds = self._overseas_backfill(client, candidate, cached, namespace, target_bars, max_pages=9)
-        self._metrics[candidate.key] = BackfillMetrics(
-            symbol=candidate.key,
-            cache_hit=cached_before > 0,
-            cached_before=cached_before,
-            cached_after=len(result),
-            api_calls=api_calls,
-            load_seconds=load_seconds,
-            api_seconds=api_seconds,
-            total_seconds=perf_counter() - started,
-        )
+        with self._state_lock:
+            self._metrics[candidate.key] = BackfillMetrics(
+                symbol=candidate.key,
+                cache_hit=cached_before > 0,
+                cached_before=cached_before,
+                cached_after=len(result),
+                api_calls=api_calls,
+                load_seconds=load_seconds,
+                api_seconds=api_seconds,
+                total_seconds=perf_counter() - started,
+            )
         return result
 
     def iter_backfill_candidates(
@@ -239,17 +292,18 @@ class HistoryCache:
                         candidate.key,
                         exc,
                     )
-                    self._metrics[candidate.key] = BackfillMetrics(
-                        symbol=candidate.key,
-                        cache_hit=False,
-                        cached_before=0,
-                        cached_after=0,
-                        api_calls=0,
-                        load_seconds=0.0,
-                        api_seconds=0.0,
-                        total_seconds=0.0,
-                        error=f"{type(exc).__name__}: {exc}",
-                    )
+                    with self._state_lock:
+                        self._metrics[candidate.key] = BackfillMetrics(
+                            symbol=candidate.key,
+                            cache_hit=False,
+                            cached_before=0,
+                            cached_after=0,
+                            api_calls=0,
+                            load_seconds=0.0,
+                            api_seconds=0.0,
+                            total_seconds=0.0,
+                            error=f"{type(exc).__name__}: {exc}",
+                        )
 
     def schedule_warmup(self, client: KISClient, candidates: tuple[Candidate, ...]) -> None:
         """Continue the MA60 cache warm-up after each candidate has an initial card.
@@ -270,4 +324,5 @@ class HistoryCache:
                 )
 
     def snapshot_metrics(self) -> tuple[BackfillMetrics, ...]:
-        return tuple(self._metrics.values())
+        with self._state_lock:
+            return tuple(self._metrics.values())

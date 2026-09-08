@@ -21,13 +21,25 @@ class Strategy(StrEnum):
     TREND_PULLBACK = "눌림목"
     RANGE_REVERSAL = "박스권 반등"
     BREAKOUT = "거래량 돌파"
-    MOMENTUM_PULLBACK = "급등 후 첫 눌림"
+    # The implementation confirms a pullback after momentum, but it does not
+    # prove that no earlier pullback occurred before the available lookback.
+    # Do not promise an ordinal that the causal engine cannot establish.
+    MOMENTUM_PULLBACK = "급등 후 눌림"
     VWAP_RECLAIM = "VWAP 회복"
     OVERSOLD_REVERSAL = "과매도 반등"
     VOLATILITY_EXPANSION = "변동성 수축 후 확장"
+    OPENING_RANGE_RETEST = "개장 범위 돌파 후 지지확인"
     TREND_SWING = "상승 스윙"
     RANGE_SWING = "박스 스윙"
     NONE = "NONE"
+
+    @classmethod
+    def _missing_(cls, value: object) -> Strategy | None:
+        # Existing DB/JSON payloads used the former, over-specific display
+        # label.  Accept them while emitting only the honest current label.
+        if value == "급등 후 첫 눌림":
+            return cls.MOMENTUM_PULLBACK
+        return None
 
 
 class RiskState(StrEnum):
@@ -83,6 +95,10 @@ class TradeLevels:
     target1_eta_minutes: int | None = None
     target2_eta_minutes: int | None = None
     basis: str = "구조 미확인"
+    # Keep the chart invalidation level distinct from the account-protection
+    # trigger.  Appending the field preserves positional and JSON compatibility
+    # with snapshots written before this distinction existed.
+    structural_stop: float | None = None
 
 
 @dataclass(frozen=True)

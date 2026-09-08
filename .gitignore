@@ -1,6 +1,8 @@
 __pycache__/
 .pytest_cache/
 .ruff_cache/
+.test-tmp/
+.venv/
 .scanner_data/
 .local-tools/
 .streamlit/secrets.toml

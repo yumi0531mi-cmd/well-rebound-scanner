@@ -77,3 +77,34 @@ def test_new_bars_are_written_to_durable_store(tmp_path) -> None:
     assert len(combined) == 5
     assert len(durable.upserts) == 1
     assert durable.upserts[0].equals(incoming)
+
+
+def test_aware_local_csv_merges_with_naive_kis_bars_in_exchange_time(tmp_path) -> None:
+    cache = HistoryCache(tmp_path, durable_store=None)
+    path = cache.path("005930")
+    path.parent.mkdir(parents=True)
+    aware = frame("2026-09-08 09:00", 1)
+    aware.index = aware.index.tz_localize("Asia/Seoul")
+    aware.to_csv(path, index_label="timestamp")
+    incoming = frame("2026-09-08 09:01", 1)
+
+    combined = cache.merge("005930", incoming)
+
+    assert combined.index.tz is None
+    assert combined.index.tolist() == [pd.Timestamp("2026-09-08 09:00"), pd.Timestamp("2026-09-08 09:01")]
+
+
+def test_aware_durable_bars_merge_with_naive_local_cache_in_exchange_time(tmp_path) -> None:
+    remote = frame("2026-09-08 00:00", 1)
+    remote.index = remote.index.tz_localize("UTC")
+    durable = FakeDurableStore(remote)
+    cache = HistoryCache(tmp_path, durable_store=durable)  # type: ignore[arg-type]
+    local = frame("2026-09-08 09:01", 1)
+    path = cache.path("005930")
+    path.parent.mkdir(parents=True)
+    local.to_csv(path, index_label="timestamp")
+
+    combined = cache.load("005930")
+
+    assert combined.index.tz is None
+    assert combined.index.tolist() == [pd.Timestamp("2026-09-08 09:00"), pd.Timestamp("2026-09-08 09:01")]

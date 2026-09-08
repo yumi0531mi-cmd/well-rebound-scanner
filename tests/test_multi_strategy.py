@@ -8,6 +8,11 @@ from wellscan.models import Strategy
 from wellscan.opportunities import classify, estimate_minutes
 
 
+def test_momentum_pullback_label_does_not_claim_unproved_first_occurrence() -> None:
+    assert Strategy.MOMENTUM_PULLBACK.value == "급등 후 눌림"
+    assert Strategy("급등 후 첫 눌림") is Strategy.MOMENTUM_PULLBACK
+
+
 def rising_bars(count: int = 960) -> pd.DataFrame:
     index = pd.date_range("2026-08-20 09:00", periods=count, freq="min")
     steps = np.arange(count)
@@ -62,6 +67,15 @@ def test_upside_eta_is_suppressed_while_price_is_falling() -> None:
     bars.loc[bars.index[-20:], "close"] = falling
 
     assert estimate_minutes(bars, 101.0, 103.0) is None
+
+
+def test_strategy_audit_does_not_change_opportunities():
+    source = rising_bars()
+    frames = tuple(completed_resample(source, minutes) for minutes in (15, 5, 3))
+    price = float(source.close.iloc[-1])
+    audit = {}
+    assert classify(*frames, price, None, audit=audit) == classify(*frames, price, None)
+    assert audit and all(reasons for reasons in audit.values())
 
 
 def test_downside_eta_is_suppressed_while_price_is_rising() -> None:
