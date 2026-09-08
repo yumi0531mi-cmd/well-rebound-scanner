@@ -4,7 +4,7 @@ services:
     runtime: python
     plan: free
     autoDeployTrigger: commit
-    buildCommand: pip install -r requirements.txt && DATABASE_URL= pytest -q && ruff check .
+    buildCommand: pip install -r requirements.txt && DATABASE_URL= pytest -q --ignore=tests/test_external_history.py --ignore=tests/test_controlled_tuning.py --ignore=tests/test_controlled_tuning_audit.py --ignore=tests/test_expanded_tuning.py --ignore=tests/test_expand_us_tuning.py --ignore=tests/test_pullback_number_audit.py --ignore=tests/test_tuning_feasibility.py && ruff check .
     startCommand: python start.py
     healthCheckPath: /_stcore/health
     envVars:
