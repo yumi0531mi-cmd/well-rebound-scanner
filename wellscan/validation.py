@@ -437,24 +437,33 @@ class ValidationStore:
         if not case.verified_execution_contract:
             return "이전 신호 기록 · 모의 체결 미검증"
         if case.observed_risk == "HARD_STOP_OBSERVED" and case.live_outcome not in TERMINAL_OUTCOMES:
-            return "현재가 손절선 이탈 · 모의 청산 분봉 확인 중"
-        return {
-            None: "모의 진입 확인 · 1차 대기",
-            "PENDING_ENTRY": "신호 발생 · 모의 체결 대기",
-            "TARGET1": "1차 목표 도달 · 2차 대기",
-            "TARGET2": "2차 목표 도달",
-            "STOP": "손절·구조붕괴",
-            "TARGET1_STOP": "1차 도달 후 잔량 손절",
-            "SESSION_CLOSE": "세션 종료 모의 청산",
-            "TARGET1_SESSION_CLOSE": "1차 도달 후 잔량 모의 청산",
+            reached = "진입가 도달 · " if case.filled_at is not None else ""
+            target1 = "1차 목표 도달 · " if case.live_outcome == "TARGET1" else ""
+            return f"{reached}{target1}현재가 손절선 이탈 · 모의 청산 분봉 확인 중"
+        statuses = {
+            None: "진입가 도달 · 1차 목표 도달 중",
+            "PENDING_ENTRY": "후보 등록 · 진입가 도달 대기",
+            "TARGET1": "진입가 도달 · 1차 목표 도달 · 2차 목표 도달 중",
+            "TARGET2": "진입가 도달 · 1차 목표 도달 · 2차 목표 도달",
+            "STOP": "진입가 도달 · 손절",
+            "TARGET1_STOP": "진입가 도달 · 1차 목표 도달 · 손절",
+            "SESSION_CLOSE": "진입가 도달 · 세션 종료 모의 청산",
+            "TARGET1_SESSION_CLOSE": "진입가 도달 · 1차 목표 도달 · 세션 종료 모의 청산",
             "EXIT_UNCONFIRMED": "청산 확인 불가 · 가격 누락",
-            "SOFT_STOP": "Soft Stop 2개 종가 확인 청산",
-            "TARGET1_SOFT_STOP": "1차 도달 후 Soft Stop 청산",
-            "EXECUTION_ERROR": "모의 체결/청산 데이터 오류",
-            "UNFILLED_EXPIRED": "유효 3분 경과 · 미체결",
-            "UNFILLED_RR_REJECTED": "체결가 순손익비 미달 · 미진입",
-            "UNFILLED_NEXT_SESSION": "세션 변경 · 미체결",
-        }.get(case.live_outcome, "진입 신호 발생 · 1차 대기")
+            "SOFT_STOP": "진입가 도달 · Soft Stop 손절",
+            "TARGET1_SOFT_STOP": "진입가 도달 · 1차 목표 도달 · Soft Stop 손절",
+            "EXECUTION_ERROR": "모의 체결/청산 데이터 오류 · 결과 확인 필요",
+            "UNFILLED_EXPIRED": "후보 등록 · 진입가 미도달 · 유효 3분 경과",
+            "UNFILLED_RR_REJECTED": "후보 등록 · 체결가 순손익비 미달 · 미진입",
+            "UNFILLED_NEXT_SESSION": "후보 등록 · 세션 변경 · 미체결",
+        }
+        if case.live_outcome in statuses:
+            # ``None`` is OPEN only after a completed bar established a fill.
+            # An inconsistent durable row must not be presented as an entry.
+            if case.live_outcome is None and case.filled_at is None:
+                return "저장 상태 불일치 · 진입 여부 확인 필요"
+            return statuses[case.live_outcome]
+        return f"저장 상태 {case.live_outcome!s} · 판정 확인 필요"
 
     def tracking_cases(self, engine_version: str | None = None) -> list[SignalCase]:
         """Return all unfinished one-time validation cases regardless of the current UI session or mode."""

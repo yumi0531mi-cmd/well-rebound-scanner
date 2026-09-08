@@ -27,7 +27,7 @@ from wellscan.realtime import RealtimeHub
 from wellscan.scanner_service import daemon_results_snapshot, daemon_service_status, shared_runtime_components
 from wellscan.sequence import SequenceStore
 from wellscan.sessions import ENABLED_SESSIONS, session_exchange, session_status
-from wellscan.validation import TERMINAL_OUTCOMES, SignalCase, ValidationStore
+from wellscan.validation import SignalCase, ValidationStore
 from wellscan.web_status import (
     ADMIN_TOKEN_ENV,
     PipelineIssue,
@@ -373,6 +373,26 @@ def render_tracking_case(case: SignalCase) -> None:
     )
 
 
+def _tracking_history_html(cases: list[SignalCase]) -> str:
+    """Build one chronological list from persisted paper-execution states."""
+    items = []
+    for case in cases:
+        name = case.display_name or case.symbol.split(":")[-1]
+        status_text = ValidationStore.live_status(case)
+        items.append(f"<li>{html.escape(name)} · {html.escape(status_text)}</li>")
+    return f'<ol class="tracking-history">{"".join(items)}</ol>' if items else ""
+
+
+def render_tracking_history(cases: list[SignalCase]) -> None:
+    """Keep today's complete persisted lifecycle visible without a collapsed panel."""
+    st.subheader("오늘 후보·진입 진행 이력 · 실제 주문 아님")
+    history_html = _tracking_history_html(cases)
+    if not history_html:
+        st.info("현재 세션 신호 진행 이력: 아직 기록 없음")
+        return
+    st.markdown(history_html, unsafe_allow_html=True)
+
+
 def render_result(candidate: Candidate, result: ScanResult, *, actionable: bool = False) -> None:
     try:
         quote = _live_quote(candidate)
@@ -511,7 +531,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.caption("세션별 서로 다른 신호 종목 5개 목표 · 80% 승률 미검증 · 자동 주문 없음 · -1.5%는 손절 트리거이며 갭 손실 한도가 아님")
+st.caption("9개 활성 매매기법 전체의 실제 ENTRY를 합산한 세션별 고유 진입종목 최소 5개 기준(없으면 없음) · 80% 승률 미검증 · 자동 주문 없음 · -1.5%는 손절 트리거이며 갭 손실 한도가 아님")
 if not os.environ.get("WELLSCAN_INSTRUMENT_POLICIES"):
     st.warning("추정 비용 적용 중 · 상품 분류 미확인 종목은 관찰 전용입니다. 실제 계좌 수익과 다를 수 있습니다.")
 
@@ -549,9 +569,7 @@ if not status.active:
     except (OSError, RuntimeError, ValueError) as exc:
         st.error(f"오늘 신호 기록 조회 실패 · {safe_pipeline_message(exc)}")
         closed_session_records = []
-    if closed_session_records:
-        st.subheader("오늘 모의 신호 기록 · 실제 체결 내역 아님")
-        st.dataframe(_tracking_rows(closed_session_records), hide_index=True, use_container_width=True)
+    render_tracking_history(closed_session_records)
     st.stop()
 
 with st.sidebar:
@@ -777,7 +795,8 @@ def build_scan_snapshot(
 def render_current_session_tracking() -> None:
     """Show daemon-created records even before the first web scan snapshot."""
     try:
-        daily = validations().daily_cases(None, market.value, session=status.session.value)
+        session_daily = validations().daily_cases(None, market.value, session=status.session.value)
+        market_daily = validations().daily_cases(None, market.value)
         progress = validations().session_progress(
             ENGINE_VERSION,
             market.value,
@@ -788,22 +807,22 @@ def render_current_session_tracking() -> None:
         st.error(f"신호 기록 조회 실패 · {safe_pipeline_message(exc)}")
         return
     st.caption(
-        f"이번 세션 모의 체결 종목 {progress['unique_symbols']}/5 목표 · 신호 {progress['signals']}건 · "
+        f"9개 활성 매매기법 전체 합산 · 이번 세션 고유 모의 진입종목 {progress['unique_symbols']}개 "
+        f"(최소 5개 기준, 없으면 없음) · 신호 {progress['signals']}건 · "
         f"모의 진입 {progress['entries']}건 · 미체결 대기 {progress['pending']}건 · 실제 주문 아님"
     )
     ongoing = [
         case
-        for case in daily
+        for case in session_daily
         if case.verified_execution_contract and case.live_outcome in {None, "TARGET1", "PENDING_ENTRY"}
     ]
-    closed = [case for case in daily if case.verified_execution_contract and case.live_outcome in TERMINAL_OUTCOMES]
     if ongoing:
         st.subheader("자동 추적 진행 중")
         for case in ongoing:
             render_tracking_case(case)
-    if closed:
-        with st.expander(f"이번 세션 종료 기록 · {len(closed)}개", expanded=False):
-            st.dataframe(_tracking_rows(closed), hide_index=True, use_container_width=True)
+    # Do not select only known outcomes here. Every verified persisted state,
+    # including explicit errors and future/unknown states, remains visible.
+    render_tracking_history(market_daily)
 
 
 def snapshot_from_daemon(selected_market: Market, selected_session: TradingSession) -> ScanSnapshot | None:
@@ -1030,6 +1049,10 @@ def live_cards() -> None:
     render_current_session_tracking()
 
 
+if not visible:
+    st.warning("현재 모드와 가격 조건을 통과한 후보가 없습니다.")
+
+
 live_cards()
 
 
@@ -1094,7 +1117,3 @@ if not use_daemon_feed:
 
 # 신호는 미체결 대기로 저장하며, 완료 1분봉 공통 실행기가 모의 진입/청산을 확정합니다.
 # 사용자의 요청에 따라 개별 진입가·성과·Calibration 화면은 스캐너에 표시하지 않습니다.
-
-
-if not visible:
-    st.warning("현재 모드와 가격 조건을 통과한 후보가 없습니다.")

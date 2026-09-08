@@ -224,6 +224,28 @@ def test_running_daemon_feed_prevents_a_second_browser_heavy_scan(monkeypatch):
         for label in ("적용기법", "현재가 미수신", "진입가", "구조 STOP", "최대 Hard Stop", "T1", "T2", "진입 ETA", "구조 기준 완료봉", "현재가 수신"):
             assert label in rendered
         assert "지금 매수 금지" in rendered
+        assert any("9개 활성 매매기법 전체의 실제 ENTRY를 합산" in item.value for item in app.caption)
+        assert any("아직 기록 없음" in item.value for item in app.info)
     finally:
         st.cache_resource.clear()
         st.cache_data.clear()
+
+
+def test_tracking_history_is_an_always_visible_numbered_list_of_all_daily_cases():
+    source = Path("app.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    functions = {
+        node.name: node
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    render_source = ast.get_source_segment(source, functions["render_current_session_tracking"])
+    history_source = ast.get_source_segment(source, functions["render_tracking_history"])
+    html_source = ast.get_source_segment(source, functions["_tracking_history_html"])
+
+    assert render_source is not None and "render_tracking_history(market_daily)" in render_source
+    assert "st.expander" not in render_source
+    assert history_source is not None and "아직 기록 없음" in history_source
+    assert html_source is not None and '<ol class="tracking-history">' in html_source and "<li>" in html_source
+    assert "verified_execution_contract" not in html_source
+    assert "market_daily = validations().daily_cases(None, market.value)" in render_source

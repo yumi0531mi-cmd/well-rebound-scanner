@@ -97,10 +97,40 @@ def test_live_validation_advances_from_target1_to_target2(tmp_path) -> None:
     target1 = store.update_completed_bars(first, future.iloc[:2], datetime(2026, 8, 21, 1, 2, tzinfo=UTC))
     second = store.update_completed_bars(target1, future, datetime(2026, 8, 21, 1, 3, tzinfo=UTC))
 
-    assert store.live_status(first) == "모의 진입 확인 · 1차 대기"
-    assert store.live_status(target1) == "1차 목표 도달 · 2차 대기"
-    assert store.live_status(second) == "2차 목표 도달"
+    assert store.live_status(first) == "진입가 도달 · 1차 목표 도달 중"
+    assert store.live_status(target1) == "진입가 도달 · 1차 목표 도달 · 2차 목표 도달 중"
+    assert store.live_status(second) == "진입가 도달 · 1차 목표 도달 · 2차 목표 도달"
     assert store.tracking_cases("v2") == []
+
+
+def test_live_status_keeps_entry_target_and_stop_history_explicit(tmp_path) -> None:
+    store = ValidationStore(tmp_path, use_environment=False)
+    case = executable_case(store, "timeline")
+    assert store.live_status(case) == "후보 등록 · 진입가 도달 대기"
+
+    entry = pd.DataFrame(
+        dict(open=[100], high=[101], low=[99.8], close=[100], volume=[1000]),
+        index=pd.date_range("2026-08-21 10:00", periods=1, freq="min"),
+    )
+    entered = store.update_completed_bars(case, entry, datetime(2026, 8, 21, 1, 1, tzinfo=UTC))
+    assert store.live_status(entered) == "진입가 도달 · 1차 목표 도달 중"
+
+    target1_then_stop = pd.DataFrame(
+        dict(open=[100, 100, 98.5], high=[101, 102.2, 99], low=[99.8, 99.8, 98], close=[100, 102, 98.5], volume=1000),
+        index=pd.date_range("2026-08-21 10:00", periods=3, freq="min"),
+    )
+    stopped = store.update_completed_bars(entered, target1_then_stop, datetime(2026, 8, 21, 1, 3, tzinfo=UTC))
+    assert store.live_status(stopped) == "진입가 도달 · 1차 목표 도달 · 손절"
+
+
+def test_live_status_does_not_present_unknown_or_inconsistent_state_as_success(tmp_path) -> None:
+    store = ValidationStore(tmp_path, use_environment=False)
+    pending = executable_case(store, "unknown-state")
+    inconsistent = replace(pending, live_outcome=None, filled_at=None)
+    unknown = replace(pending, live_outcome="NEW_SERVER_STATE")
+
+    assert store.live_status(inconsistent) == "저장 상태 불일치 · 진입 여부 확인 필요"
+    assert store.live_status(unknown) == "저장 상태 NEW_SERVER_STATE · 판정 확인 필요"
 
 
 def test_daily_cases_use_each_markets_trading_date(tmp_path) -> None:

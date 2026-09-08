@@ -5,8 +5,10 @@ import logging
 import math
 import os
 import random
+import re
 import threading
 import time
+import unicodedata
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -20,6 +22,12 @@ from .bar_store import CockroachBarStore
 from .indicators import normalize_bars
 from .instruments import MasterCatalog
 from .models import Candidate, Market, TradingSession
+
+DOMESTIC_LIMIT_UP_FALLBACK_PCT = 29.5
+_DOMESTIC_LEVERAGED_NAME = re.compile(
+    r"레버리지|인버스|LEVERAG(?:E|ED)|INVERSE|(?<![0-9])[2-9](?:\.\d+)?X|(?<![0-9])[2-9](?:\.\d+)?배",
+    re.IGNORECASE,
+)
 
 
 class KISError(RuntimeError):
@@ -278,8 +286,36 @@ class KISClient:
                 continue
         raise KISError(f"숫자 필드 누락 또는 오류: {','.join(keys)}")
 
+    @classmethod
+    def _domestic_rank_candidate(cls, row: dict[str, Any], source: str) -> Candidate | None:
+        symbol = str(row.get("mksc_shrn_iscd") or "").strip()
+        if not symbol:
+            return None
+        name = str(row.get("hts_kor_isnm") or symbol).strip()
+        change_pct = cls._number(row, "prdy_ctrt")
+        normalized_name = unicodedata.normalize("NFKC", name)
+        change_sign = str(row.get("prdy_vrss_sign") or "").strip()
+        # KIS documents sign 1 as upper-limit and sign 2 as an ordinary rise.
+        # Only use the percentage fallback when the sign is unavailable; a
+        # valid sign=2 row near the limit is not yet an upper-limit row.
+        limit_up = change_sign == "1" or (
+            change_sign not in {"1", "2", "3", "4", "5"}
+            and change_pct >= DOMESTIC_LIMIT_UP_FALLBACK_PCT
+        )
+        if limit_up or _DOMESTIC_LEVERAGED_NAME.search(normalized_name):
+            return None
+        return Candidate(
+            symbol=symbol,
+            name=name,
+            price=cls._number(row, "stck_prpr"),
+            change_pct=change_pct,
+            volume=cls._number(row, "acml_vol"),
+            turnover=cls._number(row, "acml_tr_pbmn"),
+            sources=frozenset({source}),
+        )
+
     def _ranking(self, sort_code: str, source: str, limit: int = 100) -> list[Candidate]:
-        rows: list[dict[str, Any]] = []
+        candidates: list[Candidate] = []
         continuation = ""
         for _ in range(10):
             payload, next_continuation = self.get(
@@ -300,26 +336,17 @@ class KISClient:
                 },
                 continuation,
             )
-            rows.extend(row for row in payload.get("output", []) if isinstance(row, dict))
-            if len(rows) >= limit or next_continuation not in {"M", "F"}:
+            for row in payload.get("output", []):
+                if not isinstance(row, dict):
+                    continue
+                candidate = self._domestic_rank_candidate(row, source)
+                if candidate is not None:
+                    candidates.append(candidate)
+                if len(candidates) >= limit:
+                    break
+            if len(candidates) >= limit or next_continuation not in {"M", "F"}:
                 break
             continuation = "N"
-        candidates: list[Candidate] = []
-        for row in rows[:limit]:
-            symbol = str(row.get("mksc_shrn_iscd") or "").strip()
-            if not symbol:
-                continue
-            candidates.append(
-                Candidate(
-                    symbol=symbol,
-                    name=str(row.get("hts_kor_isnm") or symbol),
-                    price=self._number(row, "stck_prpr"),
-                    change_pct=self._number(row, "prdy_ctrt"),
-                    volume=self._number(row, "acml_vol"),
-                    turnover=self._number(row, "acml_tr_pbmn"),
-                    sources=frozenset({source}),
-                )
-            )
         return candidates
 
     def trading_policy(self, candidate: Candidate):
