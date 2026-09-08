@@ -225,21 +225,33 @@ class KISClient:
             token = self.access_token()
             self._throttle()
             started = time.perf_counter()
-            with self._lock:
-                response = self.session.request(
-                    "GET",
-                    f"{self.base_url}{path}",
-                    headers={
-                        "authorization": f"Bearer {token}",
-                        "appkey": self.app_key,
-                        "appsecret": self.app_secret,
-                        "tr_id": tr_id,
-                        "tr_cont": tr_cont,
-                        "custtype": "P",
-                    },
-                    params=params,
-                    timeout=15,
+            try:
+                with self._lock:
+                    response = self.session.request(
+                        "GET",
+                        f"{self.base_url}{path}",
+                        headers={
+                            "authorization": f"Bearer {token}",
+                            "appkey": self.app_key,
+                            "appsecret": self.app_secret,
+                            "tr_id": tr_id,
+                            "tr_cont": tr_cont,
+                            "custtype": "P",
+                        },
+                        params=params,
+                        timeout=15,
+                    )
+            except (requests.ConnectionError, requests.Timeout) as exc:
+                logging.getLogger(__name__).warning(
+                    "kis_transport_retry tr_id=%s attempt=%s error=%s",
+                    tr_id,
+                    attempt + 1,
+                    type(exc).__name__,
                 )
+                if attempt == 2:
+                    raise KISError(f"{tr_id} KIS 전송 실패({type(exc).__name__})") from exc
+                time.sleep((0.35 * (2**attempt)) + random.uniform(0.0, 0.15))
+                continue
             logging.getLogger(__name__).info("kis_request tr_id=%s attempt=%s elapsed_s=%.3f status=%s",
                                             tr_id, attempt + 1, time.perf_counter() - started, response.status_code)
             if response.status_code not in {429, 500, 502, 503, 504} or attempt == 2:

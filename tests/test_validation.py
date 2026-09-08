@@ -115,6 +115,30 @@ def test_daily_cases_use_each_markets_trading_date(tmp_path) -> None:
     assert [case.case_id for case in store.daily_cases(None, "KR", date(2026, 8, 22), "KR_REGULAR")] == ["kr-day"]
 
 
+def test_naive_legacy_timestamp_does_not_block_daily_records_or_new_signal(tmp_path) -> None:
+    store = ValidationStore(tmp_path, use_environment=False)
+    legacy = SignalCase(
+        "legacy-naive",
+        "KR:KRX:KR_REGULAR:OLD",
+        "2026-08-21T00:30:00",
+        100,
+        102,
+        104,
+        99,
+        "눌림목",
+        "legacy",
+        market="KR",
+        session=TradingSession.KR_REGULAR.value,
+    )
+    store._path(legacy.case_id).write_text(json.dumps(asdict(legacy)), encoding="utf-8")
+
+    daily = store.daily_cases(None, "KR", date(2026, 8, 21), TradingSession.KR_REGULAR.value)
+    recorded = executable_case(store, "new-after-legacy")
+
+    assert [case.case_id for case in daily] == ["legacy-naive"]
+    assert recorded is not None
+
+
 def test_signal_case_persists_common_engine_display_snapshot_and_loads_old_rows(tmp_path) -> None:
     store = ValidationStore(tmp_path, use_environment=False)
     case = executable_case(store, "display")
@@ -181,6 +205,23 @@ def test_session_progress_keeps_same_contract_fills_across_engine_versions(tmp_p
     assert progress["unique_symbols"] == 2
     assert progress["entries"] == 2
     assert progress["symbols"] == ["KR:KRX:OTHER", "KR:KRX:TEST"]
+
+
+def test_session_progress_accepts_legacy_naive_snapshot_fields(tmp_path) -> None:
+    store = ValidationStore(tmp_path, use_environment=False)
+    case = executable_case(store, "legacy-naive-progress")
+    case.signaled_at = "2026-08-21T00:59:00"
+    case.filled_at = "2026-08-21T01:00:00"
+    case.fill_price = 100
+    store._write_case(case)
+
+    progress = store.session_progress(
+        "ignored", "KR", TradingSession.KR_REGULAR.value, datetime(2026, 8, 21, 1, 1, tzinfo=UTC)
+    )
+
+    assert progress["signals"] == 1
+    assert progress["entries"] == 1
+    assert progress["unique_symbols"] == 1
 
 
 def test_completed_bar_tracker_ignores_bars_outside_the_plan_session(tmp_path) -> None:

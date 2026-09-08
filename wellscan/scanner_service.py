@@ -54,6 +54,12 @@ COLD_CALL_RESERVE_PER_CANDIDATE = {Market.KR: 26, Market.US: 11}
 RECENT_ERROR_LIMIT = 20
 SEEN_CASE_LIMIT = 2_000
 SESSION_RESULT_LIMIT = 80
+# KIS documents that BAQ/BAY/BAA daytime minute history is limited to one
+# trading day.  A 1000-bar precondition can therefore never complete for
+# US_DAY.  The common engine already owns staged readiness (180/300/900 bars),
+# so the daemon only needs the same initial window as the browser path and
+# must publish DATA_WAIT while the current day accumulates.
+US_DAY_INITIAL_HISTORY_BARS = HistoryCache.INITIAL_READY_BARS
 
 
 class StaleCompletedBarError(RuntimeError):
@@ -436,6 +442,11 @@ class ScannerService:
             return COLD_CALL_RESERVE_PER_CANDIDATE[candidate.market]
         return WARM_CALL_RESERVE_PER_CANDIDATE
 
+    def _initial_history_target(self, candidate: Candidate) -> int:
+        if candidate.session == TradingSession.US_DAY:
+            return min(self.config.initial_history_bars, US_DAY_INITIAL_HISTORY_BARS)
+        return self.config.initial_history_bars
+
     def _live_price(self, candidate: Candidate) -> tuple[float, datetime]:
         """Fetch one fresh quote used only to revalidate a completed-bar setup."""
 
@@ -592,19 +603,21 @@ class ScannerService:
             if not current_status.active or current_status.session != status.session:
                 break
             try:
-                reserved = self._call_reserve(candidate, self.config.initial_history_bars)
+                history_target = self._initial_history_target(candidate)
+                reserved = self._call_reserve(candidate, history_target)
                 if self._monotonic() + reserved * KIS_REQUEST_INTERVAL_SECONDS > deadline:
                     self._counters.budget_exhaustions += 1
                     break
                 bars = self.history.backfill_candidate(
                     self.client,
                     candidate,
-                    target_bars=self.config.initial_history_bars,
+                    target_bars=history_target,
                 )
                 session_bars = filter_session_bars(normalize_bars(bars), status.session)
-                if len(session_bars) < self.config.initial_history_bars:
+                if len(session_bars) < history_target:
                     self._counters.data_wait_observations += 1
-                    continue
+                    if status.session != TradingSession.US_DAY:
+                        continue
                 close = self._latest_completed_close(bars, status.session, current)
                 policy = self.client.trading_policy(candidate)
                 result = self._evaluator(

@@ -306,6 +306,47 @@ def test_us_day_live_revalidation_uses_day_exchange_code(tmp_path):
     assert client.price_calls == [("BAQ", "AAPL")]
 
 
+def test_us_day_publishes_partial_one_day_history_without_waiting_for_1000(tmp_path):
+    now = datetime(2026, 9, 8, 2, 1, 30, tzinfo=UTC)  # 22:01:30 New York
+    index = pd.date_range("2026-09-07 20:02", periods=120, freq="min")
+    frame = pd.DataFrame(
+        {"open": 100.0, "high": 101.0, "low": 99.0, "close": 100.5, "volume": 1000.0},
+        index=index,
+    )
+    candidate = Candidate(
+        "AAPL", "Apple", 100, 1, 1, 1,
+        market=Market.US, exchange="NAS", session=TradingSession.US_DAY,
+    )
+    history = FakeHistory(frame)
+    validation = FakeValidation()
+    evaluated = []
+
+    def evaluator(symbol, supplied, price, store, **kwargs):
+        del supplied, price, store
+        evaluated.append((symbol, kwargs))
+        return SimpleNamespace(final_buy=False, stage=Stage.DATA_WAIT, evaluated_at=kwargs["now"])
+
+    service = ScannerService(
+        config(tmp_path, initial_history_bars=HistoryCache.WARM_TARGET_BARS),
+        client=FakeClient([candidate]),
+        history=history,
+        sequences=object(),
+        validations=validation,
+        clock=lambda: now,
+        session_resolver=resolver(active_market=Market.US, active_session=TradingSession.US_DAY),
+        evaluator=evaluator,
+        live_revalidator=lambda result, price, checked_at: result,
+    )
+
+    service.run_cycle()
+
+    assert history.calls == [(candidate.key, HistoryCache.INITIAL_READY_BARS)]
+    assert evaluated and evaluated[0][0] == candidate.key
+    assert validation.nonfinal
+    assert service.snapshot().counters["data_wait_observations"] == 1
+    assert service.results_snapshot().sessions[0].results[0][1].stage == Stage.DATA_WAIT
+
+
 def test_nonfinal_result_is_observed_without_recording_signal(tmp_path):
     candidate = Candidate("000660", "SK하이닉스", 100, 1, 1, 1)
     validation = FakeValidation()

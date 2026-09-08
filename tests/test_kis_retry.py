@@ -5,6 +5,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
+import requests
 
 from wellscan.kis import KISClient, KISError
 
@@ -92,3 +93,44 @@ def test_shared_requests_session_is_not_used_concurrently(tmp_path) -> None:
         list(executor.map(lambda _: client.get("/test", "TEST", {}), range(8)))
 
     assert session.max_active == 1
+
+
+class _FlakySession:
+    def __init__(self, failures: int):
+        self.failures = failures
+        self.calls = 0
+
+    def request(self, *args, **kwargs):
+        del args, kwargs
+        self.calls += 1
+        if self.calls <= self.failures:
+            raise requests.ConnectionError("remote disconnected")
+        return Response(200, {"rt_cd": "0", "output": {}})
+
+
+def _client(monkeypatch, tmp_path, failures: int) -> KISClient:
+    monkeypatch.setattr("wellscan.kis.time.sleep", lambda _seconds: None)
+    monkeypatch.setattr("wellscan.kis.random.uniform", lambda _left, _right: 0.0)
+    client = KISClient(tmp_path, auth_store=object())
+    monkeypatch.setattr(client, "access_token", lambda: "token")
+    monkeypatch.setattr(client, "_throttle", lambda: None)
+    client.session = _FlakySession(failures)
+    return client
+
+
+def test_get_retries_remote_disconnect(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path, failures=1)
+
+    payload, continuation = client.get("/history", "HHDFS76950200", {})
+
+    assert payload["rt_cd"] == "0"
+    assert continuation == ""
+    assert client.session.calls == 2
+
+
+def test_get_preserves_typed_failure_after_transport_retries(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path, failures=3)
+
+    with pytest.raises(KISError, match=r"HHDFS76950200 KIS 전송 실패\(ConnectionError\)"):
+        client.get("/history", "HHDFS76950200", {})
+    assert client.session.calls == 3

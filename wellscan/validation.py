@@ -141,11 +141,17 @@ class ValidationStore:
 
     @staticmethod
     def trading_day(value: str | datetime, market: str) -> date:
+        instant = ValidationStore._stored_instant(value)
+        timezone = ZoneInfo("Asia/Seoul") if market == "KR" else ZoneInfo("America/New_York")
+        return instant.astimezone(timezone).date()
+
+    @staticmethod
+    def _stored_instant(value: str | datetime) -> datetime:
+        """Adapt legacy naive persisted timestamps without relaxing live-time validation."""
         instant = datetime.fromisoformat(value) if isinstance(value, str) else value
         if instant.tzinfo is None:
             instant = instant.replace(tzinfo=UTC)
-        timezone = ZoneInfo("Asia/Seoul") if market == "KR" else ZoneInfo("America/New_York")
-        return instant.astimezone(timezone).date()
+        return instant
 
     def _write_case(self, case: SignalCase) -> None:
         path = self._path(case.case_id)
@@ -321,7 +327,7 @@ class ValidationStore:
                     and item.verified_execution_contract
                     and (item.live_outcome not in REARMABLE_UNFILLED or item.signal_rearmed_at is None)
                     and self._instrument_id(item.symbol) == instrument_id
-                    and session_day(TradingSession(item.session), datetime.fromisoformat(item.signaled_at)) == signal_session_day
+                    and session_day(TradingSession(item.session), self._stored_instant(item.signaled_at)) == signal_session_day
                 ),
                 None,
             )
@@ -339,7 +345,7 @@ class ValidationStore:
                 item for item in collected
                 if item.market == market
                 and item.session == session
-                and session_day(TradingSession(item.session), datetime.fromisoformat(item.signaled_at)) == signal_session_day
+                and session_day(TradingSession(item.session), self._stored_instant(item.signaled_at)) == signal_session_day
             ]
             if len(same_day) >= limit:
                 return None
@@ -358,7 +364,7 @@ class ValidationStore:
                     or candidate.live_outcome not in REARMABLE_UNFILLED
                     or candidate.signal_rearmed_at is not None
                     or self._instrument_id(candidate.symbol) != instrument_id
-                    or session_day(TradingSession(session), datetime.fromisoformat(candidate.signaled_at)) != day):
+                    or session_day(TradingSession(session), self._stored_instant(candidate.signaled_at)) != day):
                 continue
             path = self._path(candidate.case_id)
             with FileLock(str(path) + ".lock", timeout=3):
@@ -414,7 +420,7 @@ class ValidationStore:
         if day is None and session is None:
             return [
                 case for case in candidates
-                if session_day(self._case_session(case), datetime.fromisoformat(case.signaled_at))
+                if session_day(self._case_session(case), self._stored_instant(case.signaled_at))
                 == session_day(self._case_session(case), now)
             ]
         target_day = day or session_day(TradingSession(session), now)
@@ -422,7 +428,7 @@ class ValidationStore:
             case
             for case in candidates
             if (
-                session_day(self._case_session(case), datetime.fromisoformat(case.signaled_at))
+                session_day(self._case_session(case), self._stored_instant(case.signaled_at))
             ) == target_day
         ]
 
@@ -464,9 +470,9 @@ class ValidationStore:
         compatible = [case for case in self.cases(market=market, session=session)
                       if case.verified_execution_contract]
         cases = [case for case in compatible
-                 if session_day(TradingSession(session), datetime.fromisoformat(case.signaled_at)) == day]
+                 if session_day(TradingSession(session), self._stored_instant(case.signaled_at)) == day]
         entered = [case for case in compatible if case.filled_at is not None
-                   and session_day(TradingSession(session), datetime.fromisoformat(case.filled_at)) == day]
+                   and session_day(TradingSession(session), self._stored_instant(case.filled_at)) == day]
         symbols = sorted({self._instrument_id(case.symbol) for case in entered})
         return {"unique_symbols": len(symbols), "signals": len(cases), "entries": len(entered),
                 "pending": sum(case.live_outcome == "PENDING_ENTRY" for case in cases), "reentries": len(entered) - len(symbols),
