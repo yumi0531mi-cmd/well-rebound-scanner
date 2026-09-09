@@ -179,6 +179,27 @@ def test_cycle_uses_last_completed_close_and_common_engine(tmp_path):
     assert service.results_snapshot().sessions[0].results[0][0].price == 101.25
 
 
+def test_empty_discovery_publishes_completed_empty_session(tmp_path):
+    service = ScannerService(
+        config(tmp_path),
+        client=FakeClient([]),
+        history=FakeHistory(),
+        sequences=object(),
+        validations=FakeValidation(),
+        clock=lambda: NOW,
+        session_resolver=resolver(),
+        evaluator=lambda *args, **kwargs: None,
+        live_revalidator=lambda result, price, now: result,
+    )
+
+    service.run_cycle()
+
+    snapshot = service.results_snapshot()
+    assert len(snapshot.sessions) == 1
+    assert snapshot.sessions[0].session == TradingSession.KR_REGULAR
+    assert snapshot.sessions[0].results == ()
+
+
 def test_cold_cache_keeps_warming_to_1000_without_evaluating(tmp_path):
     index = pd.date_range("2026-09-05 09:00", periods=180, freq="min")
     frame = pd.DataFrame(
