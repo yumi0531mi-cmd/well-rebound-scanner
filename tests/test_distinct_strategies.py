@@ -7,7 +7,7 @@ import pytest
 import wellscan.engine as engine_module
 from wellscan.engine import _select_opportunity, evaluate
 from wellscan.indicators import normalize_bars
-from wellscan.models import CORE_STRATEGIES, Market, Stage, Strategy, TradingSession
+from wellscan.models import Market, Stage, Strategy, TradingSession
 from wellscan.opportunities import (
     Opportunity,
     bull_flag_breakout,
@@ -15,8 +15,8 @@ from wellscan.opportunities import (
     failed_breakdown_reclaim,
     gap_up_retest,
     inside_bar_breakout,
-    opening_range_low_reversal,
     opening_range_breakout,
+    opening_range_low_reversal,
     quiet_123_reversal,
     red_to_green_reversal,
     vwap_pullback_hold,
@@ -347,7 +347,7 @@ def test_kr_special_delayed_open_does_not_accept_normal_opening_bars():
     assert opening_range_breakout(normal_open, TradingSession.KR_REGULAR) is None
 
 
-def test_six_additional_strategy_fixtures_pass_real_entry_price_and_cost_policy():
+def test_disabled_additional_strategy_fixtures_cannot_enter_active_engine():
     flag = bull_flag_frame()
     vwap15, vwap3 = vwap_hold_frames()
     opening = opening_breakout_frame()
@@ -370,10 +370,10 @@ def test_six_additional_strategy_fixtures_pass_real_entry_price_and_cost_policy(
         assert item is not None
         close = float(frame.close.iloc[-1])
         atr = float(frame.atr.iloc[-1])
-        assert _select_opportunity((item,), policy, close, close, atr) is item
+        assert _select_opportunity((item,), policy, close, close, atr) is None
 
 
-def test_opening_breakout_reaches_final_buy_through_public_engine_and_cost_policy():
+def test_disabled_opening_breakout_cannot_reach_final_buy_through_public_engine():
     bars = one_minute_from_three(opening_breakout_frame())
     policy = TradingPolicy(
         costs=estimated_costs(Market.KR, TradingSession.KR_REGULAR),
@@ -388,25 +388,25 @@ def test_opening_breakout_reaches_final_buy_through_public_engine_and_cost_polic
         TradingSession.KR_REGULAR,
         policy=policy,
     )
-    assert result.stage == Stage.FINAL_BUY
-    assert result.strategy == Strategy.OPENING_RANGE_BREAKOUT
-    assert result.conditions["공통 위험정책 통과"] is True
+    assert result.stage == Stage.DATA_WAIT
+    assert result.strategy is not Strategy.OPENING_RANGE_BREAKOUT
+    assert not result.final_buy
 
 
 def opportunity(strategy, entry, target=105.0):
     return Opportunity(strategy, 100, entry, 98.0, target, target + 2, 99.0, "test", {"test": True})
 
 
-def test_established_strategy_keeps_primary_and_new_only_is_selectable():
-    core = opportunity(CORE_STRATEGIES[0], 100.0)
-    first_expansion = opportunity(Strategy.FAILED_BREAKDOWN_RECLAIM, 101.0)
-    second_expansion = opportunity(Strategy.OPENING_RANGE_BREAKOUT, 101.0)
-    assert _select_opportunity((second_expansion, first_expansion, core), None, 101.0, 101.0, 1.0) is core
-    assert _select_opportunity((second_expansion, first_expansion), None, 101.0, 101.0, 1.0) is first_expansion
-    assert _select_opportunity((second_expansion,), None, 101.0, 101.0, 1.0) is second_expansion
+def test_active_portfolio_priority_and_disabled_strategy_filtering():
+    established = opportunity(Strategy.RANGE_REVERSAL, 100.0)
+    experimental = opportunity(Strategy.LIQUIDITY_SWEEP_RECLAIM, 101.0)
+    disabled = opportunity(Strategy.OPENING_RANGE_BREAKOUT, 101.0)
+    assert _select_opportunity((disabled, experimental, established), None, 101.0, 101.0, 1.0) is established
+    assert _select_opportunity((disabled, experimental), None, 101.0, 101.0, 1.0) is experimental
+    assert _select_opportunity((disabled,), None, 101.0, 101.0, 1.0) is None
 
 
-def test_opening_strategy_is_reachable_before_general_twenty_bar_warmup(monkeypatch):
+def test_disabled_opening_strategy_is_filtered_before_general_twenty_bar_warmup(monkeypatch):
     calls = []
     item = opportunity(Strategy.OPENING_RANGE_LOW_REVERSAL, 100.0, 104.0)
 
@@ -420,9 +420,8 @@ def test_opening_strategy_is_reachable_before_general_twenty_bar_warmup(monkeypa
     result = evaluate("EARLY", bars, 101.0, SequenceStore(memory_only=True),
                       datetime.fromisoformat("2026-09-04T09:21:00+09:00"), TradingSession.KR_REGULAR)
     assert calls == [7]
-    assert result.stage == Stage.FINAL_BUY
-    assert result.strategy == Strategy.OPENING_RANGE_LOW_REVERSAL
-    assert result.diagnostics["sequence_ready"] is True
+    assert result.stage == Stage.DATA_WAIT
+    assert result.strategy is not Strategy.OPENING_RANGE_LOW_REVERSAL
 
 
 def test_public_engine_rejects_nonfinite_ohlcv_before_strategy_detection():

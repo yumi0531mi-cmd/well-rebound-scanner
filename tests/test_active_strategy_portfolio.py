@@ -12,6 +12,7 @@ from wellscan.opportunities import (
     price_strength_pullback_resume,
     prior_high_breakout_retest,
 )
+from wellscan.policy import Costs, TradingPolicy
 from wellscan.sessions import kr_session_window
 
 
@@ -23,6 +24,22 @@ def test_inactive_strategy_cannot_fall_back_into_engine_selection() -> None:
     assert _select_opportunity((_opportunity(Strategy.BREAKOUT),), None, 101., 101., 1.) is None
     active = _opportunity(Strategy.RANGE_REVERSAL)
     assert _select_opportunity((_opportunity(Strategy.BREAKOUT), active), None, 101., 101., 1.) is active
+
+
+def test_waiting_established_does_not_hide_executable_experimental() -> None:
+    waiting = Opportunity(
+        Strategy.RANGE_REVERSAL, 100, 105., 103., 110., 112., 104.,
+        "waiting established", {"test": True}, 103.,
+    )
+    ready = Opportunity(
+        Strategy.LIQUIDITY_SWEEP_RECLAIM, 100, 100., 99., 105., 107., 99.5,
+        "ready experimental", {"test": True}, 99.,
+    )
+    policy = TradingPolicy(Costs(.00015, .00015, .002, .001, "deterministic test"), "STOCK")
+
+    selected = _select_opportunity((waiting, ready), policy, 100.1, 100.1, 1.)
+
+    assert selected is ready
 
 
 def test_classify_does_not_execute_off_strategy_functions(monkeypatch) -> None:

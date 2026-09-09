@@ -112,7 +112,7 @@ def _select_opportunity(opportunities: tuple[Opportunity, ...], policy: TradingP
         return None
     established = tuple(item for item in opportunities if item.strategy in ESTABLISHED_ACTIVE_STRATEGIES)
     experimental = tuple(item for item in opportunities if item.strategy in EXPERIMENTAL_STRATEGIES)
-    opportunities = established or experimental
+    opportunities = established + experimental
     if not opportunities:
         return None
     if policy is None or policy.costs is None:
