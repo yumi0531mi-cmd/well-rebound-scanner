@@ -71,7 +71,7 @@
 - 로컬 Render 동등 회귀 테스트: 460개 수집, 460개 통과, 실패 0개.
 - 마지막 런타임 수정 대상 테스트: 25개 통과.
 - `ruff` 정적 검사: 통과.
-- 운영 `main` 최신 커밋: `f8ded86baad3ac5a5d5d668693f2f79a0782a369`.
+- 빈 세션 상태 수정과 최초 인계 보고서가 포함된 운영 코드 커밋: `f8ded86baad3ac5a5d5d668693f2f79a0782a369`. 보고서 상태 갱신 커밋은 이후 이어질 수 있으므로 실제 최신값은 `git rev-parse origin/main`으로 확인한다.
 - Render 최신 배포 `f8ded86`: 빌드 성공, `Live` 확인(배포 시간 2분 29초).
 - `/_stcore/health`: HTTP 200 `ok` 확인.
 - 실제 운영 웹에서 앱 `0.7.2-empty-session-status`, 엔진 `multi-strategy-18-independent-six-common-execution`, 활성 6기법, 시장 상태, 현재가 갱신 설정, 하단 진행 이력 표시를 확인했다.
