@@ -345,19 +345,35 @@ class ScannerService:
 
     def _publish_result(self, candidate: Candidate, result: ScanResult) -> None:
         published_at = self._aware_now()
-        timestamp = published_at.isoformat()
-        day = session_day(candidate.session, published_at).isoformat()
         with self._results_lock:
-            bucket = self._session_results.setdefault(candidate.session, {})
-            if self._session_result_day.get(candidate.session) != day:
-                bucket.clear()
-            self._session_result_day[candidate.session] = day
+            bucket = self._prepare_session_bucket(candidate.session, published_at)
             bucket.pop(candidate.key, None)
             bucket[candidate.key] = (candidate, result)
             while len(bucket) > SESSION_RESULT_LIMIT:
                 bucket.pop(next(iter(bucket)))
-            self._session_result_updated_at[candidate.session] = timestamp
-            self._results_updated_at = timestamp
+
+    def _prepare_session_bucket(
+        self,
+        session: TradingSession,
+        published_at: datetime,
+    ) -> dict[str, tuple[Candidate, ScanResult]]:
+        """Mark a completed session scan, including a valid empty result."""
+
+        timestamp = published_at.isoformat()
+        day = session_day(session, published_at).isoformat()
+        bucket = self._session_results.setdefault(session, {})
+        if self._session_result_day.get(session) != day:
+            bucket.clear()
+        self._session_result_day[session] = day
+        self._session_result_updated_at[session] = timestamp
+        self._results_updated_at = timestamp
+        return bucket
+
+    def _publish_session_completion(self, session: TradingSession) -> None:
+        """Publish that discovery/evaluation completed even when it produced no rows."""
+
+        with self._results_lock:
+            self._prepare_session_bucket(session, self._aware_now())
 
     def _write_status(self, *, running: bool | None = None) -> None:
         status = self.snapshot(running=running)
@@ -663,6 +679,7 @@ class ScannerService:
                 self._error("candidate", exc, symbol=candidate.key, session=status.session.value)
             except Exception as exc:  # keep the daemon alive, but expose the unexpected type
                 self._error("candidate-unexpected", exc, symbol=candidate.key, session=status.session.value)
+        self._publish_session_completion(status.session)
 
     def run_cycle(self) -> bool:
         """Run one deterministic bounded cycle; False means another cycle owns the lock."""
