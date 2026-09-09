@@ -224,7 +224,7 @@ def test_running_daemon_feed_prevents_a_second_browser_heavy_scan(monkeypatch):
         for label in ("적용기법", "현재가 미수신", "진입가", "구조 STOP", "최대 Hard Stop", "T1", "T2", "진입 ETA", "구조 기준 완료봉", "현재가 수신"):
             assert label in rendered
         assert "지금 매수 금지" in rendered
-        assert any("9개 활성 매매기법 전체의 실제 ENTRY를 합산" in item.value for item in app.caption)
+        assert any("6개 활성 매매기법 전체의 실제 ENTRY를 합산" in item.value for item in app.caption)
         assert any("아직 기록 없음" in item.value for item in app.info)
     finally:
         st.cache_resource.clear()
@@ -248,4 +248,49 @@ def test_tracking_history_is_an_always_visible_numbered_list_of_all_daily_cases(
     assert history_source is not None and "아직 기록 없음" in history_source
     assert html_source is not None and '<ol class="tracking-history">' in html_source and "<li>" in html_source
     assert "verified_execution_contract" not in html_source
+    assert "ValidationStore.live_status(case)" in html_source
+    assert "matched_strategies" in html_source and "trend_label" in html_source
+    assert "sorted(cases, key=lambda item: item.signaled_at)" in html_source
     assert "market_daily = validations().daily_cases(None, market.value)" in render_source
+
+
+def test_tracking_history_html_uses_only_persisted_case_state_and_is_mobile_safe():
+    source = Path("app.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    function = next(
+        node for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_tracking_history_html"
+    )
+    isolated = ast.Module(body=[function], type_ignores=[])
+    ast.fix_missing_locations(isolated)
+
+    class StoredStatus:
+        @staticmethod
+        def live_status(case):
+            return case.persisted_status
+
+    namespace = {
+        "SignalCase": object,
+        "ValidationStore": StoredStatus,
+        "TradingSession": lambda value: value,
+        "local_time": lambda value, _session: datetime.fromisoformat(value),
+        "html": __import__("html"),
+    }
+    exec(compile(isolated, "app.py", "exec"), namespace)
+    case = SimpleNamespace(
+        signaled_at="2026-09-09T01:02:00+00:00",
+        display_name="테스트<&>",
+        symbol="KR:KRX:KR_REGULAR:000001",
+        persisted_status="진입가 도달 · 1차 목표 도달 중",
+        matched_strategies=("박스권 반등",),
+        strategy="박스권 반등",
+        trend_label="상승추세",
+        session="KR_REGULAR",
+    )
+
+    rendered = namespace["_tracking_history_html"]([case])
+
+    assert '<ol class="tracking-history">' in rendered
+    assert "테스트&lt;&amp;&gt;" in rendered
+    assert "진입가 도달 · 1차 목표 도달 중" in rendered
+    assert "상승추세 · 박스권 반등 · 01:02" in rendered

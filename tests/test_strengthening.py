@@ -4,7 +4,7 @@ from dataclasses import FrozenInstanceError, asdict, replace
 import pandas as pd
 import pytest
 
-from wellscan.models import Strategy, TradingSession
+from wellscan.models import EXPANSION_STRATEGIES, Strategy, TradingSession
 from wellscan.opportunities import Opportunity
 from wellscan.strengthening import (
     StrengtheningEvidence,
@@ -91,8 +91,20 @@ def test_registry_exactly_matches_preregistered_ids_and_gates():
             "S11-structure-confluence",
             ("bullish3_close65", "vwap3_up", "micro_reversal1", "noise_ge050atr", "target1_le6atr"),
         ),
+        ("S12-established-control", ()),
+        ("S14-expansion-v1-control", ()),
+        ("S13-expansion-active", ()),
     )
     assert tuple((profile.profile_id, profile.gates) for profile in registered_profiles()) == expected
+    control = next(profile for profile in registered_profiles() if profile.profile_id == "S12-established-control")
+    assert set(control.disabled_strategies) == {
+        strategy.value for strategy in EXPANSION_STRATEGIES
+    }
+    v1_control = next(profile for profile in registered_profiles() if profile.profile_id == "S14-expansion-v1-control")
+    assert set(v1_control.disabled_strategies) == {
+        strategy.value for strategy in EXPANSION_STRATEGIES[4:]
+    }
+    assert registered_profiles()[-1].is_baseline
 
 
 @pytest.mark.parametrize("value", [None, float("nan"), float("inf"), 0.])

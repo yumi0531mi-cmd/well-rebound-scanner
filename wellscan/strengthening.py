@@ -13,7 +13,7 @@ from typing import Any
 
 import pandas as pd
 
-from .models import Strategy, TradingSession
+from .models import EXPANSION_STRATEGIES, EXPANSION_STRATEGIES_V2, Strategy, TradingSession
 from .opportunities import Opportunity, confirmed_reversal
 from .policy import TradingPolicy, session_day
 
@@ -361,7 +361,14 @@ def registered_profiles() -> tuple[StrengtheningProfile, ...]:
         ("S10-trend-confirm-volume", ("ema15_up", "reversal3", "volume3_ge125")),
         ("S11-structure-confluence", ("bullish3_close65", "vwap3_up", "micro_reversal1", "noise_ge050atr", "target1_le6atr")),
     )
-    return tuple(StrengtheningProfile(name, gates) for name, gates in configurations)
+    profiles = tuple(StrengtheningProfile(name, gates) for name, gates in configurations)
+    expansion = tuple(strategy.value for strategy in EXPANSION_STRATEGIES)
+    second_expansion = tuple(strategy.value for strategy in EXPANSION_STRATEGIES_V2)
+    return profiles + (
+        StrengtheningProfile("S12-established-control", disabled_strategies=expansion),
+        StrengtheningProfile("S14-expansion-v1-control", disabled_strategies=second_expansion),
+        StrengtheningProfile("S13-expansion-active"),
+    )
 
 
 def profile_record(profile: StrengtheningProfile) -> dict:

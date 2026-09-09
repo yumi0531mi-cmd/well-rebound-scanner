@@ -8,9 +8,25 @@ import pandas as pd
 
 from .analysis_cache import AnalysisCache, analysis_key
 from .indicators import IndicatorCache, completed_resample, enriched, normalize_bars, pivot_points
-from .models import RiskState, ScanResult, Stage, Strategy, TradeLevels, TradingSession
+from .models import (
+    ESTABLISHED_ACTIVE_STRATEGIES,
+    EXPERIMENTAL_STRATEGIES,
+    RiskState,
+    ScanResult,
+    Stage,
+    Strategy,
+    TradeLevels,
+    TradingSession,
+)
 from .opportunities import Opportunity, attach_etas, classify, trend_description
-from .policy import ENTRY_MAX_PREMIUM_ATR, TradingPolicy, capped_stop, enforce_live_deadline, live_rr_valid
+from .policy import (
+    ENTRY_MAX_PREMIUM_ATR,
+    TradingPolicy,
+    capped_stop,
+    enforce_live_deadline,
+    live_rr_valid,
+    strategy_enabled,
+)
 from .sequence import SequenceStore, risk_day
 from .strengthening import StrengtheningProfile, collect_evidence, filter_opportunities
 
@@ -25,6 +41,7 @@ TRANSITION_MIN_15M_BARS = 12
 OPPORTUNITY_MIN_15M_BARS = 20
 WELL_MIN_5M_BARS = 25
 ENTRY_MIN_3M_BARS = 25
+OPENING_MIN_3M_BARS = 7
 # One shared completed-bar freshness contract for the engine, tick-level
 # revalidation and the background scanner. This measures the completed candle
 # close timestamp, never the later CPU evaluation timestamp.
@@ -34,6 +51,13 @@ COUNTERTREND_STRATEGIES = {
     Strategy.VWAP_RECLAIM,
     Strategy.OVERSOLD_REVERSAL,
     Strategy.OPENING_RANGE_RETEST,
+    Strategy.FAILED_BREAKDOWN_RECLAIM,
+    Strategy.OPENING_RANGE_LOW_REVERSAL,
+    Strategy.DESCENDING_WEDGE_BREAK,
+    Strategy.QUIET_123_REVERSAL,
+    Strategy.RED_TO_GREEN_REVERSAL,
+    Strategy.GAP_UP_RETEST,
+    Strategy.LIQUIDITY_SWEEP_RECLAIM,
 }
 
 
@@ -84,6 +108,11 @@ def valid_long_targets(entry: float | None, target1: float | None, target2: floa
 
 def _select_opportunity(opportunities: tuple[Opportunity, ...], policy: TradingPolicy | None,
                         completed_close: float | None, _live_price_ignored: float, atr: float | None) -> Opportunity | None:
+    if not opportunities:
+        return None
+    established = tuple(item for item in opportunities if item.strategy in ESTABLISHED_ACTIVE_STRATEGIES)
+    experimental = tuple(item for item in opportunities if item.strategy in EXPERIMENTAL_STRATEGIES)
+    opportunities = established or experimental
     if not opportunities:
         return None
     if policy is None or policy.costs is None:
@@ -230,21 +259,22 @@ def _analyze_structure(bars, live_price, session, reference, indicator_cache):
     frame5 = completed_resample(bars, 5, now=reference)
     frame3 = completed_resample(bars, 3, now=reference)
     transition_ready = len(frame15) >= TRANSITION_MIN_15M_BARS
-    opportunity_data_ready = len(frame15) >= OPPORTUNITY_MIN_15M_BARS
     well_data_ready = len(frame5) >= WELL_MIN_5M_BARS
     entry_data_ready = len(frame3) >= ENTRY_MIN_3M_BARS
+    opening_data_ready = len(frame3) >= OPENING_MIN_3M_BARS
 
     def indicators(minutes, frame):
         return indicator_cache.enrich(minutes, frame, session) if indicator_cache is not None else enriched(frame, session)
 
     data15 = indicators(15, frame15) if transition_ready else pd.DataFrame()
     data5 = indicators(5, frame5) if well_data_ready else pd.DataFrame()
-    data3 = indicators(3, frame3) if entry_data_ready else pd.DataFrame()
+    data3 = indicators(3, frame3) if opening_data_ready else pd.DataFrame()
     trend = _trend(frame15, session, prepared=data15) if transition_ready else (False, False, Strategy.NONE)
     well = _well_rebound(frame5, session, prepared=data5) if well_data_ready else (False, False, False)
     entry_setup = _entry_setup(data3) if entry_data_ready else (False, False, False, None, None)
     swing = _swing_quality(frame5) if well_data_ready else (None, None, None, None)
-    opportunities = classify(frame15, frame5, frame3, live_price, session, prepared=(data15, data5, data3)) if opportunity_data_ready and well_data_ready and entry_data_ready else ()
+    opportunities = classify(frame15, frame5, frame3, live_price, session,
+                             prepared=(data15, data5, data3)) if opening_data_ready else ()
     trend_info = trend_description(frame15, frame5, prepared=data15) if transition_ready and well_data_ready else ("미확정", None)
     evidence = collect_evidence(data15, data5, data3, bars, live_price, session)
     return StructuralAnalysis(
@@ -314,15 +344,16 @@ def evaluate(
     ma60_ready = count15 >= 60
     well_data_ready = count5 >= WELL_MIN_5M_BARS
     entry_data_ready = count3 >= ENTRY_MIN_3M_BARS
+    opening_data_ready = count3 >= OPENING_MIN_3M_BARS
     readiness_reasons = structure.readiness_reasons
     aligned, transitioning, legacy_strategy = structure.trend
     convergence, stochastic_rebound, macd_turn = structure.well
     higher_low, volume_recovery, vwap_recovery, rebound_high, second_low = structure.entry_setup
     net_swing, persistence, confidence, fatigue = structure.swing
     data3 = structure.recent3
-    latest3 = data3.iloc[-1] if entry_data_ready else None
+    latest3 = data3.iloc[-1] if not data3.empty else None
     confirmation_close = float(bars.close.iloc[-1]) if not bars.empty else None
-    opportunities = structure.opportunities
+    opportunities = tuple(item for item in structure.opportunities if strategy_enabled(item.strategy))
     strengthening_audit = {}
     if strengthening_profile is not None:
         opportunities = filter_opportunities(opportunities, structure.evidence, strengthening_profile, policy,
@@ -365,11 +396,12 @@ def evaluate(
     risk_state = RiskState.HARD_EXIT if hard_exit else RiskState.REAL_BREAKDOWN if two_close_breakdown else RiskState.SHAKEOUT if shakeout else RiskState.NORMAL
     countertrend_confirmed = bool(primary and primary.strategy in COUNTERTREND_STRATEGIES)
     excluded = bool((trend_label == "하향" and not countertrend_confirmed) or two_close_breakdown or hard_exit)
+    sequence_ready = transition_ready or primary is not None
 
     state = cycle
     # Avoid writing a false exclusion/cooldown before the 15-minute transition
     # path itself has enough completed bars to be evaluated.
-    if transition_ready:
+    if sequence_ready:
         # A historical pivot breach in a watch-only chart is not a stopped
         # entry plan. Keep current structural exclusion, but do not fabricate
         # a stopped cycle and poison all later setups with a daily hard kill.
@@ -403,7 +435,7 @@ def evaluate(
         elif state.stage == Stage.EXCLUDED and state.cooldown_until and risk_state == RiskState.NORMAL:
             risk_state = RiskState.COOLDOWN
 
-    confirmed_entry = state.entry_price if transition_ready and state.stage in {Stage.ENTRY_WAIT, Stage.FINAL_BUY} else None
+    confirmed_entry = state.entry_price if sequence_ready and state.stage in {Stage.ENTRY_WAIT, Stage.FINAL_BUY} else None
     planned_entry = primary.entry if primary else None
     entry = confirmed_entry or planned_entry
     hard_stop = state.entry_hard_stop if confirmed_entry and state.entry_hard_stop else hard_stop
@@ -420,15 +452,16 @@ def evaluate(
     conditions: dict[str, bool | None] = {f"매매기법: {item.strategy.value}": True for item in opportunities}
     if primary is not None:
         conditions.update(primary.conditions)
-    conditions["진입가격 도달"] = breakout if entry_data_ready else None
+    conditions["진입가격 도달"] = breakout if entry_data_ready or primary is not None else None
     conditions["상승 목표구조 유효"] = not invalid_long_targets if entry is not None else None
     available_conditions = [value for value in conditions.values() if value is not None]
     score = primary.strength if primary else (int(round(sum(value is True for value in available_conditions) / len(available_conditions) * 100)) if available_conditions else 0)
-    all_structure_unavailable = not transition_ready and not well_data_ready and not entry_data_ready
+    all_structure_unavailable = not transition_ready and not well_data_ready and not entry_data_ready and primary is None
     stage = Stage.DATA_WAIT if all_structure_unavailable else state.stage
     if invalid_long_targets and stage in {Stage.ENTRY_WAIT, Stage.FINAL_BUY}:
         stage = Stage.MISSED
-    conditions["FINAL_BUY"] = stage == Stage.FINAL_BUY and risk_state == RiskState.NORMAL if entry_data_ready else None
+    conditions["FINAL_BUY"] = (stage == Stage.FINAL_BUY and risk_state == RiskState.NORMAL
+                                if entry_data_ready or primary is not None else None)
     if stage == Stage.FINAL_BUY:
         basis = f"{strategy.value} 진입 확정 · {primary.basis}" if primary else "진입 확정"
     elif entry:
@@ -477,6 +510,8 @@ def evaluate(
             "opportunity_data_ready": opportunity_data_ready,
             "well_data_ready": well_data_ready,
             "entry_data_ready": entry_data_ready,
+            "opening_data_ready": opening_data_ready,
+            "sequence_ready": sequence_ready,
             "rebound_high": rebound_high,
             "second_higher_low": second_low,
             "vwap_3m": float(latest3.vwap) if latest3 is not None and np.isfinite(latest3.vwap) else None,
@@ -504,7 +539,7 @@ def evaluate(
         # Persist the published stage, not a pre-policy FINAL_BUY that the
         # user never received. Otherwise a rejected setup becomes a phantom
         # active plan and can trigger later stopped-cycle penalties.
-        if transition_ready and result.stage != state.stage:
+        if sequence_ready and result.stage != state.stage:
             state.stage = result.stage
             if state.stage not in {Stage.ENTRY_WAIT, Stage.FINAL_BUY}:
                 state.entry_price = None

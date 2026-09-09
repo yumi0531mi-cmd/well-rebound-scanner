@@ -141,7 +141,7 @@ def mock_same_primary_prices(root):
     store = SequenceStore(root, memory_only=True, use_environment=False)
     bars = history_for_mock()
     old = Opportunity(Strategy.RANGE_REVERSAL, 100, 100, 99, 104, 106, 99.5, "old", {"mock": True})
-    new = Opportunity(Strategy.VWAP_RECLAIM, 100, 100.1, 99.2, 104.2, 106.2, 99.6, "new", {"mock": True})
+    new = Opportunity(Strategy.MOMENTUM_PULLBACK, 100, 100.1, 99.2, 104.2, 106.2, 99.6, "new", {"mock": True})
     policy = TradingPolicy(estimated_costs(Market.KR, KR), "STOCK")
     with patch.object(engine, "classify", return_value=(old,)):
         engine.evaluate("AUDIT", bars, 100., store, now=INSTANT.to_pydatetime(), session=KR, policy=policy)

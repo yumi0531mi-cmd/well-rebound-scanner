@@ -47,14 +47,20 @@ def test_oversold_oscillator_turn_alone_cannot_create_trade():
     items = classify(data, data, data, 100.5, None, prepared=(data, data, data), audit=audit)
     assert Strategy.OVERSOLD_REVERSAL not in {item.strategy for item in items}
     assert "가격 반전 확인" in audit[Strategy.OVERSOLD_REVERSAL.value]
+    # Keep an already-observed resistance above the confirmation candle so
+    # the strengthened candidate still has a causal target structure.
+    data.loc[data.index[-5], "high"] = 108.
     data.loc[data.index[-1], ["high", "low", "close"]] = [103., 99., 102.]
     items = classify(data, data, data, 101., None, prepared=(data, data, data))
     item = next(item for item in items if item.strategy == Strategy.OVERSOLD_REVERSAL)
-    assert item.entry == 101.
+    # Reversal confirmation creates a watch plan; a later completed candle
+    # must cross the confirmation high before SequenceStore can emit ENTRY.
+    assert item.entry == 103.
+    assert item.entry > data.close.iloc[-1]
     assert item.hard_stop == 97.5
 
 
-def test_kr_pullback_adds_only_confirmation_and_preserves_levels_and_us():
+def test_inactive_trend_pullback_is_not_emitted_in_any_market():
     from wellscan.models import Strategy, TradingSession
     from wellscan.opportunities import classify
 
@@ -68,16 +74,8 @@ def test_kr_pullback_adds_only_confirmation_and_preserves_levels_and_us():
         items = classify(data, data, data, 100.5, session, prepared=(data, data, data))
         return next((x for x in items if x.strategy == Strategy.TREND_PULLBACK), None)
 
-    assert selected(TradingSession.US_REGULAR) is not None
+    assert selected(TradingSession.US_REGULAR) is None
     assert selected(TradingSession.KR_REGULAR) is None
     data.loc[data.index[-1], ["high", "low", "close"]] = [103., 99., 102.]
-    kr, us = selected(TradingSession.KR_REGULAR), selected(TradingSession.US_REGULAR)
-    assert kr is not None and us is not None
-    assert kr.conditions == {**us.conditions, "가격 반전 확인": True}
-    for field in ("entry", "hard_stop", "soft_stop", "target1", "target2"):
-        assert getattr(kr, field) == getattr(us, field)
-    for field, value in [("ema9", 98.), ("stoch_k", 20.)]:
-        old = data.loc[data.index[-1], field]
-        data.loc[data.index[-1], field] = value
-        assert selected(TradingSession.KR_REGULAR) is None
-        data.loc[data.index[-1], field] = old
+    assert selected(TradingSession.KR_REGULAR) is None
+    assert selected(TradingSession.US_REGULAR) is None

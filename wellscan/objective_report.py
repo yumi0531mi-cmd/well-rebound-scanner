@@ -1,7 +1,7 @@
 """Per-strategy target1 metrics, never an aggregate deployment verdict."""
 import pandas as pd
 
-from .models import Strategy, TradingSession
+from .models import ACTIVE_STRATEGIES, TradingSession
 from .policy import session_day
 
 
@@ -11,7 +11,7 @@ def hit(trade):
 
 def objective_tables(trades, coverage, session, *, strategies=None, errors=()):
     if strategies is None:
-        strategies = [item.value for item in Strategy if item not in {Strategy.NONE, Strategy.TREND_SWING, Strategy.RANGE_SWING}]
+        strategies = [item.value for item in ACTIVE_STRATEGIES]
     groups = {str(name): [] for name in strategies}
     dates = {day: [] for days in coverage.values() for day in days}
     for trade in trades:

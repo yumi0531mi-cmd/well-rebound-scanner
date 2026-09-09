@@ -47,7 +47,7 @@ def test_trigger_uses_closed_one_minute_not_unfinished_three_minute(monkeypatch,
     frame = pd.DataFrame(dict(open=100., high=101., low=99., close=100., volume=1000.),
                          index=pd.date_range("2026-08-25 09:00", periods=1000, freq="min"))
     frame.loc[frame.index[-1], "close"] = 100.5
-    item = Opportunity(Strategy.TREND_PULLBACK, 100, 100.2, 98.5, 105, 107, 99, "mock", {"mock": True})
+    item = Opportunity(Strategy.RANGE_REVERSAL, 100, 100.2, 98.5, 105, 107, 99, "mock", {"mock": True})
     monkeypatch.setattr("wellscan.engine.classify", lambda *a, **k: (item,))
     result = evaluate("TEST", frame, 100.5, SequenceStore(tmp_path, memory_only=True))
     assert result.final_buy

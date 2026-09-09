@@ -11,10 +11,15 @@ import os
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, time, timedelta
 
-from .models import Market, ScanResult, Stage, TradingSession
+from .models import ACTIVE_STRATEGIES, Market, ScanResult, Stage, Strategy, TradingSession
 from .sessions import KST, NEW_YORK, _market_hours, session_status, us_session_window
 
 ENTRY_MAX_PREMIUM_ATR = 0.25
+
+
+def strategy_enabled(strategy: Strategy) -> bool:
+    """Central fixed portfolio switch; disabled strategies remain loadable."""
+    return strategy in ACTIVE_STRATEGIES
 
 
 @dataclass(frozen=True)

@@ -19,7 +19,7 @@ from wellscan.engine import evaluate, revalidate_live
 from wellscan.execution import local_time
 from wellscan.history import HistoryCache
 from wellscan.kis import KISClient, KISError
-from wellscan.models import Candidate, Market, ScanResult, Stage, TradingSession
+from wellscan.models import ACTIVE_STRATEGY_COUNT, Candidate, Market, ScanResult, Stage, TradingSession
 from wellscan.performance import TIMINGS
 from wellscan.policy import session_day
 from wellscan.quotes import QuoteBook
@@ -161,11 +161,17 @@ st.markdown(
 .action-methods{font-size:.78rem;color:#475569;margin:.25rem 0;overflow-wrap:anywhere}
 .action-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.2rem .7rem;margin-top:.35rem}
 .action-cell{font-size:.84rem;min-width:0;overflow-wrap:anywhere}
+.tracking-history{margin:.35rem 0 1rem;padding-left:1.75rem}
+.tracking-history li{margin:.4rem 0;padding:.55rem .65rem;border:1px solid #dbe3ee;border-radius:10px;background:#f8fafc;overflow-wrap:anywhere}
+.tracking-history li::marker{font-weight:800;color:#475569}
+.tracking-name{font-weight:850}.tracking-status{font-weight:750;color:#334155}
+.tracking-meta{display:block;margin-top:.18rem;font-size:.78rem;color:#64748b}
 [data-testid="stMetric"]{border:1px solid #dbe3ee;border-radius:12px;padding:.55rem;background:#f8fafc}
 @media(max-width:700px){
   .block-container{padding:3.35rem .55rem 2rem}.hero h1{font-size:1.35rem}.hero p{font-size:.82rem;margin:.2rem 0}
   .version{font-size:.7rem;margin:.3rem 0 .55rem}.action-tile{padding:.58rem;border-radius:10px;margin-bottom:.35rem}
   .action-title{font-size:.98rem}.action-line{font-size:.82rem}.action-command{font-size:.84rem;margin-top:.35rem}.action-grid{grid-template-columns:1fr;gap:.16rem}.action-cell{font-size:.8rem}.action-methods{font-size:.73rem}
+  .tracking-history{padding-left:1.45rem}.tracking-history li{margin:.32rem 0;padding:.48rem .52rem}.tracking-status{display:block;margin-top:.12rem}.tracking-meta{font-size:.73rem}
   [data-testid="stMetric"]{padding:.35rem}[data-testid="stMetricLabel"]{font-size:.7rem}
   [data-testid="stSidebar"]{min-width:min(86vw,320px);max-width:min(86vw,320px)}
 }
@@ -374,21 +380,36 @@ def render_tracking_case(case: SignalCase) -> None:
 
 
 def _tracking_history_html(cases: list[SignalCase]) -> str:
-    """Build one chronological list from persisted paper-execution states."""
+    """Render persisted states only; never infer a lifecycle from live cards."""
     items = []
-    for case in cases:
+    for case in sorted(cases, key=lambda item: item.signaled_at):
         name = case.display_name or case.symbol.split(":")[-1]
         status_text = ValidationStore.live_status(case)
-        items.append(f"<li>{html.escape(name)} · {html.escape(status_text)}</li>")
+        methods = getattr(case, "matched_strategies", None) or (case.strategy,)
+        if isinstance(methods, str):
+            methods = (methods,)
+        methods_text = " · ".join(str(method) for method in methods)
+        trend_text = str(getattr(case, "trend_label", None) or "추세 기록 없음")
+        try:
+            signal_time = local_time(case.signaled_at, TradingSession(case.session)).strftime("%H:%M")
+        except (TypeError, ValueError):
+            signal_time = "시각 기록 오류"
+        items.append(
+            '<li><span class="tracking-name">'
+            f"{html.escape(name)}</span> · "
+            f'<span class="tracking-status">{html.escape(status_text)}</span>'
+            f'<span class="tracking-meta">{html.escape(trend_text)} · '
+            f"{html.escape(methods_text)} · {html.escape(signal_time)}</span></li>"
+        )
     return f'<ol class="tracking-history">{"".join(items)}</ol>' if items else ""
 
 
 def render_tracking_history(cases: list[SignalCase]) -> None:
     """Keep today's complete persisted lifecycle visible without a collapsed panel."""
-    st.subheader("오늘 후보·진입 진행 이력 · 실제 주문 아님")
+    st.subheader("오늘 후보 이탈·진입 진행 이력 · 실제 주문 아님")
     history_html = _tracking_history_html(cases)
     if not history_html:
-        st.info("현재 세션 신호 진행 이력: 아직 기록 없음")
+        st.info("오늘 저장된 신호 진행 이력: 아직 기록 없음")
         return
     st.markdown(history_html, unsafe_allow_html=True)
 
@@ -531,7 +552,11 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.caption("9개 활성 매매기법 전체의 실제 ENTRY를 합산한 세션별 고유 진입종목 최소 5개 기준(없으면 없음) · 80% 승률 미검증 · 자동 주문 없음 · -1.5%는 손절 트리거이며 갭 손실 한도가 아님")
+st.caption(
+    f"{ACTIVE_STRATEGY_COUNT}개 활성 매매기법 전체의 실제 ENTRY를 합산한 세션별 고유 진입종목 "
+    "최소 5개 기준(없으면 없음) · 80% 승률 미검증 · 자동 주문 없음 · "
+    "-1.5%는 손절 트리거이며 갭 손실 한도가 아님"
+)
 if not os.environ.get("WELLSCAN_INSTRUMENT_POLICIES"):
     st.warning("추정 비용 적용 중 · 상품 분류 미확인 종목은 관찰 전용입니다. 실제 계좌 수익과 다를 수 있습니다.")
 
@@ -807,7 +832,7 @@ def render_current_session_tracking() -> None:
         st.error(f"신호 기록 조회 실패 · {safe_pipeline_message(exc)}")
         return
     st.caption(
-        f"9개 활성 매매기법 전체 합산 · 이번 세션 고유 모의 진입종목 {progress['unique_symbols']}개 "
+        f"{ACTIVE_STRATEGY_COUNT}개 활성 매매기법 전체 합산 · 이번 세션 고유 모의 진입종목 {progress['unique_symbols']}개 "
         f"(최소 5개 기준, 없으면 없음) · 신호 {progress['signals']}건 · "
         f"모의 진입 {progress['entries']}건 · 미체결 대기 {progress['pending']}건 · 실제 주문 아님"
     )

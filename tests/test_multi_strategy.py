@@ -4,13 +4,35 @@ import numpy as np
 import pandas as pd
 
 from wellscan.indicators import completed_resample
-from wellscan.models import Strategy
+from wellscan.models import (
+    ACTIVE_STRATEGIES,
+    ACTIVE_STRATEGY_COUNT,
+    ESTABLISHED_ACTIVE_STRATEGIES,
+    EXPERIMENTAL_STRATEGIES,
+    Strategy,
+)
 from wellscan.opportunities import classify, estimate_minutes
 
 
 def test_momentum_pullback_label_does_not_claim_unproved_first_occurrence() -> None:
     assert Strategy.MOMENTUM_PULLBACK.value == "급등 후 눌림"
     assert Strategy("급등 후 첫 눌림") is Strategy.MOMENTUM_PULLBACK
+
+
+def test_active_strategy_registry_contains_only_the_approved_six() -> None:
+    assert ACTIVE_STRATEGY_COUNT == 6
+    assert len(ACTIVE_STRATEGIES) == len(set(ACTIVE_STRATEGIES))
+    assert ESTABLISHED_ACTIVE_STRATEGIES == (
+        Strategy.RANGE_REVERSAL,
+        Strategy.MOMENTUM_PULLBACK,
+        Strategy.OVERSOLD_REVERSAL,
+    )
+    assert EXPERIMENTAL_STRATEGIES == (
+        Strategy.PRICE_STRENGTH_PULLBACK_RESUME,
+        Strategy.LIQUIDITY_SWEEP_RECLAIM,
+        Strategy.PRIOR_HIGH_BREAKOUT_RETEST,
+    )
+    assert ACTIVE_STRATEGIES == ESTABLISHED_ACTIVE_STRATEGIES + EXPERIMENTAL_STRATEGIES
 
 
 def rising_bars(count: int = 960) -> pd.DataFrame:
@@ -31,7 +53,7 @@ def rising_bars(count: int = 960) -> pd.DataFrame:
     )
 
 
-def test_rising_chart_is_classified_by_an_independent_strategy() -> None:
+def test_plain_rising_chart_is_not_forced_into_an_inactive_trend_strategy() -> None:
     bars = rising_bars()
     items = classify(
         completed_resample(bars, 15),
@@ -41,11 +63,9 @@ def test_rising_chart_is_classified_by_an_independent_strategy() -> None:
         None,
     )
 
-    assert items
-    assert any(item.strategy in {Strategy.TREND_CONTINUATION, Strategy.TREND_PULLBACK} for item in items)
+    assert not any(item.strategy in {Strategy.TREND_CONTINUATION, Strategy.TREND_PULLBACK} for item in items)
+    assert all(item.strategy in ACTIVE_STRATEGIES for item in items)
     assert all(item.hard_stop < item.entry < item.target1 < item.target2 for item in items)
-    trend_items = [item for item in items if item.strategy in {Strategy.TREND_CONTINUATION, Strategy.TREND_PULLBACK}]
-    assert all("구조" in item.basis or "눌림" in item.basis for item in trend_items)
 
 
 def test_eta_uses_observed_bar_speed_and_distance() -> None:

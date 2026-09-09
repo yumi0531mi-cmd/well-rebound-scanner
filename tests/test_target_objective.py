@@ -49,7 +49,7 @@ def test_bad_structural_inputs_do_not_create_levels(entry, support, atr):
     assert _levels(Strategy.RANGE_REVERSAL, entry, support, 105, atr, 106, {"mock": True}, "mock") is None
 
 
-def test_breakout_uses_preexisting_resistance_not_next_overhead_pivot(monkeypatch):
+def test_inactive_breakout_is_not_emitted_even_when_its_old_pattern_matches(monkeypatch):
     from wellscan.opportunities import classify
     frame = pd.DataFrame(dict(open=99., high=100., low=98., close=99., volume=1000.,
                               ema9=100., ema20=99., vwap=99., atr=2., ma5=99., ma20=99., ma60=99.,
@@ -59,9 +59,7 @@ def test_breakout_uses_preexisting_resistance_not_next_overhead_pivot(monkeypatc
     # A later pivot at 100 is the tested barrier; 110 is overhead resistance.
     monkeypatch.setattr("wellscan.opportunities._last_pivots", lambda _: ([110., 100.], [98.]))
     items = classify(frame, frame, frame, 100.5, None, prepared=(frame, frame, frame))
-    breakout = next(item for item in items if item.strategy == Strategy.BREAKOUT)
-    assert breakout.entry == 100
-    assert breakout.target1 == 110
+    assert Strategy.BREAKOUT not in {item.strategy for item in items}
 
 
 @pytest.mark.parametrize("column,value", [("close", float("nan")), ("volume", -1), ("high", 98), ("low", 102)])
@@ -76,7 +74,7 @@ def test_vector_validation_keeps_error_detection(column, value):
 
 def test_waiting_strategy_does_not_hide_confirmed_cost_valid_strategy():
     from wellscan.engine import _select_opportunity
-    waiting = _levels(Strategy.TREND_CONTINUATION, 102, 100, 110, 1, 110, {"mock": True}, "mock")
+    waiting = _levels(Strategy.MOMENTUM_PULLBACK, 102, 100, 110, 1, 110, {"mock": True}, "mock")
     ready = _levels(Strategy.RANGE_REVERSAL, 100, 99, 105, 1, 106, {"mock": True}, "mock")
     assert _select_opportunity((waiting, ready), TradingPolicy(costs(), "STOCK"), 100.2, 100.2, 1) == ready
     expensive = replace(ready, target1=100.1)
@@ -85,8 +83,8 @@ def test_waiting_strategy_does_not_hide_confirmed_cost_valid_strategy():
 
 def test_unfillable_stale_trigger_does_not_hide_executable_alternative():
     from wellscan.engine import _select_opportunity
-    stale = _levels(Strategy.TREND_CONTINUATION, 100, 99, 110, 1, 110, {"mock": True}, "mock")
-    fresh = _levels(Strategy.TREND_PULLBACK, 100.8, 99.8, 110, 1, 110, {"mock": True}, "mock")
+    stale = _levels(Strategy.RANGE_REVERSAL, 100, 99, 110, 1, 110, {"mock": True}, "mock")
+    fresh = _levels(Strategy.MOMENTUM_PULLBACK, 100.8, 99.8, 110, 1, 110, {"mock": True}, "mock")
     assert _select_opportunity((stale, fresh), TradingPolicy(costs(), "STOCK"), 101, 101, 1) == fresh
 
 
@@ -186,8 +184,9 @@ def test_downtrend_without_plan_does_not_create_future_cooldown(monkeypatch, tmp
     (Strategy.TREND_CONTINUATION, True),
     (Strategy.OVERSOLD_REVERSAL, False),
     (Strategy.RANGE_REVERSAL, False),
-    (Strategy.VWAP_RECLAIM, False),
-    (Strategy.OPENING_RANGE_RETEST, False),
+    (Strategy.LIQUIDITY_SWEEP_RECLAIM, False),
+    (Strategy.VWAP_RECLAIM, True),
+    (Strategy.OPENING_RANGE_RETEST, True),
 ])
 def test_downtrend_gate_respects_independent_reversal_strategy(monkeypatch, tmp_path, strategy, excluded):
     from test_audit_regressions import frame
