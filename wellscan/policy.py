@@ -1,4 +1,4 @@
-"""Shared long-only risk policy. Rates are fractions, never inferred from ticker names.
+﻿"""Shared long-only risk policy. Rates are fractions, never inferred from ticker names.
 
 No broker orders are sent. Unknown instrument/cost metadata blocks new signals,
 not quote display. Explicit scenario costs remain unverified for profitability.
@@ -14,7 +14,7 @@ from datetime import UTC, datetime, time, timedelta
 from .models import ACTIVE_STRATEGIES, Market, ScanResult, Stage, Strategy, TradingSession
 from .sessions import KST, NEW_YORK, _market_hours, session_status, us_session_window
 
-ENTRY_MAX_PREMIUM_ATR = 0.25
+ENTRY_MAX_PREMIUM_ATR = 0.5
 
 
 def strategy_enabled(strategy: Strategy) -> bool:
