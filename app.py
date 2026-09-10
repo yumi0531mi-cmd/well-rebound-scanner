@@ -105,14 +105,22 @@ if st.query_params.get("admin") == "backtest":
             # The admin replay and the daemon/UI share one KIS token and one
             # durable-store owner.  A second KISClient here could issue a
             # duplicate token after a deployment restart.
+            _runtime = shared_runtime_components()
+            _target_bars = 900 + _days * 450
+
+            def _history_loader(candidate, _client=_runtime.client, _history=_runtime.history, _target=_target_bars):
+                return _history.backfill_candidate(_client, candidate, _target)
+
             _report = run(
-                shared_runtime_components().client,
+                _runtime.client,
                 days=_days,
                 top_n=_top_n,
                 market=_market,
                 progress=_progress_area.caption,
                 session=_selected_session,
+                history_loader=_history_loader,
             )
+
             _failed = _report["status"] in {"FAILED", "PARTIAL"}
             _status.update(label="⚠ 검증 실패 또는 일부 실패" if _failed else "계산 종료 · 수익성 보장 아님",
                            state="error" if _failed else "complete")
