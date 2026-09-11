@@ -136,7 +136,7 @@ def config(tmp_path: Path, **changes):
 def test_candidate_limit_is_derived_from_kis_call_budget():
     defaults = ScannerServiceConfig()
     assert defaults.initial_history_bars == HistoryCache.WARM_TARGET_BARS == 5500
-    assert defaults.maximum_completed_bar_age_seconds == 90.0
+    assert defaults.maximum_completed_bar_age_seconds == 600.0
     assert budgeted_candidate_limit(Market.KR, 10, 80) == 10
     assert budgeted_candidate_limit(Market.US, 10, 80) == 5
     assert budgeted_candidate_limit(Market.KR, 4, 80) == 0

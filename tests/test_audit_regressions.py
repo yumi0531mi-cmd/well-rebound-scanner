@@ -57,7 +57,7 @@ def signal():
 
 
 @pytest.mark.parametrize("price,age,stage", [(97, 1, Stage.EXCLUDED), (99, 1, Stage.ENTRY_WAIT),
-                                          (103, 1, Stage.MISSED), (100, 120, Stage.DATA_WAIT)])
+                                          (103, 1, Stage.MISSED), (100, 700, Stage.DATA_WAIT)])
 def test_live_signal_is_invalidated_immediately(price, age, stage):
     original = signal()
     checked = revalidate_live(original, price, original.evaluated_at + timedelta(seconds=age))
@@ -220,7 +220,7 @@ def test_forming_bar_cannot_hide_a_stale_last_completed_bar(tmp_path):
     now = pd.Timestamp("2026-08-21 10:00:30", tz="Asia/Seoul").to_pydatetime()
     bars = pd.DataFrame(
         dict(open=[100, 100], high=[101, 101], low=[99, 99], close=[100, 100], volume=[1000, 1000]),
-        index=pd.DatetimeIndex([pd.Timestamp("2026-08-21 09:55"), pd.Timestamp("2026-08-21 10:00")]),
+        index=pd.DatetimeIndex([pd.Timestamp("2026-08-21 09:35"), pd.Timestamp("2026-08-21 09:40")]),
     )
     with pytest.raises(ValueError, match="갱신 지연"):
         evaluate("STALE-COMPLETED", bars, 100, SequenceStore(tmp_path, use_environment=False),
