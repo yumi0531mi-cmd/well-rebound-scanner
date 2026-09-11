@@ -45,7 +45,7 @@ OPENING_MIN_3M_BARS = 7
 # One shared completed-bar freshness contract for the engine, tick-level
 # revalidation and the background scanner. This measures the completed candle
 # close timestamp, never the later CPU evaluation timestamp.
-MAX_COMPLETED_BAR_AGE_SECONDS = 90.0
+MAX_COMPLETED_BAR_AGE_SECONDS = 600.0
 COUNTERTREND_STRATEGIES = {
     Strategy.RANGE_REVERSAL,
     Strategy.VWAP_RECLAIM,
