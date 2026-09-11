@@ -20,7 +20,7 @@ TABLE_NAME = "scanner_minute_bars"
 AUTH_TABLE_NAME = "scanner_auth_cache"
 SIGNAL_TABLE_NAME = "scanner_signal_cases"
 SEQUENCE_TABLE_NAME = "scanner_sequence_states"
-MAX_BARS_PER_SYMBOL = 3000
+MAX_BARS_PER_SYMBOL = 7000
 DB_RETRY_COOLDOWN_SECONDS = 60
 
 

@@ -45,7 +45,7 @@ class HistoryCache:
 
     MAX_BACKFILL_WORKERS = 2
     INITIAL_READY_BARS = 180
-    WARM_TARGET_BARS = 1000
+    WARM_TARGET_BARS = 5500
 
     def __init__(self, root: str | Path = ".scanner_data/history", durable_store: CockroachBarStore | None = None):
         self.root = Path(root)
