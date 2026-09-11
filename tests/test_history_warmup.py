@@ -74,7 +74,7 @@ def test_warmup_skips_a_cache_that_already_meets_target(tmp_path) -> None:
     candidate = Candidate("005930", "삼성전자", 70000, 1, 1, 1)
     client = NeverCalledClient()
     cache = HistoryCache(tmp_path)
-    cache.merge(candidate.symbol, minute_frame("2026-08-21 09:00", 1000))
+    cache.merge(candidate.symbol, minute_frame("2026-08-21 09:00", 5500))
 
     cache.schedule_warmup(client, (candidate,))  # type: ignore[arg-type]
 
