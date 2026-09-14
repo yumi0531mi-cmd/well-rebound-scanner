@@ -8,12 +8,37 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from config import PROBABILITY_FEATURE_FIELDS, PROBABILITY_L2_PENALTY, PROBABILITY_MIN_TRAINING_TRADES
+from config import (
+    PROBABILITY_FEATURE_FIELDS,
+    PROBABILITY_L2_PENALTY,
+    PROBABILITY_MIN_TRAINING_TRADES,
+    PROBABILITY_MODEL_VERSION,
+)
 
 
 def target1_hit(trade: dict[str, Any]) -> bool:
     result = str(trade.get("result", ""))
     return result == "TARGET2" or result.startswith("TARGET1_THEN_")
+
+
+def signal_feature_snapshot(result: Any) -> dict[str, float | None]:
+    """Freeze model inputs exactly as observed when the signal was created."""
+    direct = {
+        "score": result.score,
+        "persistence": result.persistence,
+        "evidence_confidence": result.evidence_confidence,
+        "pattern_fatigue": result.pattern_fatigue,
+        "net_swing_pct": result.net_swing_pct,
+    }
+    payload: dict[str, float | None] = {}
+    for name in PROBABILITY_FEATURE_FIELDS:
+        value = direct.get(name, result.diagnostics.get(name))
+        try:
+            number = float(value) if value is not None else None
+        except (TypeError, ValueError):
+            number = None
+        payload[name] = number if number is not None and math.isfinite(number) else None
+    return payload
 
 
 def causal_factor_evidence(bars: pd.DataFrame, entry: float | None,
@@ -56,9 +81,10 @@ def causal_factor_evidence(bars: pd.DataFrame, entry: float | None,
 
 
 def _vector(trade: dict[str, Any]) -> np.ndarray | None:
+    stored = trade.get("probability_features")
     values = []
     for name in PROBABILITY_FEATURE_FIELDS:
-        value = trade.get(name)
+        value = stored.get(name) if isinstance(stored, dict) else trade.get(name)
         if value is None:
             return None
         try:
@@ -99,6 +125,44 @@ def _predict(vector: np.ndarray, fitted: tuple[np.ndarray, np.ndarray, np.ndarra
     return float(1 / (1 + math.exp(-max(-35, min(35, value)))))
 
 
+def estimate_live_signal(features: dict[str, float | None], evaluated_at: Any,
+                         prior_cases: list[Any], net_rr: float | None) -> dict[str, Any]:
+    """Fit only cases resolved before this signal; the estimate never qualifies performance."""
+    current = pd.Timestamp(evaluated_at)
+    if current.tzinfo is None:
+        raise ValueError("확률 평가 시각에는 시간대가 필요합니다")
+    vectors: list[np.ndarray] = []
+    labels: list[float] = []
+    for case in prior_cases:
+        state = getattr(case, "execution_state", None)
+        if (getattr(case, "probability_model_version", None) != PROBABILITY_MODEL_VERSION
+                or not getattr(case, "verified_execution_contract", False)
+                or not isinstance(state, dict) or state.get("phase") != "CLOSED" or not state.get("exit_at")):
+            continue
+        resolved = pd.Timestamp(state["exit_at"])
+        if resolved.tzinfo is None or resolved >= current:
+            continue
+        vector = _vector({"probability_features": getattr(case, "probability_features", None)})
+        if vector is not None:
+            vectors.append(vector)
+            labels.append(float(bool(state.get("target1_at"))))
+    current_vector = _vector({"probability_features": features})
+    usable = len(vectors) >= PROBABILITY_MIN_TRAINING_TRADES and len(set(labels)) == 2
+    probability = _predict(current_vector, _fit_logistic(np.vstack(vectors), np.asarray(labels))) \
+        if usable and current_vector is not None else None
+    expected_r = probability * float(net_rr) - (1 - probability) \
+        if probability is not None and net_rr is not None and math.isfinite(float(net_rr)) else None
+    return {
+        "probability_model_version": PROBABILITY_MODEL_VERSION,
+        "target1_probability": probability,
+        "expected_value_r": expected_r,
+        "probability_training_trades": len(vectors),
+        "probability_status": "WALK_FORWARD_UNQUALIFIED" if probability is not None else
+                              "SIGNAL_FEATURES_UNAVAILABLE" if current_vector is None else
+                              "INSUFFICIENT_PRIOR_TRADES",
+    }
+
+
 def attach_walk_forward_estimates(trades: list[dict[str, Any]]) -> dict[str, Any]:
     """Predict each timestamp from strictly earlier resolved entries only."""
     ordered = sorted(enumerate(trades), key=lambda item: pd.Timestamp(item[1]["entry_at"]))
@@ -137,6 +201,7 @@ def attach_walk_forward_estimates(trades: list[dict[str, Any]]) -> dict[str, Any
     calibration = [{"probability_band": f"{key * 10}-{(key + 1) * 10}%", "count": len(values),
                     "observed_target1_rate": sum(values) / len(values)} for key, values in sorted(buckets.items())]
     return {
+        "model_version": PROBABILITY_MODEL_VERSION,
         "status": "WALK_FORWARD_UNQUALIFIED",
         "predictions": len(predictions),
         "brier_score": float(np.mean([(probability - label) ** 2 for probability, label in predictions])),

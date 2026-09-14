@@ -1,9 +1,16 @@
 from copy import deepcopy
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
 import pandas as pd
 
-from wellscan.probability import attach_walk_forward_estimates, causal_factor_evidence
+from config import PROBABILITY_MODEL_VERSION
+from wellscan.probability import (
+    attach_walk_forward_estimates,
+    causal_factor_evidence,
+    estimate_live_signal,
+    signal_feature_snapshot,
+)
 
 
 def _trade(index, at=None, hit=None):
@@ -62,3 +69,37 @@ def test_causal_factor_evidence_is_finite_and_trailing():
 def test_causal_factor_evidence_rejects_invalid_bars():
     bars = pd.DataFrame({"high": [1.0] * 140, "low": [0.5] * 139 + [float("nan")], "close": [0.8] * 140})
     assert all(value is None for value in causal_factor_evidence(bars, 1, 2).values())
+
+
+def test_walk_forward_accepts_immutable_signal_feature_snapshot():
+    trades = [_trade(index) for index in range(40)]
+    for trade in trades:
+        trade["probability_features"] = signal_feature_snapshot(
+            type("Result", (), {**trade, "diagnostics": trade})()
+        )
+        for name in trade["probability_features"]:
+            trade.pop(name, None)
+    assert attach_walk_forward_estimates(trades)["predictions"] == 10
+
+
+def test_live_estimate_uses_only_already_resolved_immutable_cases():
+    cases = []
+    for index in range(31):
+        trade = _trade(index)
+        features = signal_feature_snapshot(type("Result", (), {**trade, "diagnostics": trade})())
+        resolved = datetime(2026, 1, 2, 10, tzinfo=UTC) + timedelta(minutes=index)
+        cases.append(SimpleNamespace(
+            verified_execution_contract=True,
+            probability_model_version=PROBABILITY_MODEL_VERSION,
+            probability_features=features,
+            execution_state={"phase": "CLOSED", "exit_at": resolved.isoformat(),
+                             "target1_at": resolved.isoformat() if index % 3 else None},
+        ))
+    current = datetime(2026, 1, 3, 10, tzinfo=UTC)
+    future = current + timedelta(minutes=1)
+    cases[-1].execution_state["exit_at"] = future.isoformat()
+    result = estimate_live_signal(cases[0].probability_features, current, cases, 1.2)
+    assert result["probability_status"] == "WALK_FORWARD_UNQUALIFIED"
+    assert result["probability_training_trades"] == 30
+    assert 0 < result["target1_probability"] < 1
+    assert result["expected_value_r"] is not None

@@ -54,6 +54,7 @@ TARGET_DISTANCE_STRICT_MAX_ATR = 4.0
 # Walk-forward probability model (features are observed at signal time only)
 PROBABILITY_MIN_TRAINING_TRADES = 30
 PROBABILITY_L2_PENALTY = 1.0
+PROBABILITY_MODEL_VERSION = "causal-logit-v1"
 PROBABILITY_FEATURE_FIELDS = (
     "score",
     "persistence",

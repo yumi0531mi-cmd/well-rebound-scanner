@@ -20,6 +20,7 @@ from config import (
     BACKTEST_MIN_TOP_N,
     MIN_TRADES_PER_MARKET,
     MIN_UNIQUE_ENTRIES_PER_SESSION,
+    PROBABILITY_MIN_TRAINING_TRADES,
 )
 from kis_data_fetcher import KISMinuteDataFetcher
 from wellscan import APP_VERSION, ENGINE_VERSION
@@ -367,6 +368,16 @@ def _stage_text(stage: Stage) -> str:
     return stage.value
 
 
+def probability_text(case: SignalCase) -> str:
+    probability = getattr(case, "target1_probability", None)
+    count = int(getattr(case, "probability_training_trades", 0))
+    if probability is None:
+        return f"T1 확률 미산출 · 완료 학습 {count}/{PROBABILITY_MIN_TRAINING_TRADES}건"
+    expected = getattr(case, "expected_value_r", None)
+    ev = f" · EV {expected:+.2f}R" if expected is not None else ""
+    return f"T1 추정 {probability * 100:.1f}%{ev} · 독립검증 전 미확정"
+
+
 def _tracking_rows(cases: list[SignalCase]) -> list[dict[str, str]]:
     rows = []
     for case in cases:
@@ -392,6 +403,7 @@ def _tracking_rows(cases: list[SignalCase]) -> list[dict[str, str]]:
             "구조 기준 완료봉": diagnostic_timestamp_text(getattr(case, "completed_bar_at", None), "기록 없음"),
             "현재가 수신": str(case.last_checked_at or "미수신"),
             "신호시각": case.signaled_at[11:16],
+            "확률모델": probability_text(case),
             "모의 순수익률": price_text(case.realized_net_pct),
         })
     return rows
@@ -421,6 +433,7 @@ def render_tracking_case(case: SignalCase) -> None:
         f'<div class="action-cell">진입 ETA {eta_minutes_text(getattr(case, "entry_eta_minutes", None))}</div>'
         f'<div class="action-cell">T1 ETA {eta_minutes_text(getattr(case, "target1_eta_minutes", None))}</div>'
         f'<div class="action-cell">T2 ETA {eta_minutes_text(getattr(case, "target2_eta_minutes", None))}</div>'
+        f'<div class="action-cell">확률모델 {html.escape(probability_text(case))}</div>'
         f'<div class="action-cell">구조 기준 완료봉 {html.escape(diagnostic_timestamp_text(getattr(case, "completed_bar_at", None), "기록 없음"))}</div>'
         f'<div class="action-cell">현재가 수신 {html.escape(str(case.last_checked_at or "미수신"))}</div>'
         '</div></div>',

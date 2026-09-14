@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-09-15T03:10:16+09:00",
+  "updated_at": "2026-09-15T03:16:24+09:00",
   "current_step": 3,
   "completed_steps": [
     "기존 저장소와 인계 보고서 확인",
@@ -18,7 +18,10 @@
     "미래 스냅샷 대체 없는 과거시점 후보군 마스크 구현",
     "스냅샷 누락·노후 구간 PARTIAL 강등 구현",
     "변동성 z-score·추세 지속성·목표 이동여력 인과 팩터 구현",
-    "금지 연구 테스트 제외 운영 회귀 전체 통과; Ruff/pip check 통과"
+    "금지 연구 테스트 제외 운영 회귀 전체 통과; Ruff/pip check 통과",
+    "신호 발생 시점 확률 팩터와 모델 버전 영구 저장 구현",
+    "청산이 먼저 끝난 동일 시장·세션 사례만 쓰는 실시간 인과 확률·EV 구현",
+    "운영 회귀 474개 통과; 확률 미산출/미검증 상태 웹 표시"
   ],
   "files": {
     "config.py": "created; qualification/risk/cost/data/model settings centralized",
@@ -28,7 +31,9 @@
     "app.py": "web backtest extended to 60 days and 100 symbols; probability calibration shown",
     "wellscan/backtest.py": "60-day contract, point-in-time universe mask, causal probability/EV reporting implemented",
     "wellscan/universe_history.py": "created; future-free candidate membership and stale snapshot rejection",
-    "wellscan/probability.py": "causal volatility, persistence, move-capacity factors added"
+    "wellscan/probability.py": "causal factors, immutable signal snapshots, resolved-before-signal live estimator implemented",
+    "wellscan/validation.py": "signal-time features and unqualified probability/EV persisted",
+    "app.py": "point-in-time backtest and explicit live probability training/qualification labels"
   },
   "verified_metrics": {
     "target1_goal": 0.8,
@@ -46,7 +51,6 @@
     "no_relaxation": true
   },
   "next_actions": [
-    "persist signal-time probability features for future live walk-forward training",
     "deploy candidate snapshot collection after explicit push approval and accumulate complete point-in-time coverage",
     "run actual KIS 60-day development validation when credentials are available; local credentials currently absent",
     "push commit 48687c9 to origin/main after explicit deployment approval",

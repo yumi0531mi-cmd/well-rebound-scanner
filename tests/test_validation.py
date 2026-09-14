@@ -177,6 +177,10 @@ def test_signal_case_persists_common_engine_display_snapshot_and_loads_old_rows(
     assert restored.matched_strategies == ("박스권 반등", "VWAP 회복")
     assert (restored.entry_eta_minutes, restored.target1_eta_minutes, restored.target2_eta_minutes) == (2, 7, 12)
     assert restored.completed_bar_at == case.signaled_at
+    assert restored.probability_features["score"] == 100
+    assert restored.probability_features["atr_pct"] is None
+    assert restored.probability_model_version == "causal-logit-v1"
+    assert restored.probability_status == "SIGNAL_FEATURES_UNAVAILABLE"
 
     old_payload = {
         "case_id": "old-row", "symbol": "KR:KRX:KR_REGULAR:OLD",
@@ -187,6 +191,7 @@ def test_signal_case_persists_common_engine_display_snapshot_and_loads_old_rows(
     store._path("old-row").write_text(json.dumps(old_payload), encoding="utf-8")
     old = next(item for item in store.cases() if item.case_id == "old-row")
     assert old.matched_strategies == () and old.completed_bar_at is None
+    assert old.probability_features is None
 
 
 def test_us_day_cases_do_not_split_at_new_york_midnight(tmp_path) -> None:

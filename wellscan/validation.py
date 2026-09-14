@@ -10,11 +10,14 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 from filelock import FileLock
 
+from config import PROBABILITY_MODEL_VERSION
+
 from .bar_store import CockroachBarStore
 from .execution import EXECUTION_VERSION, Bar, Phase, Plan, State, advance, local_time
 from .indicators import normalize_bars
 from .models import ScanResult, TradingSession
 from .policy import Costs, session_day
+from .probability import estimate_live_signal, signal_feature_snapshot
 from .sequence import SequenceStore
 from .sessions import filter_session_bars
 
@@ -78,6 +81,12 @@ class SignalCase:
     target1_eta_minutes: int | None = None
     target2_eta_minutes: int | None = None
     completed_bar_at: str | None = None
+    probability_features: dict[str, float | None] | None = None
+    probability_model_version: str | None = None
+    target1_probability: float | None = None
+    expected_value_r: float | None = None
+    probability_training_trades: int = 0
+    probability_status: str = "NOT_EVALUATED"
 
     def __post_init__(self):
         # JSON encodes tuples as arrays. Normalize new and old durable rows to
@@ -271,6 +280,10 @@ class ValidationStore:
             minimum_rr=float(result.diagnostics.get("policy_minimum_rr", 1.0)),
             structural_stop=structural_stop,
         )
+        estimate = estimate_live_signal(
+            signal_feature_snapshot(result), result.evaluated_at,
+            self.cases(market=market, session=session), result.diagnostics.get("net_rr_target1"),
+        )
         case = SignalCase(
             case_id=case_id,
             symbol=result.symbol,
@@ -300,6 +313,12 @@ class ValidationStore:
             target2_eta_minutes=levels.target2_eta_minutes,
             completed_bar_at=(str(result.diagnostics["completed_bar_at"])
                               if result.diagnostics.get("completed_bar_at") is not None else None),
+            probability_features=signal_feature_snapshot(result),
+            probability_model_version=PROBABILITY_MODEL_VERSION,
+            target1_probability=estimate["target1_probability"],
+            expected_value_r=estimate["expected_value_r"],
+            probability_training_trades=estimate["probability_training_trades"],
+            probability_status=estimate["probability_status"],
             last_price=initial_price,
             last_checked_at=initial_checked_at,
         )
