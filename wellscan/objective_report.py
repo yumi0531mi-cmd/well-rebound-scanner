@@ -1,6 +1,13 @@
 """Per-strategy target1 metrics, never an aggregate deployment verdict."""
 import pandas as pd
 
+from config import (
+    MIN_TRADES_PER_MARKET,
+    MIN_UNIQUE_ENTRIES_PER_SESSION,
+    TARGET1_HIT_RATE_FLOOR,
+    TARGET1_HIT_RATE_GOAL,
+)
+
 from .models import ACTIVE_STRATEGIES, TradingSession
 from .policy import session_day
 
@@ -26,8 +33,10 @@ def objective_tables(trades, coverage, session, *, strategies=None, errors=()):
         rate = len(winners) / len(values) * 100 if values else None
         timing = [trade for trade in winners if trade.get("target1_minutes") is not None]
         measured = len(timing) == len(winners) and bool(winners)
-        target80 = "FAIL(데이터 오류)" if errors else "FAIL(표본 없음)" if rate is None else "PASS" if rate >= 80 else "FAIL(80% 미만)"
-        floor70 = "FAIL(데이터 오류)" if errors else "FAIL(표본 없음)" if rate is None else "PASS" if rate >= 70 else "FAIL(70% 미만)"
+        goal_pct = TARGET1_HIT_RATE_GOAL * 100
+        floor_pct = TARGET1_HIT_RATE_FLOOR * 100
+        target80 = "FAIL(데이터 오류)" if errors else "FAIL(표본 없음)" if rate is None else "PASS" if rate >= goal_pct else f"FAIL({goal_pct:g}% 미만)"
+        floor70 = "FAIL(데이터 오류)" if errors else "FAIL(표본 없음)" if rate is None else "PASS" if rate >= floor_pct else f"FAIL({floor_pct:g}% 미만)"
         strategy_rows.append({"기법명": name, "진입 건수": len(values), "1차 목표 도달 건수": len(winners),
                               "도달률": rate,
                               "평균 도달 시간(분)": sum(t["target1_minutes"] for t in timing) / len(timing) if measured else None,
@@ -43,12 +52,12 @@ def objective_tables(trades, coverage, session, *, strategies=None, errors=()):
         reached = sum(hit(trade) for trade in values)
         date_rows.append({"날짜": day, "진입 종목 수": count, "진입 건수": len(values), "도달 건수": reached,
                           "도달률": reached / len(values) * 100 if values else None,
-                          "5종목 이상 여부": "PASS" if count >= 5 else "FAIL"})
+                          "5종목 이상 여부": "PASS" if count >= MIN_UNIQUE_ENTRIES_PER_SESSION else "FAIL"})
     fraction = sum(row["5종목 이상 여부"] == "PASS" for row in date_rows) / len(date_rows) * 100 if date_rows else None
     return {"strategy_target1": strategy_rows, "daily_target1": date_rows,
             "five_symbols_day_pct": fraction,
             "daily_criterion": "PASS" if fraction == 100 and not errors else "FAIL",
-            "sample_at_least_50": len(trades) >= 50,
+            "sample_at_least_50": len(trades) >= MIN_TRADES_PER_MARKET,
             "deployment_eligible": False,
             "metric_note": (
                 "도달률 분모는 진입 건수, 종목 수는 중복 제거. "

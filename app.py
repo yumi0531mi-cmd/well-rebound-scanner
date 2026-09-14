@@ -11,6 +11,17 @@ from time import perf_counter
 
 import streamlit as st
 
+from config import (
+    BACKTEST_DEFAULT_TOP_N,
+    BACKTEST_LOOKBACK_DAYS,
+    BACKTEST_MAX_DAYS,
+    BACKTEST_MAX_TOP_N,
+    BACKTEST_MIN_DAYS,
+    BACKTEST_MIN_TOP_N,
+    MIN_TRADES_PER_MARKET,
+    MIN_UNIQUE_ENTRIES_PER_SESSION,
+)
+from kis_data_fetcher import KISMinuteDataFetcher
 from wellscan import APP_VERSION, ENGINE_VERSION
 from wellscan.background import SnapshotCoordinator, SnapshotState
 from wellscan.candidates import MAX_ANALYSIS_CANDIDATES, UniverseBook
@@ -82,8 +93,8 @@ if st.query_params.get("admin") == "backtest":
     _selected_session = TradingSession.KR_REGULAR
     if _market_label == "미국주식":
         _selected_session = st.selectbox("미국 세션", ENABLED_SESSIONS[Market.US], index=2)
-    _days = st.slider("조회 거래일 수", 2, 10, 3)
-    _top_n = st.slider("종목 수", 5, 30, 10)
+    _days = st.slider("조회 거래일 수", BACKTEST_MIN_DAYS, BACKTEST_MAX_DAYS, BACKTEST_LOOKBACK_DAYS)
+    _top_n = st.slider("종목 수", BACKTEST_MIN_TOP_N, BACKTEST_MAX_TOP_N, BACKTEST_DEFAULT_TOP_N)
     if not st.button("▶️ 백테스트 실행"):
         st.stop()
     with st.status("백테스트 실행 중... 몇 분 걸릴 수 있습니다.", expanded=True) as _status:
@@ -106,10 +117,10 @@ if st.query_params.get("admin") == "backtest":
             # durable-store owner.  A second KISClient here could issue a
             # duplicate token after a deployment restart.
             _runtime = shared_runtime_components()
-            _target_bars = 900 + _days * 450
+            _research_history = KISMinuteDataFetcher(durable_store=_runtime.durable_store)
 
-            def _history_loader(candidate, _client=_runtime.client, _history=_runtime.history, _target=_target_bars):
-                return _history.backfill_candidate(_client, candidate, _target)
+            def _history_loader(candidate, _client=_runtime.client, _history=_research_history, _days=_days):
+                return _history.fetch(_client, candidate, _days)
 
             _report = run(
                 _runtime.client,
@@ -140,10 +151,17 @@ if st.query_params.get("admin") == "backtest":
     st.subheader("날짜별 교차표")
     st.dataframe(_report["daily_target1"], use_container_width=True)
     _fraction = _report["five_symbols_day_pct"]
-    st.write(f"5종목 이상 달성 비율: {_fraction}% · 기준 {_report['daily_criterion']}")
+    st.write(f"{MIN_UNIQUE_ENTRIES_PER_SESSION}종목 이상 달성 비율: {_fraction}% · 기준 {_report['daily_criterion']}")
     st.caption(_report["metric_note"])
     if not _report["sample_at_least_50"]:
-        st.warning("시장별 최소 50건 미충족 · 배포 판정 불가")
+        st.warning(f"시장별 최소 {MIN_TRADES_PER_MARKET}건 미충족 · 배포 판정 불가")
+    _probability = _report.get("probability_model", {})
+    st.subheader("워크포워드 목표가 확률·EV")
+    st.write(f"상태: {_probability.get('status')} · 예측 가능 거래: {_probability.get('predictions', 0)}건")
+    if _probability.get("brier_score") is not None:
+        st.metric("Brier score (낮을수록 양호)", f"{_probability['brier_score']:.4f}")
+        st.dataframe(_probability.get("calibration", []), use_container_width=True)
+    st.caption(_probability.get("note", "이전 학습 거래 부족 시 확률을 표시하지 않습니다."))
     if _report.get("errors"):
         st.warning(f"일부 종목 데이터 오류 {len(_report['errors'])}건 — 아래 오류표를 확인하세요.")
         st.dataframe(_report["errors"], use_container_width=True)

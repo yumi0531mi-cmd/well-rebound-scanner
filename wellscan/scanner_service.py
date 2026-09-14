@@ -23,6 +23,8 @@ from typing import Any
 
 import pandas as pd
 
+from config import CANDIDATE_SNAPSHOT_INTERVAL_SECONDS, SCANNER_CYCLE_SECONDS
+
 from . import ENGINE_VERSION
 from .bar_store import CockroachBarStore
 from .engine import MAX_COMPLETED_BAR_AGE_SECONDS, evaluate, revalidate_live
@@ -68,7 +70,7 @@ class StaleCompletedBarError(RuntimeError):
 
 @dataclass(frozen=True)
 class ScannerServiceConfig:
-    cycle_interval_seconds: float = 60.0
+    cycle_interval_seconds: float = SCANNER_CYCLE_SECONDS
     cycle_budget_seconds: float = 50.0
     tracking_budget_fraction: float = 0.25
     max_candidates_per_session: int = 80
@@ -241,6 +243,7 @@ class ScannerService:
             self.history = history if history is not None else HistoryCache()
             self.sequences = sequences if sequences is not None else SequenceStore()
             self.validations = validations if validations is not None else ValidationStore(sequence_store=self.sequences)
+        self._durable_store = getattr(self.history, "_durable_store", None)
         self._clock = clock or (lambda: datetime.now(UTC))
         self._monotonic = monotonic or time.monotonic
         self._session_resolver = session_resolver or session_status
@@ -252,6 +255,7 @@ class ScannerService:
         self._status_lock = threading.Lock()
         self._status_file_lock = threading.Lock()
         self._results_lock = threading.Lock()
+        self._candidate_snapshot_buckets: dict[str, int] = {}
         self._thread: threading.Thread | None = None
         self._started_at = self._aware_now().isoformat()
         self._last_cycle_started_at: str | None = None
@@ -591,6 +595,16 @@ class ScannerService:
         unique = list({item.key: item for item in candidates}.values())
         if not unique:
             return []
+        snapshot_writer = getattr(self._durable_store, "save_candidate_snapshot", None)
+        observed_at = self._aware_now()
+        snapshot_key = f"{status.market.value}:{status.session.value}"
+        snapshot_bucket = int(observed_at.timestamp() // CANDIDATE_SNAPSHOT_INTERVAL_SECONDS)
+        if callable(snapshot_writer) and self._candidate_snapshot_buckets.get(snapshot_key) != snapshot_bucket:
+            try:
+                snapshot_writer(unique, observed_at)
+                self._candidate_snapshot_buckets[snapshot_key] = snapshot_bucket
+            except Exception as exc:
+                self._error("candidate-snapshot", exc, session=status.session.value)
         key = f"{status.market.value}:{status.session.value}"
         offset = self._rotation.get(key, 0) % len(unique)
         rotated = unique[offset:] + unique[:offset]

@@ -13,6 +13,8 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import pandas as pd
 
+from config import BACKTEST_MAX_STORED_BARS
+
 from .indicators import normalize_bars
 
 LOGGER = logging.getLogger(__name__)
@@ -20,7 +22,8 @@ TABLE_NAME = "scanner_minute_bars"
 AUTH_TABLE_NAME = "scanner_auth_cache"
 SIGNAL_TABLE_NAME = "scanner_signal_cases"
 SEQUENCE_TABLE_NAME = "scanner_sequence_states"
-MAX_BARS_PER_SYMBOL = 7000
+CANDIDATE_TABLE_NAME = "scanner_candidate_snapshots"
+MAX_BARS_PER_SYMBOL = BACKTEST_MAX_STORED_BARS
 DB_RETRY_COOLDOWN_SECONDS = 60
 
 
@@ -130,6 +133,17 @@ class CockroachBarStore:
                     symbol STRING PRIMARY KEY,
                     payload JSONB NOT NULL,
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+                """
+            )
+            cursor.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS {CANDIDATE_TABLE_NAME} (
+                    observed_at TIMESTAMPTZ NOT NULL,
+                    namespace STRING NOT NULL,
+                    symbol STRING NOT NULL,
+                    payload JSONB NOT NULL,
+                    PRIMARY KEY (observed_at, namespace, symbol)
                 )
                 """
             )
@@ -282,6 +296,60 @@ class CockroachBarStore:
             self._record_error(exc)
             raise StoreUnavailableError(self._last_error or "영구 모의신호 저장 실패") from exc
 
+    def save_candidate_snapshot(self, candidates: list[Any], observed_at: datetime) -> bool:
+        from psycopg.types.json import Jsonb
+
+        records = []
+        for item in candidates:
+            namespace = f"{item.market.value}:{item.exchange}:{item.session.value}"
+            payload = {
+                "name": item.name, "price": item.price, "change_pct": item.change_pct,
+                "volume": item.volume, "turnover": item.turnover, "sources": sorted(item.sources),
+            }
+            records.append((observed_at, namespace, item.symbol.upper(), Jsonb(payload)))
+        if not records:
+            return True
+        try:
+            with self._lock, self._connect() as connection:
+                self._ensure_schema(connection)
+                with connection.cursor() as cursor:
+                    cursor.executemany(
+                        f"""INSERT INTO {CANDIDATE_TABLE_NAME} (observed_at, namespace, symbol, payload)
+                            VALUES (%s, %s, %s, %s)
+                            ON CONFLICT (observed_at, namespace, symbol) DO UPDATE SET payload=excluded.payload""",
+                        records,
+                    )
+            self._available, self._last_error = True, ""
+            return True
+        except Exception as exc:
+            self._record_error(exc)
+            raise StoreUnavailableError(self._last_error or "과거시점 후보 저장 실패") from exc
+
+    def load_candidate_snapshots(self, namespace: str, start: datetime, end: datetime,
+                                 limit: int = 500_000) -> list[dict[str, Any]]:
+        try:
+            with self._lock, self._connect() as connection:
+                self._ensure_schema(connection)
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        f"""SELECT observed_at, symbol, payload FROM {CANDIDATE_TABLE_NAME}
+                            WHERE namespace=%s AND observed_at >= %s AND observed_at <= %s
+                            ORDER BY observed_at, symbol LIMIT %s""",
+                        (namespace, start, end, limit),
+                    )
+                    rows = cursor.fetchall()
+            self._available, self._last_error = True, ""
+            records = []
+            for observed_at, symbol, payload in rows:
+                value = json.loads(payload) if isinstance(payload, str) else payload
+                if not isinstance(value, dict):
+                    raise ValueError("과거시점 후보 payload가 JSON 객체가 아닙니다")
+                records.append({"observed_at": observed_at, "symbol": str(symbol), **value})
+            return records
+        except Exception as exc:
+            self._record_error(exc)
+            raise StoreUnavailableError(self._last_error or "과거시점 후보 읽기 실패") from exc
+
     def load(self, namespace: str, symbol: str, limit: int = MAX_BARS_PER_SYMBOL) -> pd.DataFrame:
         try:
             with self._lock, self._connect() as connection:
@@ -307,6 +375,12 @@ class CockroachBarStore:
         except Exception as exc:
             self._record_error(exc)
             raise StoreUnavailableError(self._last_error or "영구 분봉 읽기 실패") from exc
+
+    def load_recent(self, namespace: str, symbol: str) -> pd.DataFrame:
+        """Latency-bounded view for the live engine."""
+        from config import STRUCTURAL_WINDOW_BARS
+
+        return self.load(namespace, symbol, limit=STRUCTURAL_WINDOW_BARS)
 
     def upsert(self, namespace: str, symbol: str, incoming: pd.DataFrame) -> bool:
         data = normalize_bars(incoming).tail(MAX_BARS_PER_SYMBOL)

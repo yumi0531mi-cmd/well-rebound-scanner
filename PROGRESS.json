@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "status": "IN_PROGRESS_CRITERIA_NOT_MET",
+  "updated_at": "2026-09-14T21:48:37+09:00",
+  "current_step": 2,
+  "completed_steps": [
+    "기존 저장소와 인계 보고서 확인",
+    "legacy autonomous-control/state.json 복구",
+    "운영 main 1d4b8e2 및 미커밋 변경 확인",
+    "config.py 기준값 중앙화 1차 완료",
+    "state_manager.py 원자적 복구 저장 검증",
+    "미검증 10봉 진입 유효창을 기존 3봉 계약으로 복구",
+    "KIS 전용 60거래일 SQLite/Cockroach 이중 캐시 구현",
+    "워크포워드 목표1 확률 및 EV 모델 구현",
+    "과거시점 후보 5분 스냅샷 영구 저장 경로 구현",
+    "금지 연구 테스트 제외 운영 회귀 467개 통과; Ruff/compileall/pip check 통과"
+  ],
+  "files": {
+    "config.py": "created; qualification/risk/cost/data/model settings centralized",
+    "state_manager.py": "created; atomic load/save verified",
+    "kis_data_fetcher.py": "created; KIS-only 60-day cache path implemented",
+    "wellscan/execution.py": "3-bar validated entry contract restored through config.py",
+    "app.py": "web backtest extended to 60 days and 100 symbols; probability calibration shown",
+    "wellscan/backtest.py": "60-day contract and causal probability/EV reporting implemented"
+  },
+  "verified_metrics": {
+    "target1_goal": 0.8,
+    "acceptable_floor": 0.7,
+    "minimum_unique_entries_per_session": 5,
+    "minimum_trades_per_market": 50,
+    "latest_development_kr_target1_rate": 0.20689655172413793,
+    "latest_development_us_target1_rate": 0.10526315789473684,
+    "qualification_status": "NOT_PROVEN"
+  },
+  "restrictions": {
+    "holdout_execution_authorized": false,
+    "prohibited_data": "2026-08-17 through 2026-08-19 and holdout-candidates",
+    "official_performance_source": "KIS one-minute bars only",
+    "no_relaxation": true
+  },
+  "next_actions": [
+    "diagnose point-in-time universe coverage and candidate survivorship bias",
+    "add causal move-capacity and trend-persistence scoring without changing targets, stops, or costs",
+    "load point-in-time candidate snapshots into the replay eligibility mask after sufficient coverage accumulates",
+    "run actual KIS 60-day development validation when credentials are available; local credentials currently absent",
+    "request separate authorization before any reserved holdout access"
+  ]
+}

@@ -13,6 +13,8 @@ from typing import Any
 import pandas as pd
 from filelock import FileLock
 
+from config import HISTORY_INITIAL_READY_BARS, HISTORY_WARM_TARGET_BARS
+
 from .bar_store import CockroachBarStore, StoreStatus
 from .indicators import normalize_bars
 from .kis import KISClient
@@ -44,8 +46,8 @@ class HistoryCache:
     """L1 minute-bar cache. Render Free can lose it after a restart or spin-down."""
 
     MAX_BACKFILL_WORKERS = 2
-    INITIAL_READY_BARS = 180
-    WARM_TARGET_BARS = 5500
+    INITIAL_READY_BARS = HISTORY_INITIAL_READY_BARS
+    WARM_TARGET_BARS = HISTORY_WARM_TARGET_BARS
 
     def __init__(self, root: str | Path = ".scanner_data/history", durable_store: CockroachBarStore | None = None):
         self.root = Path(root)
@@ -93,7 +95,8 @@ class HistoryCache:
             with self._state_lock:
                 durable_missing = durable_key not in self._durable_loaded
             if self._durable_store is not None and durable_missing:
-                remote = self._canonical_bars(self._durable_store.load(namespace, symbol), namespace)
+                loader = getattr(self._durable_store, "load_recent", self._durable_store.load)
+                remote = self._canonical_bars(loader(namespace, symbol), namespace)
                 if not self._durable_store.status().available:
                     raise RuntimeError("영구 분봉 읽기 실패: " + self._durable_store.status().last_error)
                 with self._state_lock:

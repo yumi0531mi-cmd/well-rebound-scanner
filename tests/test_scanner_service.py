@@ -75,6 +75,14 @@ class FakeHistory:
         return self.frame.copy()
 
 
+class SnapshotDurable:
+    def __init__(self):
+        self.calls = []
+
+    def save_candidate_snapshot(self, candidates, observed_at):
+        self.calls.append((tuple(item.symbol for item in candidates), observed_at))
+
+
 class FakeValidation:
     def __init__(self, tracked=()):
         self.tracked = list(tracked)
@@ -119,6 +127,22 @@ def resolver(active_market=Market.KR, active_session=TradingSession.KR_REGULAR):
         return SessionStatus(market, TradingSession.CLOSED, False, "closed")
 
     return resolve
+
+
+def test_candidate_snapshot_is_persisted_once_per_configured_bucket(tmp_path):
+    candidate = Candidate("005930", "Samsung", 70000, 1, 100, 1000)
+    history = FakeHistory()
+    durable = SnapshotDurable()
+    history._durable_store = durable
+    service = ScannerService(
+        ScannerServiceConfig(status_path=tmp_path / "status.json"),
+        client=FakeClient([candidate]), history=history,
+        validations=FakeValidation(), clock=lambda: NOW,
+    )
+    status = SessionStatus(Market.KR, TradingSession.KR_REGULAR, True, "active")
+    service._discover(status, 10)
+    service._discover(status, 10)
+    assert durable.calls == [(('005930',), NOW)]
 
 
 def config(tmp_path: Path, **changes):

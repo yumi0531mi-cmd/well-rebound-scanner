@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 
+from config import ACTIVE_STRATEGY_VALUES
+
 
 class Stage(StrEnum):
     CANDIDATE = "관찰후보"
@@ -97,7 +99,9 @@ EXPERIMENTAL_STRATEGIES = (
     Strategy.LIQUIDITY_SWEEP_RECLAIM,
     Strategy.PRIOR_HIGH_BREAKOUT_RETEST,
 )
-ACTIVE_STRATEGIES = ESTABLISHED_ACTIVE_STRATEGIES + EXPERIMENTAL_STRATEGIES
+ACTIVE_STRATEGIES = tuple(Strategy(value) for value in ACTIVE_STRATEGY_VALUES)
+if ACTIVE_STRATEGIES != ESTABLISHED_ACTIVE_STRATEGIES + EXPERIMENTAL_STRATEGIES:
+    raise RuntimeError("config.py 활성 전략 순서가 검증된 포트폴리오와 다릅니다")
 ACTIVE_STRATEGY_COUNT = len(ACTIVE_STRATEGIES)
 
 

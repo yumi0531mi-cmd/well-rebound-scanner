@@ -6,6 +6,8 @@ from datetime import UTC, datetime
 import numpy as np
 import pandas as pd
 
+from config import MAX_COMPLETED_BAR_AGE_SECONDS, STRUCTURAL_WINDOW_BARS, WARMUP_BARS
+
 from .analysis_cache import AnalysisCache, analysis_key
 from .indicators import IndicatorCache, completed_resample, enriched, normalize_bars, pivot_points
 from .models import (
@@ -32,11 +34,10 @@ from .strengthening import StrengtheningProfile, collect_evidence, filter_opport
 
 # 15-minute MA60 needs 900 completed one-minute bars. This remains the
 # strict alignment requirement, but is not a global gate for other conditions.
-MIN_ONE_MINUTE_BARS = 900
+MIN_ONE_MINUTE_BARS = WARMUP_BARS
 # Live history retains up to 3000 bars. The replay must use the same available
 # trailing history, not silently seed EMA/ATR from a shorter 1000-bar window.
 # This is a calculation-consistency correction, not a shortened warmup gate.
-STRUCTURAL_WINDOW_BARS = 3000
 TRANSITION_MIN_15M_BARS = 12
 OPPORTUNITY_MIN_15M_BARS = 20
 WELL_MIN_5M_BARS = 25
@@ -45,7 +46,6 @@ OPENING_MIN_3M_BARS = 7
 # One shared completed-bar freshness contract for the engine, tick-level
 # revalidation and the background scanner. This measures the completed candle
 # close timestamp, never the later CPU evaluation timestamp.
-MAX_COMPLETED_BAR_AGE_SECONDS = 600.0
 COUNTERTREND_STRATEGIES = {
     Strategy.RANGE_REVERSAL,
     Strategy.VWAP_RECLAIM,
@@ -448,6 +448,8 @@ def evaluate(
         target2 = None
     support_candidates = [float(latest3.ema9), float(latest3.vwap)] if latest3 is not None else []
     rebuy = max((value for value in support_candidates if value < signal_price), default=None)
+    volume_ratio_3m = latest3.get("volume_ratio") if latest3 is not None else None
+    volume_ratio_3m = float(volume_ratio_3m) if volume_ratio_3m is not None and np.isfinite(volume_ratio_3m) else None
 
     conditions: dict[str, bool | None] = {f"매매기법: {item.strategy.value}": True for item in opportunities}
     if primary is not None:
@@ -517,6 +519,7 @@ def evaluate(
             "vwap_3m": float(latest3.vwap) if latest3 is not None and np.isfinite(latest3.vwap) else None,
             "vwap_3m_status": "AVAILABLE" if latest3 is not None and np.isfinite(latest3.vwap) else "UNAVAILABLE_NO_SESSION_VOLUME_OR_WARMUP",
             "atr_3m": float(latest3.atr) if latest3 is not None else None,
+            "volume_ratio_3m": volume_ratio_3m,
             "observed_price": signal_price,
             "signal_price_source": "last_completed_1m_close",
             "completed_bar_at": completed_bar_at.isoformat() if completed_bar_at is not None else None,

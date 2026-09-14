@@ -15,6 +15,16 @@ from zoneinfo import ZoneInfo
 import numpy as np
 import pandas as pd
 
+from config import (
+    BACKTEST_MAX_DAYS,
+    BACKTEST_MAX_TOP_N,
+    BACKTEST_MIN_DAYS,
+    BACKTEST_MIN_TOP_N,
+    MIN_UNIQUE_ENTRIES_PER_SESSION,
+    TARGET1_HIT_RATE_GOAL,
+    WARMUP_BARS,
+)
+
 from .engine import STRUCTURAL_WINDOW_BARS, evaluate
 from .execution import ENTRY_VALID_BARS, Bar, Phase, Plan, State, entry_price_for_bar, first_entry_bar, local_time, open_state
 from .execution import advance as advance_execution
@@ -23,12 +33,12 @@ from .kis import KISClient
 from .models import Candidate, Market, TradingSession
 from .objective_report import objective_tables
 from .policy import Costs, TradingPolicy, capped_stop, liquidation_deadline, session_day
+from .probability import attach_walk_forward_estimates
 from .sequence import SequenceStore
 from .sessions import ENABLED_SESSIONS, filter_session_bars
 from .statistics import win_rate_interval
 
 LOGGER = logging.getLogger(__name__)
-WARMUP_BARS = 900
 ENGINE_WINDOW_BARS = STRUCTURAL_WINDOW_BARS
 
 
@@ -279,8 +289,8 @@ def _build_report(trades: list[dict[str, Any]], market: Market, days: int, candi
         day = str(session_day(session, stamp.to_pydatetime()))
         entered_by_day.setdefault(day, set()).add(trade["symbol"])
     observed_goal = bool(not errors and trades and entered_by_day
-                         and min(map(len, entered_by_day.values())) >= 5
-                         and target1_hits / len(trades) >= .8)
+                         and min(map(len, entered_by_day.values())) >= MIN_UNIQUE_ENTRIES_PER_SESSION
+                         and target1_hits / len(trades) >= TARGET1_HIT_RATE_GOAL)
     return {
         "status": ("PARTIAL" if coverage else "FAILED") if errors else "VALID" if trades else "NO_TRADES",
         "market": market.value,
@@ -316,7 +326,7 @@ def _build_report(trades: list[dict[str, Any]], market: Market, days: int, candi
         "assumptions": {
             "engine": "실시간과 동일한 wellscan.engine.evaluate",
             "walk_forward": "각 시점까지 확정된 1분봉만 사용",
-            "entry": "신호 다음 3개 봉 안에서만 진입",
+            "entry": f"신호 다음 {ENTRY_VALID_BARS}개 봉 안에서만 진입",
             "exit": "체결봉부터 OHLC 순서 불명 시 보수적 손절 우선(시가 체결 포함), Soft Stop은 2개 종가 확인",
             "session": "국내 15:15 / 미국 세션 종료 10분 전, 청산 시각 데이터 없으면 미해결 오류",
             "costs": "상품별 명시된 비용 설정 적용 · 각 거래 cost_source 참조 · 실계좌 검증 별도",
@@ -334,8 +344,11 @@ def run(client: KISClient, days: int = 3, top_n: int = 10, market: Market = Mark
         history_loader: Callable[[Candidate], pd.DataFrame] | None = None,
         policy_provider: Callable[[Candidate], TradingPolicy] | None = None,
         strengthening_profile=None, analysis_cache=None) -> dict[str, Any]:
-    if not 2 <= days <= 10 or not 5 <= top_n <= 30:
-        raise ValueError("days는 2~10, top_n은 5~30 범위여야 합니다.")
+    if not BACKTEST_MIN_DAYS <= days <= BACKTEST_MAX_DAYS or not BACKTEST_MIN_TOP_N <= top_n <= BACKTEST_MAX_TOP_N:
+        raise ValueError(
+            f"days는 {BACKTEST_MIN_DAYS}~{BACKTEST_MAX_DAYS}, "
+            f"top_n은 {BACKTEST_MIN_TOP_N}~{BACKTEST_MAX_TOP_N} 범위여야 합니다."
+        )
     session = session or (TradingSession.KR_REGULAR if market == Market.KR else TradingSession.US_REGULAR)
     if session not in ENABLED_SESSIONS[market]:
         raise ValueError("거래 대상이 아닌 세션 · 국내 정규장 / 미국 데이·프리·정규장만 허용")
@@ -466,7 +479,7 @@ def run(client: KISClient, days: int = 3, top_n: int = 10, market: Market = Mark
                             raise RuntimeError("미종료 진입 시도: 유효 진입 구간 완료봉 부족")
                         reason = ("fill_price_net_rr_rejected"
                                   if execution_state.result == "UNFILLED_RR_REJECTED"
-                                  else "no_eligible_fill_within_3_bars")
+                                  else f"no_eligible_fill_within_{ENTRY_VALID_BARS}_bars")
                         unfilled(candidate, instant, reason, result)
                         index = max(index + 1, exit_idx + 1)
                         continue
@@ -490,6 +503,13 @@ def run(client: KISClient, days: int = 3, top_n: int = 10, market: Market = Mark
                         "structural_stop": structural_stop,
                         "target1_at": outcome["target1_at"], "target1_minutes": outcome["target1_minutes"],
                         "target1_bars": outcome["target1_bars"],
+                        "score": result.score,
+                        "persistence": result.persistence,
+                        "evidence_confidence": result.evidence_confidence,
+                        "pattern_fatigue": result.pattern_fatigue,
+                        "net_swing_pct": result.net_swing_pct,
+                        "atr_pct": float(atr) / entry_price * 100,
+                        "volume_ratio_3m": result.diagnostics.get("volume_ratio_3m"),
                         "weighted_exit": round(float(outcome["weighted_exit"]), 4), "result": str(outcome["result"]),
                         "return_pct": _net_return(entry_price, float(outcome["weighted_exit"]), policy.costs),
                         "cost_source": policy.costs.source,
@@ -512,6 +532,7 @@ def run(client: KISClient, days: int = 3, top_n: int = 10, market: Market = Mark
                 LOGGER.exception("%s 백테스트 실패", candidate.symbol)
                 errors.append({"symbol": candidate.symbol, "error": f"{type(exc).__name__}: {exc}"})
     report = _build_report(trades, market, days, candidates, errors, coverage)
+    report["probability_model"] = attach_walk_forward_estimates(trades)
     report["session"] = session.value
     report["stage_counts"] = dict(stage_counts)
     report["non_entry_reason_counts"] = dict(rejection_counts)

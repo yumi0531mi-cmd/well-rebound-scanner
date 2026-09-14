@@ -11,10 +11,23 @@ import os
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, time, timedelta
 
+from config import (
+    ENTRY_MAX_PREMIUM_ATR,
+    KR_BUY_FEE,
+    KR_SELL_FEE,
+    KR_SELL_TAX_RESERVE,
+    KR_SLIPPAGE,
+    MAX_HARD_STOP_LOSS_PCT,
+    MINIMUM_NET_RR,
+    US_BUY_FEE,
+    US_EXTENDED_SLIPPAGE,
+    US_REGULAR_SLIPPAGE,
+    US_SELL_FEE,
+    US_SELL_LEVY_RESERVE,
+)
+
 from .models import ACTIVE_STRATEGIES, Market, ScanResult, Stage, Strategy, TradingSession
 from .sessions import KST, NEW_YORK, _market_hours, session_status, us_session_window
-
-ENTRY_MAX_PREMIUM_ATR = 0.25
 
 
 def strategy_enabled(strategy: Strategy) -> bool:
@@ -48,7 +61,7 @@ class Costs:
 def capped_stop(entry: float, structural_stop: float) -> float:
     if not all(math.isfinite(x) for x in (entry, structural_stop)) or not 0 < structural_stop < entry:
         raise ValueError("구조 손절선은 0 < 손절가 < 진입가 조건 필요")
-    return max(structural_stop, entry * 0.985)
+    return max(structural_stop, entry * (1 - MAX_HARD_STOP_LOSS_PCT))
 
 
 def session_day(session: TradingSession, now: datetime):
@@ -80,7 +93,7 @@ def liquidation_deadline(session: TradingSession, now: datetime) -> datetime:
 class TradingPolicy:
     costs: Costs | None = None
     product: str = "UNKNOWN"
-    minimum_rr: float = 1.0
+    minimum_rr: float = MINIMUM_NET_RR
 
     def __post_init__(self) -> None:
         if not math.isfinite(self.minimum_rr) or self.minimum_rr < 1:
@@ -162,10 +175,13 @@ def estimated_costs(market: Market, session: TradingSession | None = None) -> Co
     US levy is a scenario reserve, not a claimed statutory SEC rate. Fixed/minimum
     fees and annual capital-gains taxes are not modeled. No promotional discount.
     """
-    fee = .00015 if market == Market.KR else .0025
-    levy = .002 if market == Market.KR else .0001
-    slip = .002 if session in {TradingSession.US_PRE, TradingSession.US_AFTER, TradingSession.US_DAY} else .001
-    return Costs(fee, fee, levy, slip, "ESTIMATED:user-authorized; no discounts; proportional fees only; tax/levy reserve, not account-verified")
+    if market == Market.KR:
+        fee, levy, slip = KR_BUY_FEE, KR_SELL_TAX_RESERVE, KR_SLIPPAGE
+        sell_fee = KR_SELL_FEE
+    else:
+        fee, sell_fee, levy = US_BUY_FEE, US_SELL_FEE, US_SELL_LEVY_RESERVE
+        slip = US_EXTENDED_SLIPPAGE if session in {TradingSession.US_PRE, TradingSession.US_AFTER, TradingSession.US_DAY} else US_REGULAR_SLIPPAGE
+    return Costs(fee, sell_fee, levy, slip, "ESTIMATED:user-authorized; no discounts; proportional fees only; tax/levy reserve, not account-verified")
 
 
 def instrument_policy(market: Market, symbol: str, session: TradingSession | None = None,

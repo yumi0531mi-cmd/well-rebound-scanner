@@ -12,12 +12,13 @@ from enum import StrEnum
 
 import pandas as pd
 
+from config import ENTRY_VALID_BARS, TARGET1_POSITION_WEIGHT
+
 from .models import TradingSession
 from .policy import ENTRY_MAX_PREMIUM_ATR, Costs, capped_stop, liquidation_deadline, session_day
 
 EXECUTION_VERSION = "closed-1m-paper-v1"
-ENTRY_VALID_BARS = 3
-TARGET1_WEIGHT = 0.5
+TARGET1_WEIGHT = TARGET1_POSITION_WEIGHT
 
 
 class Phase(StrEnum):

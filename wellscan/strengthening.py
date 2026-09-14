@@ -13,6 +13,14 @@ from typing import Any
 
 import pandas as pd
 
+from config import (
+    BULLISH_CLOSE_LOCATION_MIN,
+    NOISE_DISTANCE_MIN_ATR,
+    RELATIVE_VOLUME_MIN,
+    TARGET_DISTANCE_MAX_ATR,
+    TARGET_DISTANCE_STRICT_MAX_ATR,
+)
+
 from .models import EXPANSION_STRATEGIES, EXPANSION_STRATEGIES_V2, Strategy, TradingSession
 from .opportunities import Opportunity, confirmed_reversal
 from .policy import TradingPolicy, session_day
@@ -280,7 +288,7 @@ def _gate(gate: str, item: Opportunity, evidence: StrengtheningEvidence) -> dict
             passed = observed is True
         elif gate == "bullish3_close65":
             state, observed = evidence.candle3_status, evidence.close_location3
-            passed = evidence.bullish3 is True and observed is not None and observed >= .65
+            passed = evidence.bullish3 is True and observed is not None and observed >= BULLISH_CLOSE_LOCATION_MIN
         elif gate in {"reversal3", "micro_reversal1"}:
             state = evidence.reversal3_status if gate == "reversal3" else evidence.micro1_status
             observed = evidence.reversal3 if gate == "reversal3" else evidence.micro_reversal1
@@ -292,7 +300,7 @@ def _gate(gate: str, item: Opportunity, evidence: StrengtheningEvidence) -> dict
             passed = observed is True
         elif gate == "volume3_ge125":
             state, observed = evidence.volume3_status, evidence.volume_ratio3
-            passed = observed is not None and observed >= 1.25
+            passed = observed is not None and observed >= RELATIVE_VOLUME_MIN
         else:
             state = evidence.atr3_status
             numerator = None
@@ -310,7 +318,10 @@ def _gate(gate: str, item: Opportunity, evidence: StrengtheningEvidence) -> dict
                 if not math.isfinite(observed):
                     observed, state = None, "NONFINITE_RATIO"
                 else:
-                    passed = observed >= .5 if gate == "noise_ge050atr" else observed <= (4 if gate == "target1_le4atr" else 6)
+                    threshold = NOISE_DISTANCE_MIN_ATR if gate == "noise_ge050atr" else (
+                        TARGET_DISTANCE_STRICT_MAX_ATR if gate == "target1_le4atr" else TARGET_DISTANCE_MAX_ATR
+                    )
+                    passed = observed >= threshold if gate == "noise_ge050atr" else observed <= threshold
     if state != "OK":
         passed = False
     elif observed is None:
