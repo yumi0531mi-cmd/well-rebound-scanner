@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-09-15T03:16:24+09:00",
+  "updated_at": "2026-09-15T03:21:00+09:00",
   "current_step": 3,
   "completed_steps": [
     "기존 저장소와 인계 보고서 확인",
@@ -21,7 +21,8 @@
     "금지 연구 테스트 제외 운영 회귀 전체 통과; Ruff/pip check 통과",
     "신호 발생 시점 확률 팩터와 모델 버전 영구 저장 구현",
     "청산이 먼저 끝난 동일 시장·세션 사례만 쓰는 실시간 인과 확률·EV 구현",
-    "운영 회귀 474개 통과; 확률 미산출/미검증 상태 웹 표시"
+    "운영 회귀 474개 통과; 확률 미산출/미검증 상태 웹 표시",
+    "현재 스레드 5시간 간격 자동 재개 heartbeat 활성화"
   ],
   "files": {
     "config.py": "created; qualification/risk/cost/data/model settings centralized",
@@ -43,6 +44,11 @@
     "latest_development_kr_target1_rate": 0.20689655172413793,
     "latest_development_us_target1_rate": 0.10526315789473684,
     "qualification_status": "NOT_PROVEN"
+  },
+  "estimated_validation_dates_if_deployed_2026_09_15": {
+    "us_60th_session": "2026-12-08",
+    "kr_60th_session": "2026-12-11",
+    "qualification_guaranteed": false
   },
   "restrictions": {
     "holdout_execution_authorized": false,
