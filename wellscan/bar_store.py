@@ -344,7 +344,8 @@ class CockroachBarStore:
                 value = json.loads(payload) if isinstance(payload, str) else payload
                 if not isinstance(value, dict):
                     raise ValueError("과거시점 후보 payload가 JSON 객체가 아닙니다")
-                records.append({"observed_at": observed_at, "symbol": str(symbol), **value})
+                records.append({"observed_at": observed_at, "namespace": namespace,
+                                "symbol": str(symbol), **value})
             return records
         except Exception as exc:
             self._record_error(exc)

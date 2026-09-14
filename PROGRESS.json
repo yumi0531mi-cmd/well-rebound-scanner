@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-09-14T21:55:00+09:00",
-  "current_step": 2,
+  "updated_at": "2026-09-15T03:10:16+09:00",
+  "current_step": 3,
   "completed_steps": [
     "기존 저장소와 인계 보고서 확인",
     "legacy autonomous-control/state.json 복구",
@@ -14,7 +14,11 @@
     "워크포워드 목표1 확률 및 EV 모델 구현",
     "과거시점 후보 5분 스냅샷 영구 저장 경로 구현",
     "금지 연구 테스트 제외 운영 회귀 467개 통과; Ruff/compileall/pip check 통과",
-    "production 변경 로컬 커밋 48687c9 생성"
+    "production 변경 로컬 커밋 48687c9 생성",
+    "미래 스냅샷 대체 없는 과거시점 후보군 마스크 구현",
+    "스냅샷 누락·노후 구간 PARTIAL 강등 구현",
+    "변동성 z-score·추세 지속성·목표 이동여력 인과 팩터 구현",
+    "금지 연구 테스트 제외 운영 회귀 전체 통과; Ruff/pip check 통과"
   ],
   "files": {
     "config.py": "created; qualification/risk/cost/data/model settings centralized",
@@ -22,7 +26,9 @@
     "kis_data_fetcher.py": "created; KIS-only 60-day cache path implemented",
     "wellscan/execution.py": "3-bar validated entry contract restored through config.py",
     "app.py": "web backtest extended to 60 days and 100 symbols; probability calibration shown",
-    "wellscan/backtest.py": "60-day contract and causal probability/EV reporting implemented"
+    "wellscan/backtest.py": "60-day contract, point-in-time universe mask, causal probability/EV reporting implemented",
+    "wellscan/universe_history.py": "created; future-free candidate membership and stale snapshot rejection",
+    "wellscan/probability.py": "causal volatility, persistence, move-capacity factors added"
   },
   "verified_metrics": {
     "target1_goal": 0.8,
@@ -40,9 +46,8 @@
     "no_relaxation": true
   },
   "next_actions": [
-    "diagnose point-in-time universe coverage and candidate survivorship bias",
-    "add causal move-capacity and trend-persistence scoring without changing targets, stops, or costs",
-    "load point-in-time candidate snapshots into the replay eligibility mask after sufficient coverage accumulates",
+    "persist signal-time probability features for future live walk-forward training",
+    "deploy candidate snapshot collection after explicit push approval and accumulate complete point-in-time coverage",
     "run actual KIS 60-day development validation when credentials are available; local credentials currently absent",
     "push commit 48687c9 to origin/main after explicit deployment approval",
     "request separate authorization before any reserved holdout access"

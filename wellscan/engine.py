@@ -29,6 +29,7 @@ from .policy import (
     live_rr_valid,
     strategy_enabled,
 )
+from .probability import causal_factor_evidence
 from .sequence import SequenceStore, risk_day
 from .strengthening import StrengtheningProfile, collect_evidence, filter_opportunities
 
@@ -486,6 +487,7 @@ def evaluate(
         bars,
         signal_price,
     )
+    factor_evidence = causal_factor_evidence(bars, levels.entry, levels.target1)
     result = ScanResult(
         symbol=symbol,
         evaluated_at=evaluated_at,
@@ -520,6 +522,7 @@ def evaluate(
             "vwap_3m_status": "AVAILABLE" if latest3 is not None and np.isfinite(latest3.vwap) else "UNAVAILABLE_NO_SESSION_VOLUME_OR_WARMUP",
             "atr_3m": float(latest3.atr) if latest3 is not None else None,
             "volume_ratio_3m": volume_ratio_3m,
+            **factor_evidence,
             "observed_price": signal_price,
             "signal_price_source": "last_completed_1m_close",
             "completed_bar_at": completed_bar_at.isoformat() if completed_bar_at is not None else None,

@@ -62,6 +62,9 @@ PROBABILITY_FEATURE_FIELDS = (
     "net_swing_pct",
     "atr_pct",
     "volume_ratio_3m",
+    "volatility_z",
+    "trend_persistence",
+    "move_capacity_ratio",
 )
 
 # Explicit production allow-list. Implemented strategies not listed stay off.

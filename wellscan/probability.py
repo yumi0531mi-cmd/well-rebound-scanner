@@ -16,6 +16,45 @@ def target1_hit(trade: dict[str, Any]) -> bool:
     return result == "TARGET2" or result.startswith("TARGET1_THEN_")
 
 
+def causal_factor_evidence(bars: pd.DataFrame, entry: float | None,
+                           target1: float | None) -> dict[str, float | None]:
+    """Use trailing completed bars only; no negative shift or forward window."""
+    empty = {"volatility_z": None, "trend_persistence": None, "move_capacity_ratio": None}
+    if len(bars) < 140 or entry is None or target1 is None or not 0 < entry < target1:
+        return empty
+    required = {"high", "low", "close"}
+    if not required.issubset(bars.columns):
+        return empty
+    data = bars.loc[:, ["high", "low", "close"]].apply(pd.to_numeric, errors="coerce")
+    if data.isna().any(axis=None) or not np.isfinite(data.to_numpy()).all() or (data <= 0).any(axis=None):
+        return empty
+    previous = data.close.shift(1)
+    true_range = pd.concat(
+        (data.high - data.low, (data.high - previous).abs(), (data.low - previous).abs()), axis=1
+    ).max(axis=1) / previous
+    current_volatility = float(true_range.tail(20).mean())
+    baseline = true_range.iloc[-140:-20].dropna()
+    if baseline.empty or not math.isfinite(current_volatility):
+        return empty
+    deviation = float(baseline.std(ddof=0))
+    volatility_z = (current_volatility - float(baseline.mean())) / deviation if deviation > 0 else 0.0
+    ema20 = data.close.ewm(span=20, adjust=False).mean()
+    trend = ((data.close > ema20) & (ema20.diff() > 0)).tail(30)
+    trend_persistence = float(trend.mean())
+    trailing_moves = (
+        (data.high.rolling(30).max() - data.low.rolling(30).min()) / data.close
+    ).iloc[-120:].dropna()
+    target_distance = (target1 - entry) / entry
+    if trailing_moves.empty or target_distance <= 0:
+        return empty
+    values = {
+        "volatility_z": float(volatility_z),
+        "trend_persistence": trend_persistence,
+        "move_capacity_ratio": float(trailing_moves.median() / target_distance),
+    }
+    return values if all(math.isfinite(value) for value in values.values()) else empty
+
+
 def _vector(trade: dict[str, Any]) -> np.ndarray | None:
     values = []
     for name in PROBABILITY_FEATURE_FIELDS:

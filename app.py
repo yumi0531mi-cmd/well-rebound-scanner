@@ -38,6 +38,7 @@ from wellscan.realtime import RealtimeHub
 from wellscan.scanner_service import daemon_results_snapshot, daemon_service_status, shared_runtime_components
 from wellscan.sequence import SequenceStore
 from wellscan.sessions import ENABLED_SESSIONS, session_exchange, session_status
+from wellscan.universe_history import PointInTimeUniverse
 from wellscan.validation import SignalCase, ValidationStore
 from wellscan.web_status import (
     ADMIN_TOKEN_ENV,
@@ -95,6 +96,7 @@ if st.query_params.get("admin") == "backtest":
         _selected_session = st.selectbox("미국 세션", ENABLED_SESSIONS[Market.US], index=2)
     _days = st.slider("조회 거래일 수", BACKTEST_MIN_DAYS, BACKTEST_MAX_DAYS, BACKTEST_LOOKBACK_DAYS)
     _top_n = st.slider("종목 수", BACKTEST_MIN_TOP_N, BACKTEST_MAX_TOP_N, BACKTEST_DEFAULT_TOP_N)
+    _point_in_time = st.checkbox("실제 과거시점 후보 스냅샷만 사용", value=True)
     if not st.button("▶️ 백테스트 실행"):
         st.stop()
     with st.status("백테스트 실행 중... 몇 분 걸릴 수 있습니다.", expanded=True) as _status:
@@ -118,6 +120,25 @@ if st.query_params.get("admin") == "backtest":
             # duplicate token after a deployment restart.
             _runtime = shared_runtime_components()
             _research_history = KISMinuteDataFetcher(durable_store=_runtime.durable_store)
+            _universe = None
+            if _point_in_time:
+                if _runtime.durable_store is None:
+                    raise RuntimeError("DATABASE_URL이 없어 과거시점 후보군을 검증할 수 없습니다")
+                _until = datetime.now(UTC)
+                _since = _until - timedelta(days=max(90, _days * 2))
+                _namespaces = (
+                    ["KR:KRX:KR_REGULAR"] if _market == Market.KR else
+                    [f"US:{exchange}:{_selected_session.value}" for exchange in ("NAS", "NYS", "AMS")]
+                )
+                _records = [
+                    record
+                    for namespace in _namespaces
+                    for record in _runtime.durable_store.load_candidate_snapshots(namespace, _since, _until)
+                ]
+                _universe = PointInTimeUniverse.from_records(_records)
+                _covered_days = _universe.coverage_days(_selected_session)
+                if len(_covered_days) < _days:
+                    raise RuntimeError(f"과거시점 후보 스냅샷 부족: {_days}일 요청 / {len(_covered_days)}일 보유")
 
             def _history_loader(candidate, _client=_runtime.client, _history=_research_history, _days=_days):
                 return _history.fetch(_client, candidate, _days)
@@ -129,7 +150,9 @@ if st.query_params.get("admin") == "backtest":
                 market=_market,
                 progress=_progress_area.caption,
                 session=_selected_session,
+                candidates_override=list(_universe.candidates) if _universe is not None else None,
                 history_loader=_history_loader,
+                candidate_eligibility=_universe.eligible if _universe is not None else None,
             )
 
             _failed = _report["status"] in {"FAILED", "PARTIAL"}

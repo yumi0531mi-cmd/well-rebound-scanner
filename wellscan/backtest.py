@@ -342,6 +342,7 @@ def run(client: KISClient, days: int = 3, top_n: int = 10, market: Market = Mark
         progress: Callable[[str], None] | None = None, session: TradingSession | None = None,
         candidates_override: list[Candidate] | None = None,
         history_loader: Callable[[Candidate], pd.DataFrame] | None = None,
+        candidate_eligibility: Callable[[Candidate, datetime], bool | None] | None = None,
         policy_provider: Callable[[Candidate], TradingPolicy] | None = None,
         strengthening_profile=None, analysis_cache=None) -> dict[str, Any]:
     if not BACKTEST_MIN_DAYS <= days <= BACKTEST_MAX_DAYS or not BACKTEST_MIN_TOP_N <= top_n <= BACKTEST_MAX_TOP_N:
@@ -366,6 +367,7 @@ def run(client: KISClient, days: int = 3, top_n: int = 10, market: Market = Mark
     execution_counts: dict[str, int] = defaultdict(int)
     fill_bar_rejection_counts: dict[str, int] = {}
     unfilled_signals: list[dict[str, Any]] = []
+    universe_counts: dict[str, int] = defaultdict(int)
 
     def unfilled(candidate, instant, reason, result):
         execution_counts[reason] += 1
@@ -416,6 +418,17 @@ def run(client: KISClient, days: int = 3, top_n: int = 10, market: Market = Mark
                     instant = pd.Timestamp(bars.index[index]).to_pydatetime()
                     timezone = ZoneInfo("Asia/Seoul") if market == Market.KR else ZoneInfo("America/New_York")
                     instant = (instant if instant.tzinfo else instant.replace(tzinfo=timezone)) + timedelta(minutes=1)
+                    if candidate_eligibility is not None:
+                        membership = candidate_eligibility(candidate, instant)
+                        if membership is None:
+                            universe_counts["missing_or_stale_snapshot_bars"] += 1
+                            index += 1
+                            continue
+                        if not membership:
+                            universe_counts["not_in_point_in_time_universe_bars"] += 1
+                            index += 1
+                            continue
+                        universe_counts["eligible_bars"] += 1
                     result = evaluate(candidate.key, history, float(bars.iloc[index].close), store, now=instant,
                                       session=session, policy=policy, indicator_cache=indicator_cache,
                                       strengthening_profile=strengthening_profile, analysis_cache=analysis_cache)
@@ -510,6 +523,9 @@ def run(client: KISClient, days: int = 3, top_n: int = 10, market: Market = Mark
                         "net_swing_pct": result.net_swing_pct,
                         "atr_pct": float(atr) / entry_price * 100,
                         "volume_ratio_3m": result.diagnostics.get("volume_ratio_3m"),
+                        "volatility_z": result.diagnostics.get("volatility_z"),
+                        "trend_persistence": result.diagnostics.get("trend_persistence"),
+                        "move_capacity_ratio": result.diagnostics.get("move_capacity_ratio"),
                         "weighted_exit": round(float(outcome["weighted_exit"]), 4), "result": str(outcome["result"]),
                         "return_pct": _net_return(entry_price, float(outcome["weighted_exit"]), policy.costs),
                         "cost_source": policy.costs.source,
@@ -541,7 +557,18 @@ def run(client: KISClient, days: int = 3, top_n: int = 10, market: Market = Mark
     report["fill_bar_rejection_counts"] = fill_bar_rejection_counts
     report["unfilled_signals"] = unfilled_signals
     report["unfilled_signals_limit"] = 200
+    report["point_in_time_universe"] = candidate_eligibility is not None
+    report["universe_counts"] = dict(universe_counts)
+    report["universe_coverage_complete"] = not universe_counts.get("missing_or_stale_snapshot_bars", 0)
     report.update(objective_tables(trades, coverage, session, errors=errors))
     if candidates_override is not None:
         report["assumptions"]["bias_warning"] = "외부 지정 종목 표본: 당시 전시장 후보군 아님 · 표본 선정편향 존재"
+    if candidate_eligibility is not None:
+        if report["universe_coverage_complete"]:
+            report["assumptions"]["bias_warning"] = "실제 과거시점 후보 스냅샷만 평가 · 독립 구간 여부는 별도 검증 필요"
+        else:
+            report["status"] = "PARTIAL"
+            report["validation_eligible"] = False
+            report["sample_goal_met"] = False
+            report["assumptions"]["bias_warning"] = "과거시점 후보 스냅샷 누락 구간 존재 · 성과 판정 불가"
     return report

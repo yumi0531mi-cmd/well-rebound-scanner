@@ -188,6 +188,11 @@ def test_production_backtest_uses_plan_state_advance_not_legacy_helpers(monkeypa
     rows[9] = (100, 107, 99.5, 106, 1000)
     history = pd.DataFrame(rows, columns=["open", "high", "low", "close", "volume"], index=indexes)
     candidate = Candidate("TEST", "Test", 100, 0, 1, 1)
+    eligibility_checks = []
+
+    def eligible(item, instant):
+        eligibility_checks.append((item.symbol, instant))
+        return None if len(eligibility_checks) == 1 else True
 
     report = run(
         None,
@@ -195,8 +200,14 @@ def test_production_backtest_uses_plan_state_advance_not_legacy_helpers(monkeypa
         top_n=5,
         candidates_override=[candidate],
         history_loader=lambda _: history,
+        candidate_eligibility=eligible,
         policy_provider=lambda _: TradingPolicy(costs, "STOCK"),
     )
     assert report["errors"] == []
     assert len(report["trades"]) == 1
     assert report["trades"][0]["result"] == "TARGET2"
+    assert eligibility_checks
+    assert report["point_in_time_universe"]
+    assert not report["universe_coverage_complete"]
+    assert report["status"] == "PARTIAL"
+    assert not report["sample_goal_met"]
