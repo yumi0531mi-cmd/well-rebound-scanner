@@ -373,6 +373,41 @@ class CockroachBarStore:
             self._record_error(exc)
             raise StoreUnavailableError(self._last_error or "과거시점 후보 읽기 실패") from exc
 
+    def load_latest_candidate_snapshot(
+        self, market: str, session: str, start: datetime, end: datetime, limit: int = 10_000
+    ) -> list[dict[str, Any]]:
+        """Load one recent real snapshot for transient empty-discovery recovery."""
+        try:
+            with self._lock, self._connection_session() as connection:
+                self._ensure_schema(connection)
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        f"""SELECT observed_at, namespace, symbol, payload
+                            FROM {CANDIDATE_TABLE_NAME}
+                            WHERE observed_at >= %s AND observed_at <= %s
+                            ORDER BY observed_at DESC, namespace, symbol LIMIT %s""",
+                        (start, end, limit),
+                    )
+                    rows = cursor.fetchall()
+            matching = []
+            for observed_at, namespace, symbol, payload in rows:
+                parts = str(namespace).split(":")
+                if len(parts) != 3 or parts[0] != market or parts[2] != session:
+                    continue
+                value = json.loads(payload) if isinstance(payload, str) else payload
+                if not isinstance(value, dict):
+                    raise ValueError("과거시점 후보 payload가 JSON 객체가 아닙니다")
+                matching.append({"observed_at": observed_at, "namespace": namespace,
+                                 "symbol": str(symbol), **value})
+            if matching:
+                newest = matching[0]["observed_at"]
+                matching = [record for record in matching if record["observed_at"] == newest]
+            self._available, self._last_error = True, ""
+            return matching
+        except Exception as exc:
+            self._record_error(exc)
+            raise StoreUnavailableError(self._last_error or "최근 후보 스냅샷 읽기 실패") from exc
+
     def load(self, namespace: str, symbol: str, limit: int = MAX_BARS_PER_SYMBOL) -> pd.DataFrame:
         try:
             with self._lock, self._connection_session() as connection:

@@ -986,6 +986,12 @@ if use_daemon_feed:
         f"종목 {service_counters.get('candidate_prefetch_symbols', 0)}개 · "
         f"오류 {service_counters.get('candidate_prefetch_errors', 0)}건"
     )
+    st.sidebar.caption(
+        f"후보 API 빈응답 {service_counters.get('candidate_empty_discoveries', 0)}회 · "
+        f"최근스냅샷 복구 {service_counters.get('candidate_fallbacks', 0)}회/"
+        f"{service_counters.get('candidate_fallback_symbols', 0)}개 · "
+        f"오류 {service_counters.get('candidate_fallback_errors', 0)}건"
+    )
     if service_status.recent_errors:
         last_daemon_error = service_status.recent_errors[-1]
         st.sidebar.warning(

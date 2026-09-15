@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-09-15T15:53:12+09:00",
+  "updated_at": "2026-09-15T16:19:13+09:00",
   "current_step": 3,
   "completed_steps": [
     "기존 저장소와 인계 보고서 확인",
@@ -66,7 +66,12 @@
     "운영 0.9.2 배포 확인; 미국 주간장 후보풀 80개·모드 통과 61개·내부분석 61개·최신 완료봉 표시 확인",
     "후보별 CockroachDB 3000봉 반복 조회를 최대 20종목 묶음 조회로 변경",
     "영구 DB 사용 시 로컬 CSV 중복 쓰기를 제거하고 3000봉 구조 길이를 config.py 단일 값으로 강제",
-    "0.10.0 묶음 전체구조 복구 후 운영 회귀 489개·Ruff·pip check 통과"
+    "0.10.0 묶음 전체구조 복구 후 운영 회귀 489개·Ruff·pip check 통과",
+    "운영 0.10.0 배포·CockroachDB 3000봉 연결 확인",
+    "재배포 후 미국 후보 API가 9회 이상 연속 빈 응답이었고 기존 후보를 즉시 삭제하는 운영 결함 확인",
+    "조건 완화 없이 최근 10분 이내 실제 저장 후보만 복구하고 최신 KIS 분봉으로 재검증하는 빈응답 복구 경로 구현",
+    "복구 스냅샷을 신규 스냅샷으로 저장하지 않아 10분 신선도가 무한 연장되지 않도록 강제",
+    "0.10.1 후보 빈응답 복구 후 운영 회귀 491개·Ruff·pip check 통과"
   ],
   "files": {
     "config.py": "created; qualification/risk/cost/data/model and scanner deadline-margin settings centralized",
@@ -78,12 +83,12 @@
     "wellscan/universe_history.py": "created; future-free candidate membership and stale snapshot rejection",
     "wellscan/probability.py": "causal factors, immutable signal snapshots, resolved-before-signal live estimator implemented",
     "wellscan/validation.py": "signal-time features and unqualified probability/EV persisted",
-    "app.py": "point-in-time backtest, explicit live probability labels, and full-3000-bar batch restore telemetry",
-    "wellscan/scanner_service.py": "900/3000 live cache contract, attempted-only rotation, candidate snapshot/prefetch counters, deadlines, current-universe/freshness pruning",
+    "app.py": "point-in-time backtest, probability labels, full-3000-bar restore and candidate-fallback telemetry",
+    "wellscan/scanner_service.py": "900/3000 cache contract, rotation, deadlines, freshness pruning, and bounded recent-snapshot recovery for transient empty discovery",
     "wellscan/realtime.py": "bounded per-record trailing schema extensions accepted; malformed boundaries rejected",
     "wellscan/kis.py": "thread-local scanner deadline bounds HTTP timeout and retries",
     "wellscan/history.py": "durable writes limited to changed bars; full 3000-bar candidate batch preload; redundant local CSV writes removed when durable DB is active",
-    "wellscan/bar_store.py": "serialized CockroachDB connection reused; full 3000-bar windows restored in bounded 20-symbol queries"
+    "wellscan/bar_store.py": "serialized CockroachDB connection reused; full 3000-bar windows restored in bounded 20-symbol queries; latest real candidate snapshot retrieval"
   },
   "verified_metrics": {
     "target1_goal": 0.8,
@@ -106,7 +111,7 @@
     "no_relaxation": true
   },
   "next_actions": [
-    "deploy app 0.10.0 batched full-structure cache and verify live prefetch counters and cycle duration",
+    "deploy app 0.10.1 candidate fallback and verify live fallback/prefetch counters and cycle duration",
     "run actual KIS 60-day development validation when credentials are available; local credentials currently absent",
     "request separate authorization before any reserved holdout access"
   ]

@@ -147,6 +147,38 @@ def test_candidate_snapshot_is_persisted_once_per_configured_bucket(tmp_path):
     assert service.snapshot().counters["candidate_snapshot_candidates_written"] == 1
 
 
+def test_empty_candidate_api_recovers_only_recent_real_snapshot(tmp_path):
+    class RecoveryDurable(SnapshotDurable):
+        def load_latest_candidate_snapshot(self, market, session, start, end):
+            assert (market, session) == ("KR", "KR_REGULAR")
+            assert end - start == timedelta(seconds=600)
+            return [{
+                "observed_at": end - timedelta(minutes=1),
+                "namespace": "KR:KRX:KR_REGULAR", "symbol": "005930",
+                "name": "Samsung", "price": 70000, "change_pct": 1,
+                "volume": 100, "turnover": 1000, "sources": ["turnover"],
+            }]
+
+    history, durable = FakeHistory(), RecoveryDurable()
+    history._durable_store = durable
+    service = ScannerService(
+        config(tmp_path), client=FakeClient([]), history=history,
+        validations=FakeValidation(), clock=lambda: NOW,
+    )
+
+    candidates = service._discover(
+        SessionStatus(Market.KR, TradingSession.KR_REGULAR, True, "active"), 10
+    )
+
+    assert [item.symbol for item in candidates] == ["005930"]
+    assert "snapshot-fallback" in candidates[0].sources
+    assert durable.calls == []
+    counters = service.snapshot().counters
+    assert counters["candidate_empty_discoveries"] == 1
+    assert counters["candidate_fallbacks"] == 1
+    assert counters["candidate_fallback_symbols"] == 1
+
+
 def test_discovery_rotation_advances_only_by_attempted_candidates(tmp_path):
     candidates = [Candidate(f"{index:06d}", str(index), 100, 1, 1, 1) for index in range(5)]
     service = ScannerService(

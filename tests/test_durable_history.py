@@ -126,6 +126,46 @@ def test_database_load_many_restores_full_windows_in_one_namespace_query() -> No
     assert all(len(restored[(namespace, symbol)]) == 1 for symbol in ("005930", "000660"))
 
 
+def test_database_loads_only_latest_matching_candidate_snapshot() -> None:
+    current = pd.Timestamp("2026-09-15 07:00", tz="UTC").to_pydatetime()
+
+    class Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            del args
+
+        def execute(self, statement, parameters):
+            assert "observed_at >= %s" in statement
+            assert parameters[-1] == 10_000
+
+        def fetchall(self):
+            payload = {"name": "A", "price": 10, "change_pct": 1,
+                       "volume": 2, "turnover": 3, "sources": ["volume"]}
+            return [
+                (current, "KR:KRX:KR_REGULAR", "005930", payload),
+                (current - pd.Timedelta(minutes=1), "US:NAS:US_DAY", "AAPL", payload),
+                (current - pd.Timedelta(minutes=1), "US:NYS:US_DAY", "IBM", payload),
+                (current - pd.Timedelta(minutes=2), "US:NAS:US_DAY", "MSFT", payload),
+            ]
+
+    class Connection:
+        closed = False
+
+        def cursor(self):
+            return Cursor()
+
+    store = CockroachBarStore("postgresql://user:secret@example.com:26257/defaultdb")
+    store._connection, store._initialized = Connection(), True
+
+    records = store.load_latest_candidate_snapshot(
+        "US", "US_DAY", current - pd.Timedelta(minutes=10), current
+    )
+
+    assert [record["symbol"] for record in records] == ["AAPL", "IBM"]
+
+
 def test_remote_history_restores_empty_local_cache(tmp_path) -> None:
     durable = FakeDurableStore(frame("2026-08-20 09:00", 30))
     cache = HistoryCache(tmp_path, durable_store=durable)  # type: ignore[arg-type]

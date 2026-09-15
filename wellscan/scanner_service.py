@@ -25,6 +25,7 @@ from typing import Any
 import pandas as pd
 
 from config import (
+    CANDIDATE_FALLBACK_MAX_AGE_SECONDS,
     CANDIDATE_SNAPSHOT_INTERVAL_SECONDS,
     SCANNER_CYCLE_SECONDS,
     SCANNER_REQUEST_DEADLINE_MARGIN_SECONDS,
@@ -90,6 +91,7 @@ class ScannerServiceConfig:
     tracking_history_bars: int = STRUCTURAL_WINDOW_BARS
     max_tracking_cases: int = 100
     maximum_completed_bar_age_seconds: float = MAX_COMPLETED_BAR_AGE_SECONDS
+    candidate_fallback_max_age_seconds: float = CANDIDATE_FALLBACK_MAX_AGE_SECONDS
     status_path: Path = Path(".scanner_data/scanner-service-status.json")
 
     def __post_init__(self) -> None:
@@ -110,6 +112,8 @@ class ScannerServiceConfig:
                 raise ValueError("scanner service limits must be positive")
         if self.maximum_completed_bar_age_seconds <= 0:
             raise ValueError("maximum completed bar age must be positive")
+        if self.candidate_fallback_max_age_seconds <= 0:
+            raise ValueError("candidate fallback max age must be positive")
 
 
 @dataclass
@@ -134,6 +138,10 @@ class ScannerCounters:
     candidate_prefetches: int = 0
     candidate_prefetch_symbols: int = 0
     candidate_prefetch_errors: int = 0
+    candidate_empty_discoveries: int = 0
+    candidate_fallbacks: int = 0
+    candidate_fallback_symbols: int = 0
+    candidate_fallback_errors: int = 0
 
 
 @dataclass(frozen=True)
@@ -272,6 +280,7 @@ class ScannerService:
         self._status_file_lock = threading.Lock()
         self._results_lock = threading.Lock()
         self._candidate_snapshot_buckets: dict[str, int] = {}
+        self._recent_candidates: dict[str, tuple[datetime, tuple[Candidate, ...]]] = {}
         self._thread: threading.Thread | None = None
         self._started_at = self._aware_now().isoformat()
         self._last_cycle_started_at: str | None = None
@@ -621,6 +630,51 @@ class ScannerService:
                 self._error("tracking-expiry", exc)
         return all_attempted
 
+    def _fallback_candidates(self, status: SessionStatus, observed_at: datetime) -> list[Candidate]:
+        key = f"{status.market.value}:{status.session.value}"
+        cutoff = observed_at - timedelta(seconds=self.config.candidate_fallback_max_age_seconds)
+        cached = self._recent_candidates.get(key)
+        if cached is not None and cached[0] >= cutoff:
+            return list(cached[1])
+        loader = getattr(self._durable_store, "load_latest_candidate_snapshot", None)
+        if not callable(loader):
+            return []
+        try:
+            records = loader(status.market.value, status.session.value, cutoff, observed_at)
+            candidates = []
+            for record in records:
+                parts = str(record.get("namespace", "")).split(":")
+                if len(parts) != 3:
+                    continue
+                try:
+                    numeric = tuple(
+                        float(record.get(field, 0.0))
+                        for field in ("price", "change_pct", "volume", "turnover")
+                    )
+                except (TypeError, ValueError):
+                    continue
+                if not all(math.isfinite(value) for value in numeric) or numeric[0] <= 0:
+                    continue
+                symbol = str(record.get("symbol", "")).upper()
+                if not symbol:
+                    continue
+                raw_sources = record.get("sources", ())
+                if isinstance(raw_sources, str):
+                    raw_sources = (raw_sources,)
+                sources = frozenset(str(value) for value in raw_sources) | {"snapshot-fallback"}
+                candidates.append(Candidate(
+                    symbol, str(record.get("name", "")),
+                    *numeric, sources=sources, market=status.market,
+                    exchange=parts[1], session=status.session,
+                ))
+            if candidates:
+                self._recent_candidates[key] = (records[0]["observed_at"], tuple(candidates))
+            return candidates
+        except Exception as exc:
+            self._counters.candidate_fallback_errors += 1
+            self._error("candidate-fallback", exc, session=status.session.value)
+            return []
+
     def _discover(self, status: SessionStatus, limit: int) -> list[Candidate]:
         request_each = min(self.config.discovery_limit_each, max(20, limit))
         if status.market == Market.KR:
@@ -633,14 +687,23 @@ class ScannerService:
             if item.market == status.market and item.session == status.session and item.session in ENABLED_SESSIONS[status.market]
         ]
         unique = list({item.key: item for item in candidates}.values())
-        self._prune_session_results(status.session, {item.key for item in unique})
+        observed_at = self._aware_now()
+        fresh = bool(unique)
+        if not fresh:
+            self._counters.candidate_empty_discoveries += 1
+            unique = self._fallback_candidates(status, observed_at)
+            if unique:
+                self._counters.candidate_fallbacks += 1
+                self._counters.candidate_fallback_symbols += len(unique)
         if not unique:
             return []
+        self._prune_session_results(status.session, {item.key for item in unique})
         snapshot_writer = getattr(self._durable_store, "save_candidate_snapshot", None)
-        observed_at = self._aware_now()
         snapshot_key = f"{status.market.value}:{status.session.value}"
         snapshot_bucket = int(observed_at.timestamp() // CANDIDATE_SNAPSHOT_INTERVAL_SECONDS)
-        if callable(snapshot_writer) and self._candidate_snapshot_buckets.get(snapshot_key) != snapshot_bucket:
+        if fresh:
+            self._recent_candidates[snapshot_key] = (observed_at, tuple(unique))
+        if fresh and callable(snapshot_writer) and self._candidate_snapshot_buckets.get(snapshot_key) != snapshot_bucket:
             try:
                 snapshot_writer(unique, observed_at)
                 self._candidate_snapshot_buckets[snapshot_key] = snapshot_bucket
