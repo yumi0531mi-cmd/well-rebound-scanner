@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-09-15T09:09:52+09:00",
+  "updated_at": "2026-09-15T09:17:54+09:00",
   "current_step": 3,
   "completed_steps": [
     "기존 저장소와 인계 보고서 확인",
@@ -26,7 +26,11 @@
     "운영 main 7bc5a62 배포 및 앱 0.8.1/엔진 20/Cockroach 연결 확인",
     "라이브 최대 3000봉 대비 5500봉 평가 요구로 전 후보가 차단되는 결함 재현",
     "전략 완화 없이 엔진 입장 900봉·구조 추적 3000봉으로 라이브 계약 정합화",
-    "라이브 캐시 게이트 수정 후 운영 회귀 474개 통과"
+    "라이브 캐시 게이트 수정 후 운영 회귀 474개 통과",
+    "운영 fb79149 앱 0.8.2 배포 후 후보 평가 0건에서 3건으로 회복 확인",
+    "50초 예산에서 실제 처리 수가 아닌 선택 수만큼 회전해 종목이 누락되는 결함 수정",
+    "과거시점 후보 스냅샷 저장 성공/종목행/오류 운영 계측 추가",
+    "회전·스냅샷 계측 수정 후 운영 회귀 475개 통과"
   ],
   "files": {
     "config.py": "created; qualification/risk/cost/data/model settings centralized",
@@ -39,7 +43,7 @@
     "wellscan/probability.py": "causal factors, immutable signal snapshots, resolved-before-signal live estimator implemented",
     "wellscan/validation.py": "signal-time features and unqualified probability/EV persisted",
     "app.py": "point-in-time backtest and explicit live probability training/qualification labels",
-    "wellscan/scanner_service.py": "strict 900-bar engine admission separated from 3000-bar structural tracking"
+    "wellscan/scanner_service.py": "900/3000 live cache contract, attempted-only rotation, candidate snapshot counters"
   },
   "verified_metrics": {
     "target1_goal": 0.8,
@@ -62,7 +66,8 @@
     "no_relaxation": true
   },
   "next_actions": [
-    "deploy live cache gate fix and confirm nonzero candidate evaluation plus snapshot collection",
+    "deploy attempted-only rotation and snapshot telemetry; verify candidate snapshot writes without errors",
+    "measure cold-start candidate coverage time and remove remaining 60-second cycle overrun without relaxing strategy",
     "run actual KIS 60-day development validation when credentials are available; local credentials currently absent",
     "request separate authorization before any reserved holdout access"
   ]

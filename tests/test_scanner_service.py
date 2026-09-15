@@ -143,6 +143,20 @@ def test_candidate_snapshot_is_persisted_once_per_configured_bucket(tmp_path):
     service._discover(status, 10)
     service._discover(status, 10)
     assert durable.calls == [(('005930',), NOW)]
+    assert service.snapshot().counters["candidate_snapshots_written"] == 1
+    assert service.snapshot().counters["candidate_snapshot_candidates_written"] == 1
+
+
+def test_discovery_rotation_advances_only_by_attempted_candidates(tmp_path):
+    candidates = [Candidate(f"{index:06d}", str(index), 100, 1, 1, 1) for index in range(5)]
+    service = ScannerService(
+        config(tmp_path), client=FakeClient(candidates), history=FakeHistory(),
+        validations=FakeValidation(), clock=lambda: NOW,
+    )
+    status = SessionStatus(Market.KR, TradingSession.KR_REGULAR, True, "active")
+    assert [item.symbol for item in service._discover(status, 3)] == ["000000", "000001", "000002"]
+    service._advance_rotation(status, 1)
+    assert [item.symbol for item in service._discover(status, 3)] == ["000001", "000002", "000003"]
 
 
 def config(tmp_path: Path, **changes):

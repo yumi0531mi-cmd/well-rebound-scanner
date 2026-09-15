@@ -975,6 +975,12 @@ if use_daemon_feed:
         else "측정 대기"
     )
     st.sidebar.caption(f"최근 주기 {cycle_at} · 처리 {elapsed}")
+    service_counters = getattr(service_status, "counters", {})
+    st.sidebar.caption(
+        f"과거시점 후보 저장 {service_counters.get('candidate_snapshots_written', 0)}회 · "
+        f"종목행 {service_counters.get('candidate_snapshot_candidates_written', 0)}건 · "
+        f"오류 {service_counters.get('candidate_snapshot_errors', 0)}건"
+    )
     if service_status.recent_errors:
         last_daemon_error = service_status.recent_errors[-1]
         st.sidebar.warning(

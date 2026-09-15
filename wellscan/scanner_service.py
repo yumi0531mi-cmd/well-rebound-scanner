@@ -123,6 +123,9 @@ class ScannerCounters:
     data_wait_observations: int = 0
     live_price_checks: int = 0
     budget_exhaustions: int = 0
+    candidate_snapshots_written: int = 0
+    candidate_snapshot_candidates_written: int = 0
+    candidate_snapshot_errors: int = 0
 
 
 @dataclass(frozen=True)
@@ -269,6 +272,7 @@ class ScannerService:
         self._counters = ScannerCounters()
         self._recent_errors: deque[dict[str, str]] = deque(maxlen=RECENT_ERROR_LIMIT)
         self._rotation: dict[str, int] = {}
+        self._rotation_population: dict[str, int] = {}
         self._tracking_offset = 0
         self._session_results: dict[TradingSession, dict[str, tuple[Candidate, ScanResult]]] = {}
         self._session_result_day: dict[TradingSession, str] = {}
@@ -608,14 +612,23 @@ class ScannerService:
             try:
                 snapshot_writer(unique, observed_at)
                 self._candidate_snapshot_buckets[snapshot_key] = snapshot_bucket
+                self._counters.candidate_snapshots_written += 1
+                self._counters.candidate_snapshot_candidates_written += len(unique)
             except Exception as exc:
+                self._counters.candidate_snapshot_errors += 1
                 self._error("candidate-snapshot", exc, session=status.session.value)
         key = f"{status.market.value}:{status.session.value}"
         offset = self._rotation.get(key, 0) % len(unique)
         rotated = unique[offset:] + unique[:offset]
         selected = rotated[:limit]
-        self._rotation[key] = (offset + len(selected)) % len(unique)
+        self._rotation_population[key] = len(unique)
         return selected
+
+    def _advance_rotation(self, status: SessionStatus, attempted: int) -> None:
+        key = f"{status.market.value}:{status.session.value}"
+        population = self._rotation_population.get(key, 0)
+        if attempted > 0 and population > 0:
+            self._rotation[key] = (self._rotation.get(key, 0) + attempted) % population
 
     def _scan_session(self, status: SessionStatus, deadline: float, seconds_budgeted: float) -> None:
         limit = budgeted_candidate_limit(status.market, seconds_budgeted, self.config.max_candidates_per_session)
@@ -629,6 +642,7 @@ class ScannerService:
             self._error("discovery", exc, session=status.session.value)
             return
         self._counters.candidates_seen += len(candidates)
+        attempted = 0
         for candidate in candidates:
             if self._monotonic() >= deadline:
                 self._counters.budget_exhaustions += 1
@@ -643,6 +657,7 @@ class ScannerService:
                 if self._monotonic() + reserved * KIS_REQUEST_INTERVAL_SECONDS > deadline:
                     self._counters.budget_exhaustions += 1
                     break
+                attempted += 1
                 bars = self.history.backfill_candidate(
                     self.client,
                     candidate,
@@ -698,6 +713,7 @@ class ScannerService:
                 self._error("candidate", exc, symbol=candidate.key, session=status.session.value)
             except Exception as exc:  # keep the daemon alive, but expose the unexpected type
                 self._error("candidate-unexpected", exc, symbol=candidate.key, session=status.session.value)
+        self._advance_rotation(status, attempted)
         self._publish_session_completion(status.session)
 
     def run_cycle(self) -> bool:
