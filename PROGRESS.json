@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-09-15T09:39:54+09:00",
+  "updated_at": "2026-09-15T09:46:34+09:00",
   "current_step": 3,
   "completed_steps": [
     "기존 저장소와 인계 보고서 확인",
@@ -41,7 +41,10 @@
     "주기 예산 전파 수정 후 운영 회귀 479개 통과; Ruff/pip check 통과",
     "운영 0.8.5 첫 주기 50.99초로 61.06초 대비 개선됐으나 50초 계약은 0.99초 초과 확인",
     "DB 병합·결과 저장을 위한 2초 요청 종료 여유를 config.py에 중앙화하고 KIS 호출 마감에 적용",
-    "2초 종료 여유 수정 후 운영 회귀 479개 통과; Ruff/pip check 통과"
+    "2초 종료 여유 수정 후 운영 회귀 479개 통과; Ruff/pip check 통과",
+    "운영 0.8.6 첫 주기 54.16초 및 KIS 요청 주기 예산 소진이 데이터 오류로 노출되는 문제 확인",
+    "실측 후처리 시간을 반영해 종료 여유를 7초로 조정하고 예산 종료를 오류 없는 다음 회차 이월로 분류",
+    "예산 이월 수정 후 운영 회귀 480개 통과; Ruff/pip check 통과"
   ],
   "files": {
     "config.py": "created; qualification/risk/cost/data/model and scanner deadline-margin settings centralized",
@@ -79,7 +82,7 @@
     "no_relaxation": true
   },
   "next_actions": [
-    "deploy two-second finalization margin and verify cycle elapsed stays within 50 seconds",
+    "deploy seven-second finalization margin and verify cycle elapsed stays within 50 seconds without false data errors",
     "measure cold-start candidate coverage time and remove remaining 60-second cycle overrun without relaxing strategy",
     "run actual KIS 60-day development validation when credentials are available; local credentials currently absent",
     "request separate authorization before any reserved holdout access"

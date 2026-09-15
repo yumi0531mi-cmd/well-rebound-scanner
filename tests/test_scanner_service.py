@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pandas as pd
 
 from wellscan.history import HistoryCache
-from wellscan.kis import KISError
+from wellscan.kis import KISDeadlineError, KISError
 from wellscan.models import Candidate, Market, Stage, TradingSession
 from wellscan.policy import estimated_costs
 from wellscan.scanner_service import (
@@ -175,7 +175,7 @@ def test_candidate_limit_is_derived_from_kis_call_budget():
     defaults = ScannerServiceConfig()
     assert defaults.initial_history_bars == 900
     assert defaults.tracking_history_bars == HistoryCache.WARM_TARGET_BARS == 3000
-    assert defaults.request_deadline_margin_seconds == 2.0
+    assert defaults.request_deadline_margin_seconds == 7.0
     assert defaults.maximum_completed_bar_age_seconds == 600.0
     assert budgeted_candidate_limit(Market.KR, 10, 80) == 10
     assert budgeted_candidate_limit(Market.US, 10, 80) == 5
@@ -282,6 +282,7 @@ def test_cold_cache_work_does_not_start_without_worst_case_call_budget(tmp_path)
         config(
             tmp_path,
             cycle_budget_seconds=6,
+            request_deadline_margin_seconds=1,
             initial_history_bars=HistoryCache.WARM_TARGET_BARS,
         ),
         client=FakeClient([Candidate("005930", "삼성전자", 100, 1, 1, 1)]),
@@ -299,6 +300,26 @@ def test_cold_cache_work_does_not_start_without_worst_case_call_budget(tmp_path)
 
     assert not history.calls
     assert service.snapshot().counters["budget_exhaustions"] == 1
+
+
+def test_request_deadline_rollover_is_not_reported_as_data_error(tmp_path):
+    class DeadlineHistory(FakeHistory):
+        def backfill_candidate(self, client, candidate, target_bars):
+            raise KISDeadlineError("KIS 요청 주기 예산 소진")
+
+    candidate = Candidate("005930", "삼성전자", 100, 1, 1, 1)
+    service = ScannerService(
+        config(tmp_path), client=FakeClient([candidate]), history=DeadlineHistory(),
+        sequences=object(), validations=FakeValidation(), clock=lambda: NOW,
+        session_resolver=resolver(), evaluator=lambda *args, **kwargs: None,
+    )
+
+    service.run_cycle()
+
+    snapshot = service.snapshot()
+    assert snapshot.counters["budget_exhaustions"] == 1
+    assert snapshot.counters["data_errors"] == 0
+    assert snapshot.recent_errors == ()
 
 
 def test_fresh_quote_failure_blocks_final_record_and_is_explicit(tmp_path):

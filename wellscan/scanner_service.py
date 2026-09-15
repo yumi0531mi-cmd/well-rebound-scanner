@@ -37,7 +37,7 @@ from .bar_store import CockroachBarStore
 from .engine import MAX_COMPLETED_BAR_AGE_SECONDS, evaluate, revalidate_live
 from .history import HistoryCache
 from .indicators import normalize_bars
-from .kis import KISClient, KISError
+from .kis import KISClient, KISDeadlineError, KISError
 from .models import Candidate, Market, ScanResult, Stage, TradingSession
 from .policy import session_day
 from .sequence import SequenceStore
@@ -572,6 +572,8 @@ class ScannerService:
                     try:
                         live_price, checked_at = self._live_price(candidate)
                         self.validations.update_live(updated, live_price, checked_at.isoformat())
+                    except KISDeadlineError:
+                        raise
                     except Exception as exc:
                         self._counters.tracking_errors += 1
                         self._error(
@@ -580,6 +582,10 @@ class ScannerService:
                             symbol=candidate.key,
                             session=candidate.session.value,
                         )
+            except KISDeadlineError:
+                self._counters.budget_exhaustions += 1
+                all_attempted = False
+                break
             except Exception as exc:
                 if not counted:
                     attempted += 1
@@ -642,6 +648,9 @@ class ScannerService:
             return
         try:
             candidates = self._discover(status, limit)
+        except KISDeadlineError:
+            self._counters.budget_exhaustions += 1
+            return
         except Exception as exc:
             self._counters.discovery_errors += 1
             self._error("discovery", exc, session=status.session.value)
@@ -714,6 +723,9 @@ class ScannerService:
                     )
                     self._counters.nonfinal_observations += 1
                     self._publish_result(published_candidate, result)
+            except KISDeadlineError:
+                self._counters.budget_exhaustions += 1
+                break
             except (KISError, ValueError, RuntimeError) as exc:
                 self._error("candidate", exc, symbol=candidate.key, session=status.session.value)
             except Exception as exc:  # keep the daemon alive, but expose the unexpected type

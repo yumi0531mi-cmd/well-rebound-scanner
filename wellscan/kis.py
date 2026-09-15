@@ -35,6 +35,10 @@ class KISError(RuntimeError):
     pass
 
 
+class KISDeadlineError(KISError):
+    """A scanner-owned request budget ended before more I/O could start."""
+
+
 class KISClient:
     """Read-only KIS client for rankings, current price and minute history."""
 
@@ -75,14 +79,14 @@ class KISClient:
             return 15.0
         remaining = deadline - time.monotonic()
         if remaining <= 0.2:
-            raise KISError("KIS 요청 주기 예산 소진")
+            raise KISDeadlineError("KIS 요청 주기 예산 소진")
         # A scalar timeout applies separately to connect and read.
         return max(0.1, min(15.0, remaining / 2))
 
     def _retry_sleep(self, seconds: float) -> None:
         deadline = getattr(self._request_budget, "deadline", None)
         if deadline is not None and time.monotonic() + seconds >= deadline:
-            raise KISError("KIS 요청 주기 예산 소진")
+            raise KISDeadlineError("KIS 요청 주기 예산 소진")
         time.sleep(seconds)
 
     @property
