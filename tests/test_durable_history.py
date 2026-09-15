@@ -84,6 +84,48 @@ def test_database_connection_is_reused_until_discarded(monkeypatch) -> None:
     assert len(created) == 2
 
 
+def test_database_load_many_restores_full_windows_in_one_namespace_query() -> None:
+    class Cursor:
+        def __init__(self):
+            self.calls = []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            del args
+
+        def execute(self, statement, parameters):
+            self.calls.append((statement, parameters))
+
+        def fetchall(self):
+            stamp = pd.Timestamp("2026-09-15 06:00", tz="UTC").to_pydatetime()
+            return [
+                ("005930", stamp, 100.0, 101.0, 99.0, 100.5, 1000.0),
+                ("000660", stamp, 200.0, 201.0, 199.0, 200.5, 2000.0),
+            ]
+
+    class Connection:
+        closed = False
+
+        def __init__(self):
+            self.value = Cursor()
+
+        def cursor(self):
+            return self.value
+
+    store = CockroachBarStore("postgresql://user:secret@example.com:26257/defaultdb")
+    store._connection = Connection()
+    store._initialized = True
+    namespace = "KR-KRX-KR_REGULAR"
+
+    restored = store.load_many([(namespace, "005930"), (namespace, "000660")])
+
+    assert len(store._connection.value.calls) == 1
+    assert "row_number()" in store._connection.value.calls[0][0]
+    assert all(len(restored[(namespace, symbol)]) == 1 for symbol in ("005930", "000660"))
+
+
 def test_remote_history_restores_empty_local_cache(tmp_path) -> None:
     durable = FakeDurableStore(frame("2026-08-20 09:00", 30))
     cache = HistoryCache(tmp_path, durable_store=durable)  # type: ignore[arg-type]
@@ -94,6 +136,24 @@ def test_remote_history_restores_empty_local_cache(tmp_path) -> None:
     assert len(first) == 30
     assert len(second) == 30
     assert durable.loads == 1
+
+
+def test_candidate_preload_keeps_full_3000_bars_and_avoids_individual_reads(tmp_path) -> None:
+    class BatchStore(FakeDurableStore):
+        def load_many(self, requests, limit):
+            assert limit == 3000
+            return {key: self.stored for key in requests}
+
+    durable = BatchStore(frame("2026-08-20 09:00", 3000))
+    cache = HistoryCache(tmp_path, durable_store=durable)  # type: ignore[arg-type]
+    candidates = (
+        Candidate("005930", "삼성전자", 70000, 1, 1, 1),
+        Candidate("000660", "SK하이닉스", 200000, 1, 1, 1),
+    )
+
+    assert cache.preload_candidates(candidates) == 2
+    assert all(len(cache.load(item.symbol)) == 3000 for item in candidates)
+    assert durable.loads == 0
 
 
 def test_live_candidate_keeps_full_3000_bar_structure_when_entry_warmup_is_900(tmp_path) -> None:
@@ -122,6 +182,7 @@ def test_new_bars_are_written_to_durable_store(tmp_path) -> None:
     assert len(combined) == 5
     assert len(durable.upserts) == 1
     assert durable.upserts[0].equals(incoming)
+    assert not cache.path("005930").exists()
 
 
 def test_unchanged_bars_are_not_rewritten_to_durable_store(tmp_path) -> None:

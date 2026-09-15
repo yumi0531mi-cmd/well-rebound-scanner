@@ -14,7 +14,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import pandas as pd
 
-from config import BACKTEST_MAX_STORED_BARS
+from config import BACKTEST_MAX_STORED_BARS, DURABLE_PREFETCH_SYMBOLS_PER_QUERY, STRUCTURAL_WINDOW_BARS
 
 from .indicators import normalize_bars
 
@@ -401,9 +401,65 @@ class CockroachBarStore:
 
     def load_recent(self, namespace: str, symbol: str) -> pd.DataFrame:
         """Latency-bounded view for the live engine."""
-        from config import STRUCTURAL_WINDOW_BARS
-
         return self.load(namespace, symbol, limit=STRUCTURAL_WINDOW_BARS)
+
+    def load_many(
+        self, requests: list[tuple[str, str]], limit: int = STRUCTURAL_WINDOW_BARS
+    ) -> dict[tuple[str, str], pd.DataFrame]:
+        """Restore full per-symbol windows in bounded batches and fewer round trips."""
+        if limit <= 0:
+            raise ValueError("limit must be positive")
+        keys = list(dict.fromkeys((namespace, symbol.upper()) for namespace, symbol in requests))
+        results = {
+            key: pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
+            for key in keys
+        }
+        grouped: dict[str, list[str]] = {}
+        for namespace, symbol in keys:
+            grouped.setdefault(namespace, []).append(symbol)
+        try:
+            with self._lock, self._connection_session() as connection:
+                self._ensure_schema(connection)
+                for namespace, symbols in grouped.items():
+                    for start in range(0, len(symbols), DURABLE_PREFETCH_SYMBOLS_PER_QUERY):
+                        batch = symbols[start : start + DURABLE_PREFETCH_SYMBOLS_PER_QUERY]
+                        placeholders = ", ".join("%s" for _ in batch)
+                        with connection.cursor() as cursor:
+                            cursor.execute(
+                                f"""
+                                SELECT symbol, timestamp, open, high, low, close, volume
+                                FROM (
+                                    SELECT symbol, timestamp, open, high, low, close, volume,
+                                           row_number() OVER (
+                                               PARTITION BY symbol ORDER BY timestamp DESC
+                                           ) AS bar_rank
+                                    FROM {TABLE_NAME}
+                                    WHERE namespace = %s AND symbol IN ({placeholders})
+                                ) AS ranked
+                                WHERE bar_rank <= %s
+                                ORDER BY symbol, timestamp
+                                """,
+                                (namespace, *batch, min(limit, STRUCTURAL_WINDOW_BARS)),
+                            )
+                            rows = cursor.fetchall()
+                        row_groups: dict[str, list[tuple[Any, ...]]] = {}
+                        for row in rows:
+                            row_groups.setdefault(str(row[0]).upper(), []).append(tuple(row[1:]))
+                        for symbol in batch:
+                            selected = row_groups.get(symbol, [])
+                            if not selected:
+                                continue
+                            frame = pd.DataFrame(
+                                selected, columns=["timestamp", "open", "high", "low", "close", "volume"]
+                            ).set_index("timestamp")
+                            timezone = "Asia/Seoul" if namespace.startswith("KR-") else "America/New_York"
+                            frame.index = pd.to_datetime(frame.index, utc=True).tz_convert(timezone).tz_localize(None)
+                            results[(namespace, symbol)] = normalize_bars(frame)
+            self._available, self._last_error = True, ""
+            return results
+        except Exception as exc:
+            self._record_error(exc)
+            raise StoreUnavailableError(self._last_error or "영구 분봉 묶음 읽기 실패") from exc
 
     def upsert(self, namespace: str, symbol: str, incoming: pd.DataFrame) -> bool:
         data = normalize_bars(incoming).tail(MAX_BARS_PER_SYMBOL)

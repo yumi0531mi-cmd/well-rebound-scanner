@@ -981,6 +981,11 @@ if use_daemon_feed:
         f"종목행 {service_counters.get('candidate_snapshot_candidates_written', 0)}건 · "
         f"오류 {service_counters.get('candidate_snapshot_errors', 0)}건"
     )
+    st.sidebar.caption(
+        f"3,000봉 묶음복구 {service_counters.get('candidate_prefetches', 0)}회 · "
+        f"종목 {service_counters.get('candidate_prefetch_symbols', 0)}개 · "
+        f"오류 {service_counters.get('candidate_prefetch_errors', 0)}건"
+    )
     if service_status.recent_errors:
         last_daemon_error = service_status.recent_errors[-1]
         st.sidebar.warning(

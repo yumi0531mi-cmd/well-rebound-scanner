@@ -219,6 +219,36 @@ def test_cycle_uses_last_completed_close_and_common_engine(tmp_path):
     assert service.results_snapshot().sessions[0].results[0][0].price == 101.25
 
 
+def test_cycle_prefetches_full_candidate_windows_before_individual_refresh(tmp_path):
+    events = []
+
+    class PrefetchHistory(FakeHistory):
+        def preload_candidates(self, candidates):
+            events.append(("preload", tuple(item.key for item in candidates)))
+            return len(candidates)
+
+        def backfill_candidate(self, client, candidate, target_bars):
+            assert events and events[0][0] == "preload"
+            events.append(("refresh", candidate.key))
+            return super().backfill_candidate(client, candidate, target_bars)
+
+    candidate = Candidate("005930", "삼성전자", 100, 1, 1, 1)
+    service = ScannerService(
+        config(tmp_path), client=FakeClient([candidate]), history=PrefetchHistory(),
+        sequences=object(), validations=FakeValidation(), clock=lambda: NOW,
+        session_resolver=resolver(),
+        evaluator=lambda *args, **kwargs: SimpleNamespace(
+            final_buy=False, stage=Stage.CANDIDATE, evaluated_at=kwargs["now"]
+        ),
+    )
+
+    service.run_cycle()
+
+    assert events == [("preload", (candidate.key,)), ("refresh", candidate.key)]
+    assert service.snapshot().counters["candidate_prefetches"] == 1
+    assert service.snapshot().counters["candidate_prefetch_symbols"] == 1
+
+
 def test_empty_discovery_publishes_completed_empty_session(tmp_path):
     service = ScannerService(
         config(tmp_path),

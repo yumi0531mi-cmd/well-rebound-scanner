@@ -13,7 +13,7 @@ from typing import Any
 import pandas as pd
 from filelock import FileLock
 
-from config import HISTORY_INITIAL_READY_BARS, HISTORY_WARM_TARGET_BARS
+from config import HISTORY_INITIAL_READY_BARS, HISTORY_WARM_TARGET_BARS, STRUCTURAL_WINDOW_BARS
 
 from .bar_store import CockroachBarStore, StoreStatus
 from .indicators import normalize_bars
@@ -122,17 +122,51 @@ class HistoryCache:
         with self._state_lock:
             return self._metrics.get(candidate.key)
 
+    def preload_candidates(self, candidates: tuple[Candidate, ...]) -> int:
+        """Restore every candidate's full structural window in DB-side batches."""
+        loader = getattr(self._durable_store, "load_many", None)
+        if not callable(loader) or not candidates:
+            return 0
+        unique = {
+            (self._namespace(candidate), candidate.symbol.upper()): candidate
+            for candidate in candidates
+        }
+        with self._state_lock:
+            pending = [key for key in unique if key not in self._durable_loaded]
+        if not pending:
+            return 0
+        restored = loader(pending, limit=STRUCTURAL_WINDOW_BARS)
+        if not self._durable_store.status().available:
+            raise RuntimeError("영구 분봉 묶음 읽기 실패: " + self._durable_store.status().last_error)
+        with self._state_lock:
+            for durable_key in pending:
+                namespace, _ = durable_key
+                remote = self._canonical_bars(restored.get(durable_key, pd.DataFrame()), namespace)
+                current = self._durable_frames.get(durable_key)
+                self._durable_frames[durable_key] = (
+                    remote
+                    if current is None or current.empty
+                    else normalize_bars(pd.concat([current, remote])).tail(STRUCTURAL_WINDOW_BARS)
+                )
+                self._durable_loaded.add(durable_key)
+        return len(pending)
+
     def merge(self, symbol: str, incoming: pd.DataFrame, namespace: str = "KR-KRX-KR_REGULAR") -> pd.DataFrame:
         path = self.path(symbol, namespace)
-        path.parent.mkdir(parents=True, exist_ok=True)
         incoming = self._canonical_bars(incoming, namespace)
-        with FileLock(str(path) + ".lock", timeout=5):
+        if self._durable_store is None:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with FileLock(str(path) + ".lock", timeout=5):
+                existing = self.load(symbol, namespace)
+                combined = incoming.copy() if existing.empty else pd.concat([existing, incoming])
+                combined = normalize_bars(combined).tail(STRUCTURAL_WINDOW_BARS)
+                temporary = path.with_suffix(".tmp")
+                combined.to_csv(temporary, index_label="timestamp")
+                temporary.replace(path)
+        else:
             existing = self.load(symbol, namespace)
             combined = incoming.copy() if existing.empty else pd.concat([existing, incoming])
-            combined = normalize_bars(combined).tail(3000)
-            temporary = path.with_suffix(".tmp")
-            combined.to_csv(temporary, index_label="timestamp")
-            temporary.replace(path)
+            combined = normalize_bars(combined).tail(STRUCTURAL_WINDOW_BARS)
         if self._durable_store is not None:
             changed = incoming
             if not existing.empty:

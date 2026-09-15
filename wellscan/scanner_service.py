@@ -131,6 +131,9 @@ class ScannerCounters:
     candidate_snapshots_written: int = 0
     candidate_snapshot_candidates_written: int = 0
     candidate_snapshot_errors: int = 0
+    candidate_prefetches: int = 0
+    candidate_prefetch_symbols: int = 0
+    candidate_prefetch_errors: int = 0
 
 
 @dataclass(frozen=True)
@@ -674,6 +677,17 @@ class ScannerService:
             self._error("discovery", exc, session=status.session.value)
             return
         self._counters.candidates_seen += len(candidates)
+        preloader = getattr(self.history, "preload_candidates", None)
+        if callable(preloader):
+            try:
+                restored = int(preloader(tuple(candidates)))
+                if restored:
+                    self._counters.candidate_prefetches += 1
+                    self._counters.candidate_prefetch_symbols += restored
+            except Exception as exc:
+                self._counters.candidate_prefetch_errors += 1
+                self._error("candidate-prefetch", exc, session=status.session.value)
+                return
         attempted = 0
         for candidate in candidates:
             if self._monotonic() >= deadline:
