@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-09-15T14:10:26+09:00",
+  "updated_at": "2026-09-15T15:15:11+09:00",
   "current_step": 3,
   "completed_steps": [
     "기존 저장소와 인계 보고서 확인",
@@ -54,7 +54,11 @@
     "운영 0.8.9에서 반복 주기 44.10~47.40초·후보풀 31개·WebSocket 연결 확인",
     "후보별 CockroachDB 신규 연결 누적과 이탈·노후 결과 잔류로 화면 완료봉이 최대 2시간 이상 낡는 결함 확인",
     "직렬 CockroachDB 연결 재사용·오류 연결 폐기와 현재 후보군/10분 freshness 기반 결과 제거 구현",
-    "라이브 연결·후보 freshness 수정 후 운영 회귀 485개 통과; Ruff/pip check 통과"
+    "라이브 연결·후보 freshness 수정 후 운영 회귀 485개 통과; Ruff/pip check 통과",
+    "운영 0.9.0 배포·CockroachDB·KIS WebSocket 확인; 냉시작 53.94초, 다음 주기 43.79초",
+    "운영 0.9.0에서 노후 결과 제거와 최신 완료봉 15:10~15:11 확인; 후보풀 1→2→3 회복",
+    "900봉 초기 평가가 불필요하게 CockroachDB 3000봉을 복구하는 냉시작 전송 병목 제거",
+    "요청 목표만큼 900봉 복구 후 3000봉 추적 시 확장하도록 구현; 운영 회귀 486개 통과"
   ],
   "files": {
     "config.py": "created; qualification/risk/cost/data/model and scanner deadline-margin settings centralized",
@@ -70,8 +74,8 @@
     "wellscan/scanner_service.py": "900/3000 live cache contract, attempted-only rotation, candidate snapshot counters, deadlines, current-universe/freshness pruning",
     "wellscan/realtime.py": "bounded per-record trailing schema extensions accepted; malformed boundaries rejected",
     "wellscan/kis.py": "thread-local scanner deadline bounds HTTP timeout and retries",
-    "wellscan/history.py": "durable writes limited to new or changed minute bars",
-    "wellscan/bar_store.py": "serialized CockroachDB connection reused across live candidate reads/writes and discarded on failure"
+    "wellscan/history.py": "durable writes limited to changed bars; initial durable restore is target-sized and can expand for tracking",
+    "wellscan/bar_store.py": "serialized CockroachDB connection reused; live durable reads accept a bounded target window"
   },
   "verified_metrics": {
     "target1_goal": 0.8,
@@ -94,8 +98,8 @@
     "no_relaxation": true
   },
   "next_actions": [
-    "deploy app 0.9.0 connection reuse and verify repeated cycle elapsed plus fresh candidate coverage",
-    "verify stale candidate rows disappear and completed-bar timestamps stay within the 10-minute admission contract",
+    "deploy app 0.9.1 target-sized durable restore and compare cold-start candidate coverage with 0.9.0",
+    "verify repeated cycles remain below 50 seconds and fresh candidate pool reaches at least five rows",
     "run actual KIS 60-day development validation when credentials are available; local credentials currently absent",
     "request separate authorization before any reserved holdout access"
   ]

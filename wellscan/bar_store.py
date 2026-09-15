@@ -399,11 +399,13 @@ class CockroachBarStore:
             self._record_error(exc)
             raise StoreUnavailableError(self._last_error or "영구 분봉 읽기 실패") from exc
 
-    def load_recent(self, namespace: str, symbol: str) -> pd.DataFrame:
+    def load_recent(
+        self, namespace: str, symbol: str, *, limit: int = BACKTEST_MAX_STORED_BARS
+    ) -> pd.DataFrame:
         """Latency-bounded view for the live engine."""
         from config import STRUCTURAL_WINDOW_BARS
 
-        return self.load(namespace, symbol, limit=STRUCTURAL_WINDOW_BARS)
+        return self.load(namespace, symbol, limit=min(limit, STRUCTURAL_WINDOW_BARS))
 
     def upsert(self, namespace: str, symbol: str, incoming: pd.DataFrame) -> bool:
         data = normalize_bars(incoming).tail(MAX_BARS_PER_SYMBOL)

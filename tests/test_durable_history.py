@@ -95,6 +95,27 @@ def test_remote_history_restores_empty_local_cache(tmp_path) -> None:
     assert durable.loads == 1
 
 
+def test_live_history_loads_only_requested_window_then_expands(tmp_path) -> None:
+    class WindowStore(FakeDurableStore):
+        def __init__(self, stored):
+            super().__init__(stored)
+            self.limits = []
+
+        def load_recent(self, namespace, symbol, *, limit):
+            del namespace, symbol
+            self.loads += 1
+            self.limits.append(limit)
+            return self.stored.tail(limit)
+
+    durable = WindowStore(frame("2026-08-20 09:00", 1200))
+    cache = HistoryCache(tmp_path, durable_store=durable)  # type: ignore[arg-type]
+
+    assert len(cache.load("005930", durable_limit=900)) == 900
+    assert len(cache.load("005930", durable_limit=900)) == 900
+    assert len(cache.load("005930", durable_limit=3000)) == 1200
+    assert durable.limits == [900, 3000]
+
+
 def test_new_bars_are_written_to_durable_store(tmp_path) -> None:
     durable = FakeDurableStore(pd.DataFrame(columns=["open", "high", "low", "close", "volume"]))
     cache = HistoryCache(tmp_path, durable_store=durable)  # type: ignore[arg-type]
