@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-09-15T09:34:25+09:00",
+  "updated_at": "2026-09-15T09:39:54+09:00",
   "current_step": 3,
   "completed_steps": [
     "기존 저장소와 인계 보고서 확인",
@@ -38,10 +38,13 @@
     "운영 a82183a 앱 0.8.4 배포 후 KIS WebSocket 연결 및 실제 카드 체결 수신 확인",
     "과거시점 후보 스냅샷 2회·64행·오류 0건 운영 누적 확인",
     "50초 주기 예산이 이미 시작된 최대 15초 HTTP 요청과 재시도에 전파되지 않아 61초 초과하는 결함 수정",
-    "주기 예산 전파 수정 후 운영 회귀 479개 통과; Ruff/pip check 통과"
+    "주기 예산 전파 수정 후 운영 회귀 479개 통과; Ruff/pip check 통과",
+    "운영 0.8.5 첫 주기 50.99초로 61.06초 대비 개선됐으나 50초 계약은 0.99초 초과 확인",
+    "DB 병합·결과 저장을 위한 2초 요청 종료 여유를 config.py에 중앙화하고 KIS 호출 마감에 적용",
+    "2초 종료 여유 수정 후 운영 회귀 479개 통과; Ruff/pip check 통과"
   ],
   "files": {
-    "config.py": "created; qualification/risk/cost/data/model settings centralized",
+    "config.py": "created; qualification/risk/cost/data/model and scanner deadline-margin settings centralized",
     "state_manager.py": "created; atomic load/save verified",
     "kis_data_fetcher.py": "created; KIS-only 60-day cache path implemented",
     "wellscan/execution.py": "3-bar validated entry contract restored through config.py",
@@ -76,7 +79,7 @@
     "no_relaxation": true
   },
   "next_actions": [
-    "deploy cycle deadline propagation and verify cycle elapsed stays within 50 seconds",
+    "deploy two-second finalization margin and verify cycle elapsed stays within 50 seconds",
     "measure cold-start candidate coverage time and remove remaining 60-second cycle overrun without relaxing strategy",
     "run actual KIS 60-day development validation when credentials are available; local credentials currently absent",
     "request separate authorization before any reserved holdout access"

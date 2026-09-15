@@ -27,6 +27,7 @@ import pandas as pd
 from config import (
     CANDIDATE_SNAPSHOT_INTERVAL_SECONDS,
     SCANNER_CYCLE_SECONDS,
+    SCANNER_REQUEST_DEADLINE_MARGIN_SECONDS,
     STRUCTURAL_WINDOW_BARS,
     WARMUP_BARS,
 )
@@ -78,6 +79,7 @@ class StaleCompletedBarError(RuntimeError):
 class ScannerServiceConfig:
     cycle_interval_seconds: float = SCANNER_CYCLE_SECONDS
     cycle_budget_seconds: float = 50.0
+    request_deadline_margin_seconds: float = SCANNER_REQUEST_DEADLINE_MARGIN_SECONDS
     tracking_budget_fraction: float = 0.25
     max_candidates_per_session: int = 80
     discovery_limit_each: int = 100
@@ -93,6 +95,8 @@ class ScannerServiceConfig:
     def __post_init__(self) -> None:
         if self.cycle_interval_seconds <= 0 or self.cycle_budget_seconds <= 0:
             raise ValueError("scanner service intervals must be positive")
+        if not 0 <= self.request_deadline_margin_seconds < self.cycle_budget_seconds:
+            raise ValueError("request deadline margin must fit inside the cycle budget")
         if not 0 < self.tracking_budget_fraction < 1:
             raise ValueError("tracking_budget_fraction must be between zero and one")
         for value in (
@@ -735,7 +739,8 @@ class ScannerService:
                 started + self.config.cycle_budget_seconds * self.config.tracking_budget_fraction,
             )
             request_deadline = getattr(self.client, "request_deadline", None)
-            tracking_scope = request_deadline(tracking_deadline) if callable(request_deadline) else nullcontext()
+            tracking_request_deadline = tracking_deadline - self.config.request_deadline_margin_seconds
+            tracking_scope = request_deadline(tracking_request_deadline) if callable(request_deadline) else nullcontext()
             with tracking_scope:
                 self._track_existing(tracking_deadline)
             for index, status in enumerate(active):
@@ -746,7 +751,8 @@ class ScannerService:
                     break
                 share = remaining / sessions_left
                 session_deadline = min(cycle_deadline, self._monotonic() + share)
-                session_scope = request_deadline(session_deadline) if callable(request_deadline) else nullcontext()
+                session_request_deadline = session_deadline - self.config.request_deadline_margin_seconds
+                session_scope = request_deadline(session_request_deadline) if callable(request_deadline) else nullcontext()
                 with session_scope:
                     self._scan_session(status, session_deadline, share)
             self._counters.cycles += 1
