@@ -16,7 +16,7 @@ from wellscan.scanner_service import (
     ScannerServiceConfig,
     budgeted_candidate_limit,
 )
-from wellscan.sessions import SessionStatus
+from wellscan.sessions import KST, SessionStatus, kr_session_window
 
 NOW = datetime(2026, 9, 7, 1, 1, 30, tzinfo=UTC)  # 10:01:30 KST
 
@@ -151,7 +151,7 @@ def test_empty_candidate_api_recovers_only_recent_real_snapshot(tmp_path):
     class RecoveryDurable(SnapshotDurable):
         def load_latest_candidate_snapshot(self, market, session, start, end):
             assert (market, session) == ("KR", "KR_REGULAR")
-            assert end - start == timedelta(seconds=600)
+            assert start == kr_session_window(end.astimezone(KST).date())[0]
             return [{
                 "observed_at": end - timedelta(minutes=1),
                 "namespace": "KR:KRX:KR_REGULAR", "symbol": "005930",

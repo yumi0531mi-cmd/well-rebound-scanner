@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-09-15T16:19:13+09:00",
+  "updated_at": "2026-09-15T16:26:50+09:00",
   "current_step": 3,
   "completed_steps": [
     "기존 저장소와 인계 보고서 확인",
@@ -71,7 +71,10 @@
     "재배포 후 미국 후보 API가 9회 이상 연속 빈 응답이었고 기존 후보를 즉시 삭제하는 운영 결함 확인",
     "조건 완화 없이 최근 10분 이내 실제 저장 후보만 복구하고 최신 KIS 분봉으로 재검증하는 빈응답 복구 경로 구현",
     "복구 스냅샷을 신규 스냅샷으로 저장하지 않아 10분 신선도가 무한 연장되지 않도록 강제",
-    "0.10.1 후보 빈응답 복구 후 운영 회귀 491개·Ruff·pip check 통과"
+    "0.10.1 후보 빈응답 복구 후 운영 회귀 491개·Ruff·pip check 통과",
+    "운영 0.10.1 배포·빈응답 계수 확인; 최종 정상 후보가 10분보다 오래되어 복구 0개로 안전 거부",
+    "복구 신선도를 각 시장의 현재 거래 세션 시작으로 제한하고 최대 8시간을 초과하지 않도록 강화",
+    "0.10.2 현재 세션 후보 복구 후 운영 회귀 491개·Ruff·pip check 통과"
   ],
   "files": {
     "config.py": "created; qualification/risk/cost/data/model and scanner deadline-margin settings centralized",
@@ -111,7 +114,7 @@
     "no_relaxation": true
   },
   "next_actions": [
-    "deploy app 0.10.1 candidate fallback and verify live fallback/prefetch counters and cycle duration",
+    "deploy app 0.10.2 session-bounded candidate fallback and verify live fallback/prefetch counters and cycle duration",
     "run actual KIS 60-day development validation when credentials are available; local credentials currently absent",
     "request separate authorization before any reserved holdout access"
   ]

@@ -48,8 +48,10 @@ from .sessions import (
     NEW_YORK,
     SessionStatus,
     filter_session_bars,
+    kr_session_window,
     session_exchange,
     session_status,
+    us_session_window,
 )
 from .validation import ValidationStore
 
@@ -633,6 +635,14 @@ class ScannerService:
     def _fallback_candidates(self, status: SessionStatus, observed_at: datetime) -> list[Candidate]:
         key = f"{status.market.value}:{status.session.value}"
         cutoff = observed_at - timedelta(seconds=self.config.candidate_fallback_max_age_seconds)
+        trading_day = session_day(status.session, observed_at)
+        window = (
+            kr_session_window(trading_day)
+            if status.market == Market.KR
+            else us_session_window(status.session, trading_day)
+        )
+        if window is not None:
+            cutoff = max(cutoff, window[0])
         cached = self._recent_candidates.get(key)
         if cached is not None and cached[0] >= cutoff:
             return list(cached[1])
