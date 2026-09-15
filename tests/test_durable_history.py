@@ -4,6 +4,7 @@ import pandas as pd
 
 from wellscan.bar_store import CockroachBarStore, StoreCooldownError, StoreStatus, _render_safe_database_url
 from wellscan.history import HistoryCache
+from wellscan.models import Candidate
 
 
 def frame(start: str, periods: int, base: float = 100) -> pd.DataFrame:
@@ -95,25 +96,20 @@ def test_remote_history_restores_empty_local_cache(tmp_path) -> None:
     assert durable.loads == 1
 
 
-def test_live_history_loads_only_requested_window_then_expands(tmp_path) -> None:
-    class WindowStore(FakeDurableStore):
-        def __init__(self, stored):
-            super().__init__(stored)
-            self.limits = []
+def test_live_candidate_keeps_full_3000_bar_structure_when_entry_warmup_is_900(tmp_path) -> None:
+    class Client:
+        def minute_day(self, *args, **kwargs):
+            del args, kwargs
+            return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
 
-        def load_recent(self, namespace, symbol, *, limit):
-            del namespace, symbol
-            self.loads += 1
-            self.limits.append(limit)
-            return self.stored.tail(limit)
+    stored = frame("2026-08-20 09:00", 3000)
+    cache = HistoryCache(tmp_path, durable_store=FakeDurableStore(stored))  # type: ignore[arg-type]
 
-    durable = WindowStore(frame("2026-08-20 09:00", 1200))
-    cache = HistoryCache(tmp_path, durable_store=durable)  # type: ignore[arg-type]
+    restored = cache.backfill_candidate(
+        Client(), Candidate("005930", "삼성전자", 70000, 1, 1, 1), 900  # type: ignore[arg-type]
+    )
 
-    assert len(cache.load("005930", durable_limit=900)) == 900
-    assert len(cache.load("005930", durable_limit=900)) == 900
-    assert len(cache.load("005930", durable_limit=3000)) == 1200
-    assert durable.limits == [900, 3000]
+    assert len(restored) == 3000
 
 
 def test_new_bars_are_written_to_durable_store(tmp_path) -> None:

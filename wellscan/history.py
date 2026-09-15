@@ -13,7 +13,7 @@ from typing import Any
 import pandas as pd
 from filelock import FileLock
 
-from config import HISTORY_INITIAL_READY_BARS, HISTORY_WARM_TARGET_BARS, STRUCTURAL_WINDOW_BARS
+from config import HISTORY_INITIAL_READY_BARS, HISTORY_WARM_TARGET_BARS
 
 from .bar_store import CockroachBarStore, StoreStatus
 from .indicators import normalize_bars
@@ -60,7 +60,6 @@ class HistoryCache:
         self._warm_futures: dict[str, Future[pd.DataFrame]] = {}
         self._durable_store = durable_store if durable_store is not None else CockroachBarStore.from_environment()
         self._durable_loaded: set[tuple[str, str]] = set()
-        self._durable_loaded_limits: dict[tuple[str, str], int] = {}
         self._durable_frames: dict[tuple[str, str], pd.DataFrame] = {}
         probe = getattr(self._durable_store, "probe", None)
         if callable(probe):
@@ -84,13 +83,7 @@ class HistoryCache:
         data.index = data.index.tz_convert(timezone).tz_localize(None)
         return normalize_bars(data)
 
-    def load(
-        self,
-        symbol: str,
-        namespace: str = "KR-KRX-KR_REGULAR",
-        *,
-        durable_limit: int = STRUCTURAL_WINDOW_BARS,
-    ) -> pd.DataFrame:
+    def load(self, symbol: str, namespace: str = "KR-KRX-KR_REGULAR") -> pd.DataFrame:
         path = self.path(symbol, namespace)
         try:
             local = pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
@@ -99,22 +92,15 @@ class HistoryCache:
                     pd.read_csv(path, index_col="timestamp", parse_dates=["timestamp"]), namespace
                 )
             durable_key = (namespace, symbol.upper())
-            desired_limit = max(1, min(int(durable_limit), STRUCTURAL_WINDOW_BARS))
             with self._state_lock:
-                durable_missing = self._durable_loaded_limits.get(durable_key, 0) < desired_limit
+                durable_missing = durable_key not in self._durable_loaded
             if self._durable_store is not None and durable_missing:
-                loader = getattr(self._durable_store, "load_recent", None)
-                loaded = (
-                    loader(namespace, symbol, limit=desired_limit)
-                    if callable(loader)
-                    else self._durable_store.load(namespace, symbol)
-                )
-                remote = self._canonical_bars(loaded, namespace)
+                loader = getattr(self._durable_store, "load_recent", self._durable_store.load)
+                remote = self._canonical_bars(loader(namespace, symbol), namespace)
                 if not self._durable_store.status().available:
                     raise RuntimeError("영구 분봉 읽기 실패: " + self._durable_store.status().last_error)
                 with self._state_lock:
                     self._durable_loaded.add(durable_key)
-                    self._durable_loaded_limits[durable_key] = desired_limit
                     existing_remote = self._durable_frames.get(durable_key)
                     self._durable_frames[durable_key] = (
                         remote
@@ -136,19 +122,12 @@ class HistoryCache:
         with self._state_lock:
             return self._metrics.get(candidate.key)
 
-    def merge(
-        self,
-        symbol: str,
-        incoming: pd.DataFrame,
-        namespace: str = "KR-KRX-KR_REGULAR",
-        *,
-        durable_limit: int = STRUCTURAL_WINDOW_BARS,
-    ) -> pd.DataFrame:
+    def merge(self, symbol: str, incoming: pd.DataFrame, namespace: str = "KR-KRX-KR_REGULAR") -> pd.DataFrame:
         path = self.path(symbol, namespace)
         path.parent.mkdir(parents=True, exist_ok=True)
         incoming = self._canonical_bars(incoming, namespace)
         with FileLock(str(path) + ".lock", timeout=5):
-            existing = self.load(symbol, namespace, durable_limit=durable_limit)
+            existing = self.load(symbol, namespace)
             combined = incoming.copy() if existing.empty else pd.concat([existing, incoming])
             combined = normalize_bars(combined).tail(3000)
             temporary = path.with_suffix(".tmp")
@@ -198,7 +177,7 @@ class HistoryCache:
         api_seconds += perf_counter() - started
         api_calls += 1
         if not newest.empty:
-            cached = self.merge(symbol, newest, namespace, durable_limit=target_bars)
+            cached = self.merge(symbol, newest, namespace)
         if len(cached) >= target_bars:
             return cached, api_calls, api_seconds
         cursor = today - timedelta(days=1) if cached.empty else pd.Timestamp(cached.index.min()).date() - timedelta(days=1)
@@ -210,7 +189,7 @@ class HistoryCache:
                 api_seconds += perf_counter() - started
                 api_calls += 1
                 if not older.empty:
-                    cached = self.merge(symbol, older, namespace, durable_limit=target_bars)
+                    cached = self.merge(symbol, older, namespace)
                 fetched_days += 1
             cursor -= timedelta(days=1)
         return cached, api_calls, api_seconds
@@ -241,7 +220,7 @@ class HistoryCache:
         api_calls += 1
         newest = filter_session_bars(newest, candidate.session)
         if not newest.empty:
-            cached = self.merge(candidate.symbol, newest, namespace, durable_limit=target_bars)
+            cached = self.merge(candidate.symbol, newest, namespace)
         if len(cached) >= target_bars:
             return cached, api_calls, api_seconds
 
@@ -257,7 +236,7 @@ class HistoryCache:
             if older.empty:
                 break
             prior_count = len(cached)
-            cached = self.merge(candidate.symbol, older, namespace, durable_limit=target_bars)
+            cached = self.merge(candidate.symbol, older, namespace)
             if len(cached) >= target_bars or len(cached) == prior_count:
                 break
             before = (pd.Timestamp(cached.index.min()).to_pydatetime() - timedelta(minutes=1)).strftime("%Y%m%d%H%M%S")
@@ -275,7 +254,7 @@ class HistoryCache:
         started = perf_counter()
         namespace = self._namespace(candidate)
         load_started = perf_counter()
-        cached = self.load(candidate.symbol, namespace, durable_limit=target_bars)
+        cached = self.load(candidate.symbol, namespace)
         load_seconds = perf_counter() - load_started
         cached_before = len(cached)
         if candidate.market == Market.KR:

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-09-15T15:15:11+09:00",
+  "updated_at": "2026-09-15T15:39:52+09:00",
   "current_step": 3,
   "completed_steps": [
     "기존 저장소와 인계 보고서 확인",
@@ -58,7 +58,11 @@
     "운영 0.9.0 배포·CockroachDB·KIS WebSocket 확인; 냉시작 53.94초, 다음 주기 43.79초",
     "운영 0.9.0에서 노후 결과 제거와 최신 완료봉 15:10~15:11 확인; 후보풀 1→2→3 회복",
     "900봉 초기 평가가 불필요하게 CockroachDB 3000봉을 복구하는 냉시작 전송 병목 제거",
-    "요청 목표만큼 900봉 복구 후 3000봉 추적 시 확장하도록 구현; 운영 회귀 486개 통과"
+    "요청 목표만큼 900봉 복구 후 3000봉 추적 시 확장하도록 구현; 운영 회귀 486개 통과",
+    "900봉 복구가 실제 엔진 입력을 축소해 3000봉 장기 구조 분석 계약을 훼손함을 사용자 검토로 확인",
+    "0.9.1 목표별 복구를 즉시 철회하고 모든 라이브 후보의 3000봉 구조 입력 계약 복원",
+    "900봉 진입 준비 설정과 무관하게 라이브 후보가 3000봉을 복구하는 불변 회귀검사 추가",
+    "0.9.2 3000봉 구조 계약 복원 후 운영 회귀 486개·Ruff·pip check 통과"
   ],
   "files": {
     "config.py": "created; qualification/risk/cost/data/model and scanner deadline-margin settings centralized",
@@ -74,8 +78,8 @@
     "wellscan/scanner_service.py": "900/3000 live cache contract, attempted-only rotation, candidate snapshot counters, deadlines, current-universe/freshness pruning",
     "wellscan/realtime.py": "bounded per-record trailing schema extensions accepted; malformed boundaries rejected",
     "wellscan/kis.py": "thread-local scanner deadline bounds HTTP timeout and retries",
-    "wellscan/history.py": "durable writes limited to changed bars; initial durable restore is target-sized and can expand for tracking",
-    "wellscan/bar_store.py": "serialized CockroachDB connection reused; live durable reads accept a bounded target window"
+    "wellscan/history.py": "durable writes limited to changed bars; every live candidate restores the full 3000-bar structural window",
+    "wellscan/bar_store.py": "serialized CockroachDB connection reused; live durable reads preserve the full 3000-bar window"
   },
   "verified_metrics": {
     "target1_goal": 0.8,
@@ -98,8 +102,8 @@
     "no_relaxation": true
   },
   "next_actions": [
-    "deploy app 0.9.1 target-sized durable restore and compare cold-start candidate coverage with 0.9.0",
-    "verify repeated cycles remain below 50 seconds and fresh candidate pool reaches at least five rows",
+    "deploy app 0.9.2 rollback before the 900-bar-only build can remain in production",
+    "design a batched 3000-bar Cockroach restore that reduces round trips without shortening analysis history",
     "run actual KIS 60-day development validation when credentials are available; local credentials currently absent",
     "request separate authorization before any reserved holdout access"
   ]
