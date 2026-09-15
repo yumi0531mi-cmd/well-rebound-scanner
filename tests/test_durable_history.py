@@ -79,6 +79,30 @@ def test_new_bars_are_written_to_durable_store(tmp_path) -> None:
     assert durable.upserts[0].equals(incoming)
 
 
+def test_unchanged_bars_are_not_rewritten_to_durable_store(tmp_path) -> None:
+    stored = frame("2026-08-27 09:00", 5)
+    durable = FakeDurableStore(stored)
+    cache = HistoryCache(tmp_path, durable_store=durable)  # type: ignore[arg-type]
+
+    cache.merge("005930", stored.copy())
+
+    assert durable.upserts == []
+
+
+def test_only_new_or_changed_bars_are_written_to_durable_store(tmp_path) -> None:
+    stored = frame("2026-08-27 09:00", 5)
+    incoming = stored.iloc[-2:].copy()
+    incoming.loc[incoming.index[0], "close"] += 1
+    incoming = pd.concat([incoming, frame("2026-08-27 09:05", 1, base=200)])
+    durable = FakeDurableStore(stored)
+    cache = HistoryCache(tmp_path, durable_store=durable)  # type: ignore[arg-type]
+
+    cache.merge("005930", incoming)
+
+    assert len(durable.upserts) == 1
+    assert durable.upserts[0].index.tolist() == [incoming.index[0], incoming.index[-1]]
+
+
 def test_aware_local_csv_merges_with_naive_kis_bars_in_exchange_time(tmp_path) -> None:
     cache = HistoryCache(tmp_path, durable_store=None)
     path = cache.path("005930")

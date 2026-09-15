@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-09-15T09:46:34+09:00",
+  "updated_at": "2026-09-15T09:55:01+09:00",
   "current_step": 3,
   "completed_steps": [
     "기존 저장소와 인계 보고서 확인",
@@ -44,7 +44,10 @@
     "2초 종료 여유 수정 후 운영 회귀 479개 통과; Ruff/pip check 통과",
     "운영 0.8.6 첫 주기 54.16초 및 KIS 요청 주기 예산 소진이 데이터 오류로 노출되는 문제 확인",
     "실측 후처리 시간을 반영해 종료 여유를 7초로 조정하고 예산 종료를 오류 없는 다음 회차 이월로 분류",
-    "예산 이월 수정 후 운영 회귀 480개 통과; Ruff/pip check 통과"
+    "예산 이월 수정 후 운영 회귀 480개 통과; Ruff/pip check 통과",
+    "운영 0.8.7에서 첫 주기 48.55초·예산 종료 오류 미노출 확인; 후속 주기 56.40초로 DB 후처리 병목 잔존",
+    "최근 120개 분봉 전체를 매회 CockroachDB에 재저장하던 경로를 신규·변경 행만 저장하도록 최적화",
+    "분봉 증분 저장 수정 후 운영 회귀 482개 통과; Ruff/pip check 통과"
   ],
   "files": {
     "config.py": "created; qualification/risk/cost/data/model and scanner deadline-margin settings centralized",
@@ -59,7 +62,8 @@
     "app.py": "point-in-time backtest and explicit live probability training/qualification labels",
     "wellscan/scanner_service.py": "900/3000 live cache contract, attempted-only rotation, candidate snapshot counters, cycle deadline propagation",
     "wellscan/realtime.py": "bounded per-record trailing schema extensions accepted; malformed boundaries rejected",
-    "wellscan/kis.py": "thread-local scanner deadline bounds HTTP timeout and retries"
+    "wellscan/kis.py": "thread-local scanner deadline bounds HTTP timeout and retries",
+    "wellscan/history.py": "durable writes limited to new or changed minute bars"
   },
   "verified_metrics": {
     "target1_goal": 0.8,
@@ -82,7 +86,7 @@
     "no_relaxation": true
   },
   "next_actions": [
-    "deploy seven-second finalization margin and verify cycle elapsed stays within 50 seconds without false data errors",
+    "deploy delta-only minute-bar persistence and verify repeated cycle elapsed and candidate coverage",
     "measure cold-start candidate coverage time and remove remaining 60-second cycle overrun without relaxing strategy",
     "run actual KIS 60-day development validation when credentials are available; local credentials currently absent",
     "request separate authorization before any reserved holdout access"

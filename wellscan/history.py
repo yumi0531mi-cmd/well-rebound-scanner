@@ -134,9 +134,17 @@ class HistoryCache:
             combined.to_csv(temporary, index_label="timestamp")
             temporary.replace(path)
         if self._durable_store is not None:
-            saved = self._durable_store.upsert(namespace, symbol, incoming)
-            if saved is not True:
-                raise RuntimeError("영구 분봉 저장소가 성공을 확인하지 않았습니다")
+            changed = incoming
+            if not existing.empty:
+                new_rows = incoming.loc[~incoming.index.isin(existing.index)]
+                overlap = incoming.index.intersection(existing.index)
+                changed_rows = incoming.loc[overlap]
+                changed_rows = changed_rows.loc[changed_rows.ne(existing.loc[overlap]).any(axis=1)]
+                changed = normalize_bars(pd.concat([new_rows, changed_rows]))
+            if not changed.empty:
+                saved = self._durable_store.upsert(namespace, symbol, changed)
+                if saved is not True:
+                    raise RuntimeError("영구 분봉 저장소가 성공을 확인하지 않았습니다")
             durable_key = (namespace, symbol.upper())
             with self._state_lock:
                 current = self._durable_frames.get(durable_key)
