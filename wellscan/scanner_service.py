@@ -23,7 +23,12 @@ from typing import Any
 
 import pandas as pd
 
-from config import CANDIDATE_SNAPSHOT_INTERVAL_SECONDS, SCANNER_CYCLE_SECONDS
+from config import (
+    CANDIDATE_SNAPSHOT_INTERVAL_SECONDS,
+    SCANNER_CYCLE_SECONDS,
+    STRUCTURAL_WINDOW_BARS,
+    WARMUP_BARS,
+)
 
 from . import ENGINE_VERSION
 from .bar_store import CockroachBarStore
@@ -75,11 +80,11 @@ class ScannerServiceConfig:
     tracking_budget_fraction: float = 0.25
     max_candidates_per_session: int = 80
     discovery_limit_each: int = 100
-    # Common engine classification needs up to sixty 15-minute bars (900
-    # minutes).  A fresh process must therefore warm to the established 1000
-    # bar target before it is allowed to create a signal.
-    initial_history_bars: int = HistoryCache.WARM_TARGET_BARS
-    tracking_history_bars: int = HistoryCache.WARM_TARGET_BARS
+    # Signal admission matches the engine's strict 900-bar MA60 requirement.
+    # The 3000-bar structural window is warmed/tracked separately; requiring
+    # more than the live cache can retain would suppress every candidate.
+    initial_history_bars: int = WARMUP_BARS
+    tracking_history_bars: int = STRUCTURAL_WINDOW_BARS
     max_tracking_cases: int = 100
     maximum_completed_bar_age_seconds: float = MAX_COMPLETED_BAR_AGE_SECONDS
     status_path: Path = Path(".scanner_data/scanner-service-status.json")

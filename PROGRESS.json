@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-09-15T03:21:00+09:00",
+  "updated_at": "2026-09-15T09:09:52+09:00",
   "current_step": 3,
   "completed_steps": [
     "기존 저장소와 인계 보고서 확인",
@@ -22,7 +22,11 @@
     "신호 발생 시점 확률 팩터와 모델 버전 영구 저장 구현",
     "청산이 먼저 끝난 동일 시장·세션 사례만 쓰는 실시간 인과 확률·EV 구현",
     "운영 회귀 474개 통과; 확률 미산출/미검증 상태 웹 표시",
-    "현재 스레드 5시간 간격 자동 재개 heartbeat 활성화"
+    "현재 스레드 5시간 간격 자동 재개 heartbeat 활성화",
+    "운영 main 7bc5a62 배포 및 앱 0.8.1/엔진 20/Cockroach 연결 확인",
+    "라이브 최대 3000봉 대비 5500봉 평가 요구로 전 후보가 차단되는 결함 재현",
+    "전략 완화 없이 엔진 입장 900봉·구조 추적 3000봉으로 라이브 계약 정합화",
+    "라이브 캐시 게이트 수정 후 운영 회귀 474개 통과"
   ],
   "files": {
     "config.py": "created; qualification/risk/cost/data/model settings centralized",
@@ -34,7 +38,8 @@
     "wellscan/universe_history.py": "created; future-free candidate membership and stale snapshot rejection",
     "wellscan/probability.py": "causal factors, immutable signal snapshots, resolved-before-signal live estimator implemented",
     "wellscan/validation.py": "signal-time features and unqualified probability/EV persisted",
-    "app.py": "point-in-time backtest and explicit live probability training/qualification labels"
+    "app.py": "point-in-time backtest and explicit live probability training/qualification labels",
+    "wellscan/scanner_service.py": "strict 900-bar engine admission separated from 3000-bar structural tracking"
   },
   "verified_metrics": {
     "target1_goal": 0.8,
@@ -57,9 +62,8 @@
     "no_relaxation": true
   },
   "next_actions": [
-    "deploy candidate snapshot collection after explicit push approval and accumulate complete point-in-time coverage",
+    "deploy live cache gate fix and confirm nonzero candidate evaluation plus snapshot collection",
     "run actual KIS 60-day development validation when credentials are available; local credentials currently absent",
-    "push commit 48687c9 to origin/main after explicit deployment approval",
     "request separate authorization before any reserved holdout access"
   ]
 }
