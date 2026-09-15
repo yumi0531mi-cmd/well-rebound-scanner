@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-09-15T09:17:54+09:00",
+  "updated_at": "2026-09-15T09:25:26+09:00",
   "current_step": 3,
   "completed_steps": [
     "기존 저장소와 인계 보고서 확인",
@@ -30,7 +30,11 @@
     "운영 fb79149 앱 0.8.2 배포 후 후보 평가 0건에서 3건으로 회복 확인",
     "50초 예산에서 실제 처리 수가 아닌 선택 수만큼 회전해 종목이 누락되는 결함 수정",
     "과거시점 후보 스냅샷 저장 성공/종목행/오류 운영 계측 추가",
-    "회전·스냅샷 계측 수정 후 운영 회귀 475개 통과"
+    "회전·스냅샷 계측 수정 후 운영 회귀 475개 통과",
+    "운영 0.8.3에서 과거시점 후보 스냅샷 1회·32행·오류 0건 저장 확인",
+    "KIS 국내 실시간 체결이 문서상 46개보다 1개 많은 47개 필드를 종목마다 전송해 연결 종료되는 결함 확인",
+    "균일한 후행 스키마 확장만 허용하고 불완전 레코드 경계는 거부하도록 실시간 파서 수정",
+    "실시간 스키마 수정 후 운영 회귀 477개 통과; Ruff/pip check 통과"
   ],
   "files": {
     "config.py": "created; qualification/risk/cost/data/model settings centralized",
@@ -43,7 +47,8 @@
     "wellscan/probability.py": "causal factors, immutable signal snapshots, resolved-before-signal live estimator implemented",
     "wellscan/validation.py": "signal-time features and unqualified probability/EV persisted",
     "app.py": "point-in-time backtest and explicit live probability training/qualification labels",
-    "wellscan/scanner_service.py": "900/3000 live cache contract, attempted-only rotation, candidate snapshot counters"
+    "wellscan/scanner_service.py": "900/3000 live cache contract, attempted-only rotation, candidate snapshot counters",
+    "wellscan/realtime.py": "bounded per-record trailing schema extensions accepted; malformed boundaries rejected"
   },
   "verified_metrics": {
     "target1_goal": 0.8,
@@ -66,7 +71,7 @@
     "no_relaxation": true
   },
   "next_actions": [
-    "deploy attempted-only rotation and snapshot telemetry; verify candidate snapshot writes without errors",
+    "deploy KIS realtime schema-extension parser and verify connected ticks without parser errors",
     "measure cold-start candidate coverage time and remove remaining 60-second cycle overrun without relaxing strategy",
     "run actual KIS 60-day development validation when credentials are available; local credentials currently absent",
     "request separate authorization before any reserved holdout access"

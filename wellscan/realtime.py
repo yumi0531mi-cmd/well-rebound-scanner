@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 _DOMESTIC_TRADE_FIELDS = 46
 _OVERSEAS_TRADE_FIELDS = 26
+_MAX_TRAILING_EXTENSION_FIELDS = 8
 
 
 @dataclass(frozen=True)
@@ -106,17 +107,29 @@ class RealtimeHub:
         if record_count < 1:
             raise KISError("KIS WebSocket 체결 건수가 0입니다")
 
-        width = _DOMESTIC_TRADE_FIELDS if tr_id == "H0STCNT0" else _OVERSEAS_TRADE_FIELDS
+        documented_width = _DOMESTIC_TRADE_FIELDS if tr_id == "H0STCNT0" else _OVERSEAS_TRADE_FIELDS
         values = parts[3].split("^")
-        required = record_count * width
+        required = record_count * documented_width
         if len(values) < required:
             raise KISError(f"KIS WebSocket 체결 필드 부족: {len(values)}/{required}")
-        if any(value for value in values[required:]):
-            raise KISError(f"KIS WebSocket 체결 필드 초과: {len(values)}/{required}")
+        if len(values) % record_count:
+            raise KISError(f"KIS WebSocket 체결 레코드 경계 오류: {len(values)}/{record_count}")
+        width = len(values) // record_count
+        extension_fields = width - documented_width
+        if extension_fields > _MAX_TRAILING_EXTENSION_FIELDS:
+            raise KISError(f"KIS WebSocket 체결 필드 초과: {width}/{documented_width}")
+        if extension_fields:
+            logger.info(
+                "realtime_schema_extension tr_id=%s documented=%s received=%s records=%s",
+                tr_id,
+                documented_width,
+                width,
+                record_count,
+            )
 
         timestamp = received_at or datetime.now(UTC)
         accepted = 0
-        for offset in range(0, required, width):
+        for offset in range(0, len(values), width):
             record = values[offset : offset + width]
             if tr_id == "H0STCNT0":
                 wire_key = record[0].strip().upper()

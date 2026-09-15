@@ -75,6 +75,27 @@ def test_batched_websocket_packet_publishes_every_domestic_trade() -> None:
     assert hub.metrics()["received_ticks"] == 2
 
 
+def test_appended_schema_field_preserves_every_record_boundary() -> None:
+    first = Candidate("005930", "Samsung", 1, 0, 0, 0)
+    second = Candidate("000660", "SK Hynix", 1, 0, 0, 0)
+    hub = RealtimeHub(DummyClient())  # type: ignore[arg-type]
+    subscribed = ((first.key, "H0STCNT0", first.symbol), (second.key, "H0STCNT0", second.symbol))
+    values = _domestic_record(first.symbol, "70100", "1000") + ["new-a"]
+    values += _domestic_record(second.symbol, "201000", "2000") + ["new-b"]
+
+    assert hub._ingest_tick_message(f"0|H0STCNT0|2|{'^'.join(values)}", subscribed) == 2
+    assert hub._ticks[first.key].price == 70100
+    assert hub._ticks[second.key].price == 201000
+
+
+def test_schema_extension_requires_exact_record_boundaries() -> None:
+    hub = RealtimeHub(DummyClient())  # type: ignore[arg-type]
+    values = _domestic_record("005930", "70100", "1000") * 2 + ["orphan"]
+
+    with pytest.raises(KISError, match="레코드 경계 오류"):
+        hub._ingest_tick_message(f"0|H0STCNT0|2|{'^'.join(values)}", ())
+
+
 def test_overseas_tick_uses_exact_wire_key_not_symbol_suffix() -> None:
     hub = RealtimeHub(DummyClient())  # type: ignore[arg-type]
     subscribed = (
