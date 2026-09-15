@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-09-15T09:55:01+09:00",
+  "updated_at": "2026-09-15T10:02:56+09:00",
   "current_step": 3,
   "completed_steps": [
     "기존 저장소와 인계 보고서 확인",
@@ -47,7 +47,10 @@
     "예산 이월 수정 후 운영 회귀 480개 통과; Ruff/pip check 통과",
     "운영 0.8.7에서 첫 주기 48.55초·예산 종료 오류 미노출 확인; 후속 주기 56.40초로 DB 후처리 병목 잔존",
     "최근 120개 분봉 전체를 매회 CockroachDB에 재저장하던 경로를 신규·변경 행만 저장하도록 최적화",
-    "분봉 증분 저장 수정 후 운영 회귀 482개 통과; Ruff/pip check 통과"
+    "분봉 증분 저장 수정 후 운영 회귀 482개 통과; Ruff/pip check 통과",
+    "운영 0.8.8 반복 주기 50.30초·후보풀 7개·WebSocket 연결·현재 진입신호 0개 확인",
+    "고정 후처리 0.30초 경계 초과를 흡수하도록 요청 종료 여유를 8초로 조정",
+    "8초 종료 여유 수정 후 운영 회귀 482개 통과; Ruff/pip check 통과"
   ],
   "files": {
     "config.py": "created; qualification/risk/cost/data/model and scanner deadline-margin settings centralized",
@@ -86,7 +89,7 @@
     "no_relaxation": true
   },
   "next_actions": [
-    "deploy delta-only minute-bar persistence and verify repeated cycle elapsed and candidate coverage",
+    "deploy eight-second finalization margin and verify repeated cycle elapsed below 50 seconds",
     "measure cold-start candidate coverage time and remove remaining 60-second cycle overrun without relaxing strategy",
     "run actual KIS 60-day development validation when credentials are available; local credentials currently absent",
     "request separate authorization before any reserved holdout access"

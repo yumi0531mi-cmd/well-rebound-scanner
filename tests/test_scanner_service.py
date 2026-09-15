@@ -175,7 +175,7 @@ def test_candidate_limit_is_derived_from_kis_call_budget():
     defaults = ScannerServiceConfig()
     assert defaults.initial_history_bars == 900
     assert defaults.tracking_history_bars == HistoryCache.WARM_TARGET_BARS == 3000
-    assert defaults.request_deadline_margin_seconds == 7.0
+    assert defaults.request_deadline_margin_seconds == 8.0
     assert defaults.maximum_completed_bar_age_seconds == 600.0
     assert budgeted_candidate_limit(Market.KR, 10, 80) == 10
     assert budgeted_candidate_limit(Market.US, 10, 80) == 5
