@@ -16,6 +16,7 @@ import threading
 import time
 from collections import deque
 from collections.abc import Callable
+from contextlib import nullcontext
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -733,7 +734,10 @@ class ScannerService:
                 cycle_deadline,
                 started + self.config.cycle_budget_seconds * self.config.tracking_budget_fraction,
             )
-            self._track_existing(tracking_deadline)
+            request_deadline = getattr(self.client, "request_deadline", None)
+            tracking_scope = request_deadline(tracking_deadline) if callable(request_deadline) else nullcontext()
+            with tracking_scope:
+                self._track_existing(tracking_deadline)
             for index, status in enumerate(active):
                 remaining = cycle_deadline - self._monotonic()
                 sessions_left = len(active) - index
@@ -742,7 +746,9 @@ class ScannerService:
                     break
                 share = remaining / sessions_left
                 session_deadline = min(cycle_deadline, self._monotonic() + share)
-                self._scan_session(status, session_deadline, share)
+                session_scope = request_deadline(session_deadline) if callable(request_deadline) else nullcontext()
+                with session_scope:
+                    self._scan_session(status, session_deadline, share)
             self._counters.cycles += 1
             return True
         except Exception as exc:

@@ -28,10 +28,12 @@ class Session:
     def __init__(self, responses: list[Response]):
         self.responses = responses
         self.calls = 0
+        self.timeouts: list[float] = []
 
     def request(self, method: str, url: str, **kwargs: object) -> Response:
-        del method, url, kwargs
+        del method, url
         self.calls += 1
+        self.timeouts.append(float(kwargs["timeout"]))
         return self.responses.pop(0)
 
 
@@ -63,6 +65,26 @@ def test_auth_error_is_not_retried(tmp_path, monkeypatch) -> None:
         client.get("/test", "TEST", {})
 
     assert session.calls == 1
+
+
+def test_scanner_deadline_bounds_each_requests_timeout(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("wellscan.kis.time.monotonic", lambda: 100.0)
+    client, session = configured_client(tmp_path, [Response(200, {"rt_cd": "0"})])
+
+    with client.request_deadline(106.0):
+        client.get("/test", "TEST", {})
+
+    assert session.timeouts == [3.0]
+
+
+def test_expired_scanner_deadline_starts_no_http_call(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("wellscan.kis.time.monotonic", lambda: 100.0)
+    client, session = configured_client(tmp_path, [Response(200, {"rt_cd": "0"})])
+
+    with client.request_deadline(100.1), pytest.raises(KISError, match="주기 예산 소진"):
+        client.get("/test", "TEST", {})
+
+    assert session.calls == 0
 
 
 def test_shared_requests_session_is_not_used_concurrently(tmp_path) -> None:

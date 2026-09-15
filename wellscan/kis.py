@@ -9,6 +9,7 @@ import re
 import threading
 import time
 import unicodedata
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -52,6 +53,37 @@ class KISClient:
         self._approval_key = ""
         self._approval_expires = datetime.min.replace(tzinfo=UTC)
         self._auth_store = auth_store if auth_store is not None else CockroachBarStore.from_environment()
+        self._request_budget = threading.local()
+
+    @contextmanager
+    def request_deadline(self, deadline: float):
+        """Bound REST calls in this thread to a scanner-cycle deadline."""
+
+        previous = getattr(self._request_budget, "deadline", None)
+        self._request_budget.deadline = deadline if previous is None else min(previous, deadline)
+        try:
+            yield
+        finally:
+            if previous is None:
+                del self._request_budget.deadline
+            else:
+                self._request_budget.deadline = previous
+
+    def _request_timeout(self) -> float:
+        deadline = getattr(self._request_budget, "deadline", None)
+        if deadline is None:
+            return 15.0
+        remaining = deadline - time.monotonic()
+        if remaining <= 0.2:
+            raise KISError("KIS 요청 주기 예산 소진")
+        # A scalar timeout applies separately to connect and read.
+        return max(0.1, min(15.0, remaining / 2))
+
+    def _retry_sleep(self, seconds: float) -> None:
+        deadline = getattr(self._request_budget, "deadline", None)
+        if deadline is not None and time.monotonic() + seconds >= deadline:
+            raise KISError("KIS 요청 주기 예산 소진")
+        time.sleep(seconds)
 
     @property
     def configured(self) -> bool:
@@ -105,7 +137,7 @@ class KISClient:
                 response = self.session.post(
                     f"{self.base_url}/oauth2/tokenP",
                     json={"grant_type": "client_credentials", "appkey": self.app_key, "appsecret": self.app_secret},
-                    timeout=15,
+                    timeout=self._request_timeout(),
                 )
         if not response.ok:
             try:
@@ -230,8 +262,10 @@ class KISClient:
     def get(self, path: str, tr_id: str, params: dict[str, str], tr_cont: str = "") -> tuple[dict[str, Any], str]:
         response = None
         for attempt in range(3):
+            self._request_timeout()
             token = self.access_token()
             self._throttle()
+            timeout = self._request_timeout()
             started = time.perf_counter()
             try:
                 with self._lock:
@@ -247,7 +281,7 @@ class KISClient:
                             "custtype": "P",
                         },
                         params=params,
-                        timeout=15,
+                        timeout=timeout,
                     )
             except (requests.ConnectionError, requests.Timeout) as exc:
                 logging.getLogger(__name__).warning(
@@ -258,13 +292,13 @@ class KISClient:
                 )
                 if attempt == 2:
                     raise KISError(f"{tr_id} KIS 전송 실패({type(exc).__name__})") from exc
-                time.sleep((0.35 * (2**attempt)) + random.uniform(0.0, 0.15))
+                self._retry_sleep((0.35 * (2**attempt)) + random.uniform(0.0, 0.15))
                 continue
             logging.getLogger(__name__).info("kis_request tr_id=%s attempt=%s elapsed_s=%.3f status=%s",
                                             tr_id, attempt + 1, time.perf_counter() - started, response.status_code)
             if response.status_code not in {429, 500, 502, 503, 504} or attempt == 2:
                 break
-            time.sleep((0.35 * (2**attempt)) + random.uniform(0.0, 0.15))
+            self._retry_sleep((0.35 * (2**attempt)) + random.uniform(0.0, 0.15))
         assert response is not None
         if not response.ok:
             raise KISError(f"{tr_id} HTTP {response.status_code}")
