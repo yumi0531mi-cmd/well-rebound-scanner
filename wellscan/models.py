@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 
-from config import ACTIVE_STRATEGY_VALUES
+from config import ACTIVE_STRATEGY_VALUES, NARROW_TIME_STRATEGY_VALUES
 
 
 class Stage(StrEnum):
@@ -99,9 +99,15 @@ EXPERIMENTAL_STRATEGIES = (
     Strategy.LIQUIDITY_SWEEP_RECLAIM,
     Strategy.PRIOR_HIGH_BREAKOUT_RETEST,
 )
+ALL_ENTRY_STRATEGIES = CORE_STRATEGIES + EXPANSION_STRATEGIES + EXPERIMENTAL_STRATEGIES
+if len(ALL_ENTRY_STRATEGIES) != 22 or len(set(ALL_ENTRY_STRATEGIES)) != 22:
+    raise RuntimeError("진입 전략 전체 목록은 중복 없이 22개여야 합니다")
 ACTIVE_STRATEGIES = tuple(Strategy(value) for value in ACTIVE_STRATEGY_VALUES)
+NARROW_TIME_STRATEGIES = frozenset(Strategy(value) for value in NARROW_TIME_STRATEGY_VALUES)
 if ACTIVE_STRATEGIES != ESTABLISHED_ACTIVE_STRATEGIES + EXPERIMENTAL_STRATEGIES:
     raise RuntimeError("config.py 활성 전략 순서가 검증된 포트폴리오와 다릅니다")
+if NARROW_TIME_STRATEGIES & set(ACTIVE_STRATEGIES):
+    raise RuntimeError("특정 개장 시간대 전용 전략은 운영 포트폴리오에 활성화할 수 없습니다")
 ACTIVE_STRATEGY_COUNT = len(ACTIVE_STRATEGIES)
 
 

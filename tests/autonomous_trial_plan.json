@@ -1,0 +1,57 @@
+{
+  "registered_at": "2026-09-01T03:36:26+09:00",
+  "role": "TUNING_ONLY_PREREGISTRATION",
+  "schema": "strengthening-evidence-v1",
+  "purpose": "Test causal additional AND gates; never rewrite any existing opportunity or its levels/costs.",
+  "markets_evaluated_separately": ["KR", "US"],
+  "holdout_access_allowed": false,
+  "price_input_contract": "Closed 1m bars use open labels; closed 3/5/15m prepared bars use right labels. Caller verifies the real as-of clock for the 1m inputs.",
+  "universal_active_gate_guard": "Valid latest closed 1m OHLCV with positive volume. Required aggregate samples must be current, contiguous, same-session and positive-volume. Missing/nonfinite values are unavailable and fail active gates, never zero-filled.",
+  "gate_definitions": {
+    "ema15_up": "Four contiguous same-session closed 15m candles: EMA20[-1]>EMA20[-4] AND close[-1]>EMA20[-1].",
+    "bullish3_close65": "Latest closed 3m candle: close>open AND (close-low)/(high-low)>=0.65. Flat range is unavailable.",
+    "reversal3": "Existing confirmed_reversal on two contiguous completed positive-volume 3m candles: higher low AND close above preceding high.",
+    "vwap3_up": "Three contiguous same-session closed 3m VWAP values strictly increase AND current observed price>latest VWAP.",
+    "volume3_ge125": "Latest closed 3m volume_ratio>=1.25, not a remembered earlier surge.",
+    "noise_ge050atr": "Existing (entry-soft_stop)/ATR3>=0.5. Reject a too-tight existing setup; do not move any stop.",
+    "target1_le4atr": "Existing (target1-entry)/ATR3<=4. Reject a too-distant target; do not move any target.",
+    "target1_le6atr": "Existing (target1-entry)/ATR3<=6. Separate preregistered hypothesis, not an outcome-driven adjustment to S07.",
+    "micro_reversal1": "Three contiguous same-session positive-volume closed 1m candles: low1<low2<low3 AND close3>high1."
+  },
+  "profiles": [
+    {"profile_id": "S00-baseline", "gates": []},
+    {"profile_id": "S01-ema15", "gates": ["ema15_up"]},
+    {"profile_id": "S02-close65", "gates": ["bullish3_close65"]},
+    {"profile_id": "S03-reversal3", "gates": ["reversal3"]},
+    {"profile_id": "S04-vwap3", "gates": ["vwap3_up"]},
+    {"profile_id": "S05-volume125", "gates": ["volume3_ge125"]},
+    {"profile_id": "S06-noise050", "gates": ["noise_ge050atr"]},
+    {"profile_id": "S07-target4", "gates": ["target1_le4atr"]},
+    {"profile_id": "S08-target6", "gates": ["target1_le6atr"]},
+    {"profile_id": "S09-micro1", "gates": ["micro_reversal1"]},
+    {"profile_id": "S10-trend-confirm-volume", "gates": ["ema15_up", "reversal3", "volume3_ge125"]},
+    {"profile_id": "S11-structure-confluence", "gates": ["bullish3_close65", "vwap3_up", "micro_reversal1", "noise_ge050atr", "target1_le6atr"]},
+    {"profile_id": "S12-established-control", "gates": [], "disabled_strategies": ["저점 이탈 후 회복", "개장 범위 하단 반전", "하락쐐기 상단 돌파", "저거래량 1-2-3 반전", "불플래그 돌파", "VWAP 지지 반등", "개장 범위 직접 돌파", "시가 회복 반전", "상승갭 재지지", "인사이드바 돌파"]},
+    {"profile_id": "S14-expansion-v1-control", "gates": [], "disabled_strategies": ["불플래그 돌파", "VWAP 지지 반등", "개장 범위 직접 돌파", "시가 회복 반전", "상승갭 재지지", "인사이드바 돌파"]},
+    {"profile_id": "S13-expansion-active", "gates": []}
+  ],
+  "strategy_expansion_amendment": {
+    "registered_at": "2026-09-08T18:43:18+09:00",
+    "purpose": "Compare the unchanged established-nine control against four independently classified causal expansion strategies before observing replay outcomes.",
+    "comparison": ["S14-expansion-v1-control", "S13-expansion-active"],
+    "new_strategies": ["저점 이탈 후 회복", "개장 범위 하단 반전", "하락쐐기 상단 돌파", "저거래량 1-2-3 반전"],
+    "outcome_blind": true,
+    "holdout_access_allowed": false
+  },
+  "strategy_expansion_amendment_v2": {
+    "registered_at": "2026-09-08T19:19:18+09:00",
+    "purpose": "Extend the unchanged established-nine control comparison with six more independently classified causal structures before the second replay outcomes are observed.",
+    "comparison": ["S12-established-control", "S13-expansion-active"],
+    "new_strategies": ["불플래그 돌파", "VWAP 지지 반등", "개장 범위 직접 돌파", "시가 회복 반전", "상승갭 재지지", "인사이드바 돌파"],
+    "outcome_blind": true,
+    "holdout_access_allowed": false
+  },
+  "invariants": ["No existing entry condition removed", "No stop widened", "No target lowered", "No cost reduction", "No outcome/ticker/date feature", "Baseline preserves original object references", "Only a common-engine replay counts as performance evidence"],
+  "report_requirements": "Per-market and per-strategy entries/T1 hits/rate/duration, daily distinct symbols and daily goal; include zeros, exclusions and failures. Do not claim 80% proven from this plan or mocks.",
+  "amendments": "Change assumptions only under a newly registered id; retain this file and original trial results. No holdout execution without explicit user approval."
+}

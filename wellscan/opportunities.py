@@ -7,6 +7,13 @@ from math import ceil
 import numpy as np
 import pandas as pd
 
+from config import (
+    OPENING_RANGE_BREAKOUT_MAX_MINUTES,
+    OPENING_RANGE_LOW_REVERSAL_MAX_MINUTES,
+    OPENING_RANGE_READY_MINUTES,
+    OPENING_RANGE_RETEST_MAX_MINUTES,
+)
+
 from .indicators import enriched, pivot_points
 from .models import ACTIVE_STRATEGIES, Strategy, TradeLevels, TradingSession
 from .policy import session_day
@@ -136,33 +143,49 @@ def _levels(
                        soft_stop, basis, conditions, structural_stop=structural_stop)
 
 
-def opening_range_retest(data: pd.DataFrame, session: TradingSession | None) -> Opportunity | None:
+def opening_range_retest(
+    data: pd.DataFrame,
+    session: TradingSession | None,
+    audit: dict[str, list[str]] | None = None,
+) -> Opportunity | None:
     """Independent 15-minute opening range, then closed-candle retest.
 
     Session opening bars must all exist. No previous-day range or future high
     supplies its target; projection uses the already observed opening width.
     """
+    strategy = Strategy.OPENING_RANGE_RETEST
     if session is None or session == TradingSession.CLOSED or data.empty:
+        if audit is not None:
+            audit[strategy.value] = ["거래 세션 없음"]
         return None
     zone = KST if session == TradingSession.KR_REGULAR else NEW_YORK
     times = data.index.tz_localize(zone) if data.index.tz is None else data.index.tz_convert(zone)
     day = session_day(session, times[-1].to_pydatetime())
     window = kr_session_window(day) if session == TradingSession.KR_REGULAR else us_session_window(session, day)
     if window is None:
+        if audit is not None:
+            audit[strategy.value] = ["세션 시각 미확인"]
         return None
     opening = pd.Timestamp(window[0]).tz_convert(zone)
-    if not opening + pd.Timedelta(minutes=21) <= times[-1] <= opening + pd.Timedelta(minutes=90):
+    if not (opening + pd.Timedelta(minutes=OPENING_RANGE_READY_MINUTES) <= times[-1]
+            <= opening + pd.Timedelta(minutes=OPENING_RANGE_RETEST_MAX_MINUTES)):
+        if audit is not None:
+            audit[strategy.value] = ["개장 후 21~90분"]
         return None
     current = data.loc[times > opening].copy()
     current.index = times[times > opening]
     required = pd.date_range(opening + pd.Timedelta(minutes=3), periods=5, freq="3min")
     if not required.isin(current.index).all() or len(current) < 7:
+        if audit is not None:
+            audit[strategy.value] = ["세션 시작봉 완전성"]
         return None
     initial = current.loc[required]
     upper, lower = float(initial.high.max()), float(initial.low.min())
     last = current.iloc[-1]
     atr = float(last.atr)
     if not np.isfinite(atr) or atr <= 0:
+        if audit is not None:
+            audit[strategy.value] = ["유효 ATR 없음"]
         return None
     conditions = {
         "개장 15분 범위 확보": upper - lower >= atr,
@@ -174,15 +197,22 @@ def opening_range_retest(data: pd.DataFrame, session: TradingSession | None) -> 
         "VWAP 위": bool(last.close > last.vwap),
     }
     if not all(conditions.values()):
+        if audit is not None:
+            audit[strategy.value] = [name for name, passed in conditions.items() if not passed]
         return None
     entry = max(float(last.high), float(current.high.iloc[5:-1].max()))
     projection = upper + (upper - lower)
     if projection <= entry:
+        if audit is not None:
+            audit[strategy.value] = ["개장 범위 측정 목표 미도달"]
         return None
     known_highs, _ = _last_pivots(data)
     resistance = min((value for value in known_highs if value > entry), default=projection)
-    return _levels(Strategy.OPENING_RANGE_RETEST, entry, float(last.low), resistance,
-                   atr, projection, conditions, "개장 15분 범위 상단 재지지·확정 반등봉 고가·범위 측정폭")
+    item = _levels(strategy, entry, float(last.low), resistance, atr, projection, conditions,
+                   "개장 15분 범위 상단 재지지·확정 반등봉 고가·범위 측정폭")
+    if item is None and audit is not None:
+        audit[strategy.value] = ["유효 진입·지지·손절 구조 없음"]
+    return item
 
 
 def _contiguous_tail(data: pd.DataFrame, minutes: int, limit: int = 80) -> pd.DataFrame:
@@ -329,7 +359,8 @@ def opening_range_low_reversal(
     resistance = min((lower + upper) / 2, float(confirm.vwap))
     prior_post = post_opening.iloc[:-1]
     conditions = {
-        "개장 후 21~75분": pd.Timedelta(minutes=21) <= elapsed <= pd.Timedelta(minutes=75),
+        "개장 후 허용시간": pd.Timedelta(minutes=OPENING_RANGE_READY_MINUTES) <= elapsed
+        <= pd.Timedelta(minutes=OPENING_RANGE_LOW_REVERSAL_MAX_MINUTES),
         "현 세션 3분봉 연속": not bool((current.index.to_series().diff().dropna() != pd.Timedelta(minutes=3)).any()),
         "개장 15분 범위 확보": np.isfinite(atr) and atr > 0 and upper - lower >= atr,
         "개장 범위 하단 시험": np.isfinite(atr) and lower - atr * .5 <= probe.low <= lower + atr * .2,
@@ -563,7 +594,8 @@ def opening_range_breakout(
     atr = float(current.atr)
     location = _close_location(current)
     conditions = {
-        "개장 후 21~120분": pd.Timedelta(minutes=21) <= elapsed <= pd.Timedelta(minutes=120),
+        "개장 후 허용시간": pd.Timedelta(minutes=OPENING_RANGE_READY_MINUTES) <= elapsed
+        <= pd.Timedelta(minutes=OPENING_RANGE_BREAKOUT_MAX_MINUTES),
         "현 세션 3분봉 연속": not bool((current_session.index.to_series().diff().dropna() != pd.Timedelta(minutes=3)).any()),
         "개장 범위 1 ATR 이상": np.isfinite(atr) and atr > 0 and upper - lower >= atr,
         "첫 상단 종가 돌파": not prior.empty and not bool((prior.close > upper).any()) and prior.close.iloc[-1] <= upper < current.close,
@@ -915,7 +947,8 @@ def inside_bar_breakout(
 
 def classify(frame15: pd.DataFrame, frame5: pd.DataFrame, frame3: pd.DataFrame, live_price: float, session: TradingSession | None,
              *, prepared: tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame] | None = None,
-             audit: dict[str, list[str]] | None = None) -> tuple[Opportunity, ...]:
+             audit: dict[str, list[str]] | None = None,
+             active_strategies: tuple[Strategy, ...] = ACTIVE_STRATEGIES) -> tuple[Opportunity, ...]:
     # Opening-range patterns need only seven completed 3-minute candles. Keep
     # their warm-up separate so the longer, unchanged 20/25/25 contract for
     # the other strategies cannot make a 21-90 minute setup unreachable.
@@ -924,16 +957,23 @@ def classify(frame15: pd.DataFrame, frame5: pd.DataFrame, frame3: pd.DataFrame, 
     prepared3 = prepared[2] if prepared is not None else pd.DataFrame()
     data3 = prepared3 if not prepared3.empty else enriched(frame3, session)
     opportunities: list[Opportunity] = []
-    # OFF strategies stay implemented for persisted-record compatibility and
-    # research reproducibility, but are not evaluated on every live symbol.
-    # This keeps the central six-strategy allow-list honest and avoids paying
-    # for calculations whose result the engine must discard.
+    enabled = frozenset(active_strategies)
+    prior3 = data3.iloc[:-1]
+    early_breakout = float(prior3.high.tail(20).max()) if not prior3.empty else live_price
+    early_specs = (
+        (Strategy.OPENING_RANGE_RETEST, lambda: opening_range_retest(data3, session, audit)),
+        (Strategy.FAILED_BREAKDOWN_RECLAIM, lambda: failed_breakdown_reclaim(data3, early_breakout, audit)),
+        (Strategy.OPENING_RANGE_LOW_REVERSAL, lambda: opening_range_low_reversal(data3, session, audit)),
+        (Strategy.BULL_FLAG_BREAKOUT, lambda: bull_flag_breakout(data3, audit)),
+        (Strategy.OPENING_RANGE_BREAKOUT, lambda: opening_range_breakout(data3, session, audit)),
+        (Strategy.RED_TO_GREEN_REVERSAL, lambda: red_to_green_reversal(data3, session, audit)),
+        (Strategy.GAP_UP_RETEST, lambda: gap_up_retest(data3, session, audit)),
+        (Strategy.LIQUIDITY_SWEEP_RECLAIM, lambda: liquidity_sweep_reclaim(data3, audit)),
+        (Strategy.PRIOR_HIGH_BREAKOUT_RETEST, lambda: prior_high_breakout_retest(data3, session, audit)),
+    )
     early_active = tuple(
-        item
-        for item in (
-            liquidity_sweep_reclaim(data3, audit),
-            prior_high_breakout_retest(data3, session, audit),
-        )
+        item for strategy, factory in early_specs if strategy in enabled
+        for item in (factory(),)
         if item is not None
     )
     if len(frame15) < 20 or len(frame5) < 25 or len(frame3) < 25:
@@ -1059,7 +1099,7 @@ def classify(frame15: pd.DataFrame, frame5: pd.DataFrame, frame3: pd.DataFrame, 
         ),
     ]
     for strategy, conditions, entry, stop_support, basis in specs:
-        if strategy not in ACTIVE_STRATEGIES:
+        if strategy not in enabled:
             continue
         # KR-only controlled experiment; US gates and all price levels stay fixed.
         if strategy == Strategy.TREND_PULLBACK and session == TradingSession.KR_REGULAR:
@@ -1076,13 +1116,19 @@ def classify(frame15: pd.DataFrame, frame5: pd.DataFrame, frame3: pd.DataFrame, 
             opportunities.append(item)
         elif audit is not None:
             audit[strategy.value] = ["유효 진입·지지·손절 구조 없음"]
-    # The three new strategies are independent alternatives. Existing active
-    # setups retain arbitration priority; inactive implementations are never
-    # executed in the production scan path.
-    strength_resume = price_strength_pullback_resume(data15, data5, data3, audit)
     opportunities.extend(early_active)
-    if strength_resume is not None:
-        opportunities.append(strength_resume)
+    full_specs = (
+        (Strategy.DESCENDING_WEDGE_BREAK,
+         lambda: descending_wedge_break(data15, data5, data3, breakout_level, audit)),
+        (Strategy.QUIET_123_REVERSAL, lambda: quiet_123_reversal(data15, data5, data3, audit)),
+        (Strategy.VWAP_PULLBACK_HOLD, lambda: vwap_pullback_hold(data15, data3, audit)),
+        (Strategy.INSIDE_BAR_BREAKOUT, lambda: inside_bar_breakout(data15, data5, audit)),
+        (Strategy.PRICE_STRENGTH_PULLBACK_RESUME,
+         lambda: price_strength_pullback_resume(data15, data5, data3, audit)),
+    )
+    for strategy, factory in full_specs:
+        if strategy in enabled and (item := factory()) is not None:
+            opportunities.append(item)
     return tuple(sorted(opportunities, key=lambda item: item.strength, reverse=True))
 
 

@@ -7,11 +7,13 @@ from wellscan.indicators import completed_resample
 from wellscan.models import (
     ACTIVE_STRATEGIES,
     ACTIVE_STRATEGY_COUNT,
+    ALL_ENTRY_STRATEGIES,
     ESTABLISHED_ACTIVE_STRATEGIES,
     EXPERIMENTAL_STRATEGIES,
     Strategy,
 )
 from wellscan.opportunities import classify, estimate_minutes
+from wellscan.strengthening import strategy_diagnostic_profiles
 
 
 def test_momentum_pullback_label_does_not_claim_unproved_first_occurrence() -> None:
@@ -33,6 +35,15 @@ def test_active_strategy_registry_contains_only_the_approved_six() -> None:
         Strategy.PRIOR_HIGH_BREAKOUT_RETEST,
     )
     assert ACTIVE_STRATEGIES == ESTABLISHED_ACTIVE_STRATEGIES + EXPERIMENTAL_STRATEGIES
+
+
+def test_research_registry_covers_all_22_strategies_independently() -> None:
+    profiles = strategy_diagnostic_profiles()
+    assert len(ALL_ENTRY_STRATEGIES) == len(profiles) == 22
+    assert tuple(profile.strategy_portfolio[0] for profile in profiles) == tuple(
+        strategy.value for strategy in ALL_ENTRY_STRATEGIES
+    )
+    assert all(len(profile.strategy_portfolio) == 1 for profile in profiles)
 
 
 def rising_bars(count: int = 960) -> pd.DataFrame:

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-09-15T16:26:50+09:00",
+  "updated_at": "2026-09-16T07:03:00+09:00",
   "current_step": 3,
   "completed_steps": [
     "기존 저장소와 인계 보고서 확인",
@@ -74,7 +74,32 @@
     "0.10.1 후보 빈응답 복구 후 운영 회귀 491개·Ruff·pip check 통과",
     "운영 0.10.1 배포·빈응답 계수 확인; 최종 정상 후보가 10분보다 오래되어 복구 0개로 안전 거부",
     "복구 신선도를 각 시장의 현재 거래 세션 시작으로 제한하고 최대 8시간을 초과하지 않도록 강화",
-    "0.10.2 현재 세션 후보 복구 후 운영 회귀 491개·Ruff·pip check 통과"
+    "0.10.2 현재 세션 후보 복구 후 운영 회귀 491개·Ruff·pip check 통과",
+    "운영 0.10.2에서 빈 후보 API를 세션 스냅샷 142개로 복구하고 후보풀 23→28개·화면 5개·주기 41.82~44.21초 확인",
+    "보류일 미접근 현재 v20 튜닝 진단 319작업 완료; 오류 0·KR 1진입·US 3진입·T1 0건·일별 5종목 0% 확인",
+    "v20 진단 원천은 현재 고정 종목의 Yahoo 데이터여서 과거시점 후보군·공식 KIS 성과 증명이 아님을 확인",
+    "자동 튜닝 평가기의 비활성 전략 포함·과거 65% 기준 결함을 현재 활성 전략·80% 목표·70% 하한으로 교정",
+    "탈락 원인 감사기의 1000봉 절단을 3000봉 전체 구조 입력으로 교정하고 보류일 선접근 차단 추가",
+    "3분 표본 진단에서 000660.KS 253시점 중 구조 6·비용통과 0, QBTS 260시점 중 구조 13·비용통과 2 확인",
+    "2-of-3 보조 팩터 점수 실험은 v20과 동일한 KR 1·US 3진입·T1 0건으로 개선 없음 확인 후 전량 철회",
+    "v20 기존 319작업을 재실행 없이 재집계해 KR 64,223·US 125,227 관찰 중 실제 체결 1·3건인 구조→진입 병목 확인",
+    "기존 자동 튜닝 집계가 단계·실행·탈락 원인을 버리던 결함을 수정하고 진단 스키마 v2로 전략별 실패 조건을 보존",
+    "v22 4종목 빠른 진단에서 구조 형성 KR 38·US 53회 중 순손익비 비용 차단 KR 33·US 53회 확인",
+    "원래 9기법의 변경 직전 기록은 KR 29진입·T1 20.69%·5종목 달성일 37.5%로 목표 미달이며 2026-09-09 커밋에서 활성 6기법으로 교체됨을 확인",
+    "관리자 웹 백테스트에 평가봉·구조 형성·위험정책 차단·실제 체결과 단일 실패 조건 표출 구현",
+    "구현된 전체 22개 전략을 동일 엔진에서 각각 독립 평가하는 진단 파이프라인 구현 및 회귀검사 통과",
+    "사용자 재확인에 따라 이미 평가된 활성 6개를 제외한 나머지 16개를 KR·US 병렬 전수 평가 시작",
+    "3000봉 구조 분석·장중 임의 접속시각 후보 5개·22개 전수 비교를 변경 불가 인수조건으로 재고정",
+    "미평가 16개 전략 319작업 독립 진단 완료; 오류 0건·총 34체결·T1 7건으로 어떤 전략도 표본 50건과 T1 70%를 동시 충족하지 못함",
+    "D10 저점 이탈 후 회복은 KR 2체결·T1 2건이나 표본 부족, D09 개장범위 재지지는 US 2체결·T1 1건이나 시간대 제한으로 승격 보류",
+    "D06 VWAP 회복은 17체결·T1 3건, D02 눌림목은 8체결·T1 1건, D01 상승추세는 4체결·T1 0건으로 교체 후보 탈락",
+    "튜닝 실행 동일성 해시에 config.py가 빠져 설정 변경을 감지하지 못하던 감사 결함을 수정",
+    "개장 후 21~75·90·120분 전용 3개 전략을 config.py에 명시하고 운영 활성 포트폴리오 진입을 코드로 차단",
+    "일일 진입 합계와 별개로 모든 완료 1분 시각의 동시 진입대기·즉시진입 종목 수를 검증하는 장중 접속 커버리지 구현",
+    "관리자 백테스트에 검증 시각 수·최소 평가 종목·최소 진입대기 종목·5종목 충족 시각 비율 및 미달 경고 추가",
+    "전체 22개 enum 확장으로 과거 9기법 부분집합 감사가 511개에서 4194303개로 폭증하던 결함을 원래 9기법 원장으로 고정",
+    "장중 커버리지에서 평가 종목이 5개 미만인 시각을 숨기지 않고 0% 실패로 포함하는 회귀검사 추가",
+    "전체 테스트 590개 통과 및 Ruff·compileall·pip check 통과"
   ],
   "files": {
     "config.py": "created; qualification/risk/cost/data/model and scanner deadline-margin settings centralized",
@@ -82,16 +107,18 @@
     "kis_data_fetcher.py": "created; KIS-only 60-day cache path implemented",
     "wellscan/execution.py": "3-bar validated entry contract restored through config.py",
     "app.py": "web backtest extended to 60 days and 100 symbols; probability calibration shown",
-    "wellscan/backtest.py": "60-day contract, point-in-time universe mask, causal probability/EV reporting implemented",
+    "wellscan/backtest.py": "60-day contract, point-in-time universe mask, causal probability/EV and strategy-bottleneck diagnostics implemented",
     "wellscan/universe_history.py": "created; future-free candidate membership and stale snapshot rejection",
     "wellscan/probability.py": "causal factors, immutable signal snapshots, resolved-before-signal live estimator implemented",
     "wellscan/validation.py": "signal-time features and unqualified probability/EV persisted",
-    "app.py": "point-in-time backtest, probability labels, full-3000-bar restore and candidate-fallback telemetry",
+    "app.py": "point-in-time backtest, probability labels, full-3000-bar restore, candidate-fallback telemetry, bottleneck tables, and exact-minute access coverage",
     "wellscan/scanner_service.py": "900/3000 cache contract, rotation, deadlines, freshness pruning, and bounded recent-snapshot recovery for transient empty discovery",
     "wellscan/realtime.py": "bounded per-record trailing schema extensions accepted; malformed boundaries rejected",
     "wellscan/kis.py": "thread-local scanner deadline bounds HTTP timeout and retries",
     "wellscan/history.py": "durable writes limited to changed bars; full 3000-bar candidate batch preload; redundant local CSV writes removed when durable DB is active",
-    "wellscan/bar_store.py": "serialized CockroachDB connection reused; full 3000-bar windows restored in bounded 20-symbol queries; latest real candidate snapshot retrieval"
+    "wellscan/bar_store.py": "serialized CockroachDB connection reused; full 3000-bar windows restored in bounded 20-symbol queries; latest real candidate snapshot retrieval",
+    "tests/controlled_tuning.py": "active portfolio or selected one-strategy profiles; aggregate 80% goal and 70% acceptable floor; reserved dates blocked",
+    "tests/research_setup_audit.py": "read-only 3000-bar rejection/near-miss diagnostic; reserved source intervals blocked"
   },
   "verified_metrics": {
     "target1_goal": 0.8,
@@ -100,7 +127,27 @@
     "minimum_trades_per_market": 50,
     "latest_development_kr_target1_rate": 0.20689655172413793,
     "latest_development_us_target1_rate": 0.10526315789473684,
-    "qualification_status": "NOT_PROVEN"
+    "qualification_status": "NOT_PROVEN",
+    "current_v20_diagnostic_kr_entries": 1,
+    "current_v20_diagnostic_us_entries": 3,
+    "current_v20_diagnostic_target1_hits": 0,
+    "current_v20_diagnostic_five_symbols_day_pct": 0.0,
+    "current_v20_diagnostic_official_performance": false,
+    "current_v20_kr_structure_observations": 64223,
+    "current_v20_us_structure_observations": 125227,
+    "v22_smoke_kr_formed_structures": 38,
+    "v22_smoke_us_formed_structures": 53,
+    "v22_smoke_kr_net_rr_blocks": 33,
+    "v22_smoke_us_net_rr_blocks": 53,
+    "historical_original_nine_kr_entries": 29,
+    "historical_original_nine_kr_target1_rate": 0.206896551724138,
+    "historical_original_nine_kr_five_symbols_day_pct": 37.5
+    ,"inactive_16_diagnostic_jobs": 319
+    ,"inactive_16_diagnostic_errors": 0
+    ,"inactive_16_resolved_entries": 34
+    ,"inactive_16_target1_hits": 7
+    ,"inactive_16_best_sample_candidate": "D10-failed_breakdown-reclaim KR: 2/2 T1, insufficient sample"
+    ,"inactive_16_official_performance": false
   },
   "estimated_validation_dates_if_deployed_2026_09_15": {
     "us_60th_session": "2026-12-08",
@@ -113,9 +160,24 @@
     "official_performance_source": "KIS one-minute bars only",
     "no_relaxation": true
   },
+  "immutable_acceptance_contract": {
+    "structural_analysis_bars": 3000,
+    "implemented_strategy_count": 22,
+    "strategy_selection_rule": "evaluate all 22 independently by formation, cost pass, signal, fill, and target1 outcome before changing the active portfolio",
+    "availability_rule": "must not depend on a narrow opening or closing time window; validate at multiple access times throughout every active market session",
+    "minimum_actionable_symbols_at_each_access_time": 5,
+    "target1_goal": 0.8,
+    "target1_floor_only_if_goal_not_reproducible": 0.7,
+    "costs_and_slippage_required": true,
+    "lookahead_forbidden": true,
+    "official_evidence": "actual KIS one-minute bars with point-in-time candidate universe"
+  },
   "next_actions": [
-    "deploy app 0.10.2 session-bounded candidate fallback and verify live fallback/prefetch counters and cycle duration",
-    "run actual KIS 60-day development validation when credentials are available; local credentials currently absent",
+    "retain the current active six because none of the remaining 16 has sufficient evidence for promotion; do not promote D10's 2/2 result",
+    "add exact intraday checkpoint coverage for actionable plans and immediate entry signals, then test a complementary portfolio without rerunning all 16 independent profiles",
+    "reject narrow-time-only strategies as sole coverage and test the selected complementary portfolio at multiple intraday access checkpoints",
+    "derive a causal setup or target-capacity selection rule from measured bottlenecks; reject it unless both entry count and T1 outcomes improve while 3000-bar structure remains intact",
+    "continue actual KIS candidate snapshots and 60-day minute cache; do not present Yahoo diagnostic results as qualification",
     "request separate authorization before any reserved holdout access"
   ]
 }

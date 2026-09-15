@@ -21,7 +21,7 @@ from config import (
     TARGET_DISTANCE_STRICT_MAX_ATR,
 )
 
-from .models import EXPANSION_STRATEGIES, EXPANSION_STRATEGIES_V2, Strategy, TradingSession
+from .models import ALL_ENTRY_STRATEGIES, EXPANSION_STRATEGIES, EXPANSION_STRATEGIES_V2, Strategy, TradingSession
 from .opportunities import Opportunity, confirmed_reversal
 from .policy import TradingPolicy, session_day
 
@@ -103,6 +103,7 @@ class StrengtheningProfile:
     market_strategy_gates: tuple[tuple[str, str, GateGroup], ...] = ()
     disabled_strategies: tuple[str, ...] = ()
     disabled_market_strategies: tuple[tuple[str, str], ...] = ()
+    strategy_portfolio: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.profile_id, str) or not self.profile_id.strip():
@@ -121,11 +122,16 @@ class StrengtheningProfile:
         object.__setattr__(self, "disabled_strategies", tuple(_strategy(name) for name in self.disabled_strategies))
         object.__setattr__(self, "disabled_market_strategies",
                            tuple((_market(market), _strategy(name)) for market, name in self.disabled_market_strategies))
+        portfolio = tuple(_strategy(name) for name in self.strategy_portfolio)
+        if len(set(portfolio)) != len(portfolio):
+            raise ValueError("duplicate strategy portfolio member")
+        object.__setattr__(self, "strategy_portfolio", portfolio)
 
     @property
     def is_baseline(self) -> bool:
         return not any((self.gates, self.kr_gates, self.us_gates, self.strategy_gates,
-                        self.market_strategy_gates, self.disabled_strategies, self.disabled_market_strategies))
+                        self.market_strategy_gates, self.disabled_strategies,
+                        self.disabled_market_strategies, self.strategy_portfolio))
 
     def gates_for(self, market: str | None, strategy: Strategy) -> GateGroup:
         name = strategy.value
@@ -379,6 +385,16 @@ def registered_profiles() -> tuple[StrengtheningProfile, ...]:
         StrengtheningProfile("S12-established-control", disabled_strategies=expansion),
         StrengtheningProfile("S14-expansion-v1-control", disabled_strategies=second_expansion),
         StrengtheningProfile("S13-expansion-active"),
+    )
+
+
+def strategy_diagnostic_profiles() -> tuple[StrengtheningProfile, ...]:
+    """Outcome-blind, one-strategy ledgers for all 22 implemented entries."""
+    return tuple(
+        StrengtheningProfile(
+            f"D{number:02d}-{strategy.name.lower()}", strategy_portfolio=(strategy.value,),
+        )
+        for number, strategy in enumerate(ALL_ENTRY_STRATEGIES, 1)
     )
 
 

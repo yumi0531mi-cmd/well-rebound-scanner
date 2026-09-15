@@ -30,7 +30,7 @@ from .execution import ENTRY_VALID_BARS, Bar, Phase, Plan, State, entry_price_fo
 from .execution import advance as advance_execution
 from .indicators import IndicatorCache, normalize_bars
 from .kis import KISClient
-from .models import Candidate, Market, TradingSession
+from .models import Candidate, Market, Stage, TradingSession
 from .objective_report import objective_tables
 from .policy import Costs, TradingPolicy, capped_stop, liquidation_deadline, session_day
 from .probability import attach_walk_forward_estimates
@@ -44,6 +44,33 @@ ENGINE_WINDOW_BARS = STRUCTURAL_WINDOW_BARS
 
 def _valid_level(value: float | None) -> bool:
     return value is not None and math.isfinite(value) and value > 0
+
+
+def _access_time_summary(evaluated, actionable, immediate) -> dict[str, Any]:
+    """Measure exact-minute availability, including minutes with too little data."""
+    instants = sorted(evaluated)
+    if not instants:
+        return {
+            "definition": "exact completed-minute continuously evaluated portfolio snapshot",
+            "eligible_instants": 0,
+            "minimum_actionable_symbols": None,
+            "actionable_minimum_pass_pct": None,
+            "minimum_immediate_entry_symbols": None,
+            "immediate_entry_minimum_pass_pct": None,
+        }
+
+    actionable_counts = [len(actionable.get(stamp, ())) for stamp in instants]
+    immediate_counts = [len(immediate.get(stamp, ())) for stamp in instants]
+    minimum = MIN_UNIQUE_ENTRIES_PER_SESSION
+    return {
+        "definition": "exact completed-minute continuously evaluated portfolio snapshot",
+        "eligible_instants": len(instants),
+        "minimum_candidates_evaluated": min(len(evaluated[stamp]) for stamp in instants),
+        "minimum_actionable_symbols": min(actionable_counts),
+        "actionable_minimum_pass_pct": sum(value >= minimum for value in actionable_counts) / len(instants) * 100,
+        "minimum_immediate_entry_symbols": min(immediate_counts),
+        "immediate_entry_minimum_pass_pct": sum(value >= minimum for value in immediate_counts) / len(instants) * 100,
+    }
 
 
 def _net_return(entry: float, weighted_exit: float, costs: Costs) -> float:
@@ -344,7 +371,9 @@ def run(client: KISClient, days: int = 3, top_n: int = 10, market: Market = Mark
         history_loader: Callable[[Candidate], pd.DataFrame] | None = None,
         candidate_eligibility: Callable[[Candidate, datetime], bool | None] | None = None,
         policy_provider: Callable[[Candidate], TradingPolicy] | None = None,
-        strengthening_profile=None, analysis_cache=None) -> dict[str, Any]:
+        strengthening_profile=None, analysis_cache=None,
+        strategy_portfolio=None, classification_portfolio=None,
+        analysis_namespace=None) -> dict[str, Any]:
     if not BACKTEST_MIN_DAYS <= days <= BACKTEST_MAX_DAYS or not BACKTEST_MIN_TOP_N <= top_n <= BACKTEST_MAX_TOP_N:
         raise ValueError(
             f"days는 {BACKTEST_MIN_DAYS}~{BACKTEST_MAX_DAYS}, "
@@ -363,7 +392,16 @@ def run(client: KISClient, days: int = 3, top_n: int = 10, market: Market = Mark
     coverage: dict[str, list[str]] = {}
     stage_counts: dict[str, int] = defaultdict(int)
     rejection_counts: dict[str, int] = defaultdict(int)
+    matched_strategy_counts: dict[str, int] = defaultdict(int)
+    cost_valid_strategy_counts: dict[str, int] = defaultdict(int)
+    strategy_evaluation_counts: dict[str, int] = defaultdict(int)
+    opportunity_rejection_counts: dict[str, int] = defaultdict(int)
+    opportunity_near_miss_counts: dict[str, int] = defaultdict(int)
+    policy_block_reason_counts: dict[str, int] = defaultdict(int)
     signal_symbols: dict[str, set[str]] = defaultdict(set)
+    evaluated_symbols_by_instant: dict[str, set[str]] = defaultdict(set)
+    actionable_symbols_by_instant: dict[str, set[str]] = defaultdict(set)
+    immediate_symbols_by_instant: dict[str, set[str]] = defaultdict(set)
     execution_counts: dict[str, int] = defaultdict(int)
     fill_bar_rejection_counts: dict[str, int] = {}
     unfilled_signals: list[dict[str, Any]] = []
@@ -431,8 +469,49 @@ def run(client: KISClient, days: int = 3, top_n: int = 10, market: Market = Mark
                         universe_counts["eligible_bars"] += 1
                     result = evaluate(candidate.key, history, float(bars.iloc[index].close), store, now=instant,
                                       session=session, policy=policy, indicator_cache=indicator_cache,
-                                      strengthening_profile=strengthening_profile, analysis_cache=analysis_cache)
+                                      strengthening_profile=strengthening_profile, analysis_cache=analysis_cache,
+                                      strategy_portfolio=strategy_portfolio,
+                                      classification_portfolio=classification_portfolio,
+                                      analysis_identity=(analysis_namespace, candidate.key, index)
+                                      if analysis_namespace is not None else None)
+                    access_instant = instant.isoformat()
+                    evaluated_symbols_by_instant[access_instant].add(candidate.symbol)
+                    if result.stage in {Stage.ENTRY_WAIT, Stage.FINAL_BUY} and _valid_level(result.levels.entry):
+                        actionable_symbols_by_instant[access_instant].add(candidate.symbol)
+                    if result.final_buy:
+                        immediate_symbols_by_instant[access_instant].add(candidate.symbol)
                     stage_counts[result.stage.value] += 1
+                    if result.matched_strategies:
+                        execution_counts["structure_match_evaluations"] += 1
+                        for strategy in result.matched_strategies:
+                            matched_strategy_counts[strategy.value] += 1
+                    opportunity_rejections = result.diagnostics.get("opportunity_rejections", {})
+                    if isinstance(opportunity_rejections, dict):
+                        evaluated_strategies = set(opportunity_rejections)
+                        evaluated_strategies.update(strategy.value for strategy in result.matched_strategies)
+                        for strategy in evaluated_strategies:
+                            strategy_evaluation_counts[str(strategy)] += 1
+                        for strategy, reasons in opportunity_rejections.items():
+                            if not isinstance(reasons, (list, tuple)):
+                                continue
+                            for reason in reasons:
+                                opportunity_rejection_counts[f"{strategy}: {reason}"] += 1
+                            if len(reasons) == 1:
+                                opportunity_near_miss_counts[f"{strategy}: {reasons[0]}"] += 1
+                    if _valid_level(result.levels.entry):
+                        execution_counts["planned_entry_evaluations"] += 1
+                    policy_reasons = result.diagnostics.get("policy_block_reasons")
+                    if policy_reasons:
+                        execution_counts["policy_blocked_evaluations"] += 1
+                        for reason in str(policy_reasons).split(" | "):
+                            policy_block_reason_counts[reason] += 1
+                    net_rr_blocked = bool(
+                        policy_reasons and "비용 차감 후 1차 목표 손익비 1.0 미달" in str(policy_reasons)
+                    )
+                    if result.matched_strategies and not net_rr_blocked:
+                        execution_counts["cost_valid_structure_evaluations"] += 1
+                        for strategy in result.matched_strategies:
+                            cost_valid_strategy_counts[strategy.value] += 1
                     if result.final_buy:
                         execution_counts["signal_evaluations"] += 1
                         signal_symbols[str(bar_days[index])].add(candidate.symbol)
@@ -550,9 +629,21 @@ def run(client: KISClient, days: int = 3, top_n: int = 10, market: Market = Mark
     report = _build_report(trades, market, days, candidates, errors, coverage)
     report["probability_model"] = attach_walk_forward_estimates(trades)
     report["session"] = session.value
+    report["diagnostic_schema_version"] = 3
     report["stage_counts"] = dict(stage_counts)
     report["non_entry_reason_counts"] = dict(rejection_counts)
+    report["matched_strategy_counts"] = dict(matched_strategy_counts)
+    report["cost_valid_strategy_counts"] = dict(cost_valid_strategy_counts)
+    report["strategy_evaluation_counts"] = dict(strategy_evaluation_counts)
+    report["opportunity_rejection_counts"] = dict(opportunity_rejection_counts)
+    report["opportunity_near_miss_counts"] = dict(opportunity_near_miss_counts)
+    report["policy_block_reason_counts"] = dict(policy_block_reason_counts)
     report["signal_symbols_by_day"] = {day: sorted(symbols) for day, symbols in signal_symbols.items()}
+    report["access_time_coverage"] = _access_time_summary(
+        evaluated_symbols_by_instant,
+        actionable_symbols_by_instant,
+        immediate_symbols_by_instant,
+    )
     report["execution_counts"] = dict(execution_counts)
     report["fill_bar_rejection_counts"] = fill_bar_rejection_counts
     report["unfilled_signals"] = unfilled_signals

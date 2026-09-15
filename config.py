@@ -80,3 +80,16 @@ ACTIVE_STRATEGY_VALUES = (
     "유동성 스윕 후 회복",
     "전일 고가 돌파 후 재지지",
 )
+
+# Strategies with an explicit early-session entry deadline are diagnostic only.
+# They cannot enter the production portfolio because the scanner must work at
+# any access time while the selected market session is open.
+NARROW_TIME_STRATEGY_VALUES = (
+    "개장 범위 돌파 후 지지확인",
+    "개장 범위 하단 반전",
+    "개장 범위 직접 돌파",
+)
+OPENING_RANGE_READY_MINUTES = 21
+OPENING_RANGE_RETEST_MAX_MINUTES = 90
+OPENING_RANGE_LOW_REVERSAL_MAX_MINUTES = 75
+OPENING_RANGE_BREAKOUT_MAX_MINUTES = 120

@@ -3,7 +3,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from wellscan.backtest import _entry_fill, _net_return, _overseas_history, _simulate_exit, run
+from wellscan.backtest import _access_time_summary, _entry_fill, _net_return, _overseas_history, _simulate_exit, run
 from wellscan.models import Candidate, Market, RiskState, ScanResult, Stage, Strategy, TradeLevels, TradingSession
 from wellscan.policy import Costs, TradingPolicy
 
@@ -11,6 +11,28 @@ from wellscan.policy import Costs, TradingPolicy
 def bars(rows: list[tuple[float, float, float, float]]) -> pd.DataFrame:
     index = pd.date_range("2026-08-27 09:00", periods=len(rows), freq="min")
     return pd.DataFrame(rows, columns=["open", "high", "low", "close"], index=index).assign(volume=1000)
+
+
+def test_access_time_summary_requires_five_symbols_at_every_exact_minute() -> None:
+    evaluated = {"09:01": {"A", "B", "C", "D", "E"}, "09:02": {"A", "B", "C", "D", "E"}}
+    actionable = {"09:01": {"A", "B", "C", "D", "E"}, "09:02": {"A", "B", "C", "D"}}
+    immediate = {"09:01": {"A", "B", "C", "D", "E"}}
+
+    result = _access_time_summary(evaluated, actionable, immediate)
+
+    assert result["eligible_instants"] == 2
+    assert result["minimum_actionable_symbols"] == 4
+    assert result["actionable_minimum_pass_pct"] == 50
+    assert result["minimum_immediate_entry_symbols"] == 0
+    assert result["immediate_entry_minimum_pass_pct"] == 50
+
+
+def test_access_time_summary_does_not_hide_minutes_with_fewer_than_five_evaluations() -> None:
+    result = _access_time_summary({"09:01": {"A"}}, {"09:01": {"A"}}, {})
+
+    assert result["eligible_instants"] == 1
+    assert result["minimum_candidates_evaluated"] == 1
+    assert result["actionable_minimum_pass_pct"] == 0
 
 
 def test_entry_is_checked_only_after_signal() -> None:
@@ -174,6 +196,7 @@ def test_production_backtest_uses_plan_state_advance_not_legacy_helpers(monkeypa
         TradeLevels(entry=100, target1=104, target2=106, soft_stop=99,
                     hard_stop=98.5, structural_stop=98),
         {"FINAL_BUY": True},
+        matched_strategies=(Strategy.RANGE_REVERSAL,),
         diagnostics={"atr_3m": 1., "policy_minimum_rr": 1.},
     )
     monkeypatch.setattr("wellscan.backtest.evaluate", lambda *args, **kwargs: signal)
@@ -204,6 +227,15 @@ def test_production_backtest_uses_plan_state_advance_not_legacy_helpers(monkeypa
         policy_provider=lambda _: TradingPolicy(costs, "STOCK"),
     )
     assert report["errors"] == []
+    assert report["diagnostic_schema_version"] == 3
+    assert report["stage_counts"][Stage.FINAL_BUY.value] >= 1
+    assert report["matched_strategy_counts"][Strategy.RANGE_REVERSAL.value] >= 1
+    assert report["cost_valid_strategy_counts"][Strategy.RANGE_REVERSAL.value] >= 1
+    assert isinstance(report["strategy_evaluation_counts"], dict)
+    assert isinstance(report["opportunity_rejection_counts"], dict)
+    assert isinstance(report["opportunity_near_miss_counts"], dict)
+    assert report["execution_counts"]["structure_match_evaluations"] >= 1
+    assert report["execution_counts"]["planned_entry_evaluations"] >= 1
     assert len(report["trades"]) == 1
     assert report["trades"][0]["result"] == "TARGET2"
     assert eligibility_checks

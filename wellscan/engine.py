@@ -11,8 +11,7 @@ from config import MAX_COMPLETED_BAR_AGE_SECONDS, STRUCTURAL_WINDOW_BARS, WARMUP
 from .analysis_cache import AnalysisCache, analysis_key
 from .indicators import IndicatorCache, completed_resample, enriched, normalize_bars, pivot_points
 from .models import (
-    ESTABLISHED_ACTIVE_STRATEGIES,
-    EXPERIMENTAL_STRATEGIES,
+    ACTIVE_STRATEGIES,
     RiskState,
     ScanResult,
     Stage,
@@ -27,7 +26,6 @@ from .policy import (
     capped_stop,
     enforce_live_deadline,
     live_rr_valid,
-    strategy_enabled,
 )
 from .probability import causal_factor_evidence
 from .sequence import SequenceStore, risk_day
@@ -108,12 +106,13 @@ def valid_long_targets(entry: float | None, target1: float | None, target2: floa
 
 
 def _select_opportunity(opportunities: tuple[Opportunity, ...], policy: TradingPolicy | None,
-                        completed_close: float | None, _live_price_ignored: float, atr: float | None) -> Opportunity | None:
+                        completed_close: float | None, _live_price_ignored: float, atr: float | None,
+                        allowed_strategies: tuple[Strategy, ...] = ACTIVE_STRATEGIES) -> Opportunity | None:
     if not opportunities:
         return None
-    established = tuple(item for item in opportunities if item.strategy in ESTABLISHED_ACTIVE_STRATEGIES)
-    experimental = tuple(item for item in opportunities if item.strategy in EXPERIMENTAL_STRATEGIES)
-    opportunities = established + experimental
+    opportunities = tuple(
+        item for strategy in allowed_strategies for item in opportunities if item.strategy == strategy
+    )
     if not opportunities:
         return None
     if policy is None or policy.costs is None:
@@ -252,9 +251,10 @@ class StructuralAnalysis:
     opportunities: tuple[Opportunity, ...]
     trend_info: tuple
     evidence: object
+    opportunity_rejections: tuple[tuple[str, tuple[str, ...]], ...] = ()
 
 
-def _analyze_structure(bars, live_price, session, reference, indicator_cache):
+def _analyze_structure(bars, live_price, session, reference, indicator_cache, active_strategies):
     """Pure computations shared across live, replay and stronger-only trials."""
     frame15 = completed_resample(bars, 15, now=reference)
     frame5 = completed_resample(bars, 5, now=reference)
@@ -274,13 +274,21 @@ def _analyze_structure(bars, live_price, session, reference, indicator_cache):
     well = _well_rebound(frame5, session, prepared=data5) if well_data_ready else (False, False, False)
     entry_setup = _entry_setup(data3) if entry_data_ready else (False, False, False, None, None)
     swing = _swing_quality(frame5) if well_data_ready else (None, None, None, None)
-    opportunities = classify(frame15, frame5, frame3, live_price, session,
-                             prepared=(data15, data5, data3)) if opening_data_ready else ()
+    opportunity_audit: dict[str, list[str]] = {}
+    opportunities = classify(
+        frame15, frame5, frame3, live_price, session,
+        prepared=(data15, data5, data3), audit=opportunity_audit,
+        active_strategies=active_strategies,
+    ) if opening_data_ready else ()
+    opportunity_rejections = tuple(
+        (strategy, tuple(reasons)) for strategy, reasons in opportunity_audit.items()
+    )
     trend_info = trend_description(frame15, frame5, prepared=data15) if transition_ready and well_data_ready else ("미확정", None)
     evidence = collect_evidence(data15, data5, data3, bars, live_price, session)
     return StructuralAnalysis(
         (len(frame15), len(frame5), len(frame3)), _readiness_reasons(frame15, frame5, frame3),
-        trend, well, entry_setup, swing, data3.tail(2).copy(deep=True), opportunities, trend_info, evidence,
+        trend, well, entry_setup, swing, data3.tail(2).copy(deep=True), opportunities,
+        trend_info, evidence, opportunity_rejections,
     )
 
 
@@ -296,6 +304,9 @@ def evaluate(
     indicator_cache: IndicatorCache | None = None,
     strengthening_profile: StrengtheningProfile | None = None,
     analysis_cache: AnalysisCache[StructuralAnalysis] | None = None,
+    strategy_portfolio: tuple[Strategy, ...] | None = None,
+    classification_portfolio: tuple[Strategy, ...] | None = None,
+    analysis_identity: object | None = None,
 ) -> ScanResult:
     evaluated_at = now or datetime.now(UTC)
     if not np.isfinite(live_price) or live_price <= 0:
@@ -336,9 +347,23 @@ def evaluate(
     # the last completed 1-minute close.  The current quote belongs only to
     # revalidate_live(), after this immutable structural snapshot is built.
     signal_price = float(bars.close.iloc[-1]) if not bars.empty else float(live_price)
+    selected_strategies = strategy_portfolio or ACTIVE_STRATEGIES
+    classified_strategies = classification_portfolio or selected_strategies
+    if len(set(selected_strategies)) != len(selected_strategies) or not set(selected_strategies) <= set(classified_strategies):
+        raise ValueError("전략 포트폴리오는 중복 없이 분류 포트폴리오 안에 있어야 합니다")
     def build():
-        return _analyze_structure(bars, signal_price, session, reference, indicator_cache)
-    structure = analysis_cache.get_or_create(analysis_key(bars, signal_price, session, reference), build) if analysis_cache is not None else build()
+        return _analyze_structure(
+            bars, signal_price, session, reference, indicator_cache, classified_strategies,
+        )
+    if analysis_cache is None:
+        structure = build()
+    else:
+        cache_key = (
+            analysis_identity if analysis_identity is not None
+            else analysis_key(bars, signal_price, session, reference),
+            tuple(strategy.value for strategy in classified_strategies),
+        )
+        structure = analysis_cache.get_or_create(cache_key, build)
     count15, count5, count3 = structure.counts
     transition_ready = count15 >= TRANSITION_MIN_15M_BARS
     opportunity_data_ready = count15 >= OPPORTUNITY_MIN_15M_BARS
@@ -354,14 +379,15 @@ def evaluate(
     data3 = structure.recent3
     latest3 = data3.iloc[-1] if not data3.empty else None
     confirmation_close = float(bars.close.iloc[-1]) if not bars.empty else None
-    opportunities = tuple(item for item in structure.opportunities if strategy_enabled(item.strategy))
+    opportunities = tuple(item for item in structure.opportunities if item.strategy in selected_strategies)
     strengthening_audit = {}
     if strengthening_profile is not None:
         opportunities = filter_opportunities(opportunities, structure.evidence, strengthening_profile, policy,
                                              audit=strengthening_audit)
     primary = _select_opportunity(opportunities, policy,
-                                  confirmation_close,
-                                  signal_price, float(latest3.atr) if latest3 is not None else None)
+                                  confirmation_close, signal_price,
+                                  float(latest3.atr) if latest3 is not None else None,
+                                  selected_strategies)
     strategy = primary.strategy if primary else legacy_strategy
     trend_label, structural_swing = structure.trend_info
     if structural_swing is not None:
@@ -534,6 +560,10 @@ def evaluate(
             "hard_kill_date": cycle.hard_kill_date,
             "level_status": "confirmed" if stage == Stage.FINAL_BUY else "watch" if entry else "pending",
             "matched_strategy_count": len(opportunities),
+            "opportunity_rejections": {
+                strategy: reasons for strategy, reasons in structure.opportunity_rejections
+                if Strategy(strategy) in selected_strategies
+            },
             "strengthening_profile": strengthening_profile.profile_id if strengthening_profile is not None else "baseline",
             "strengthening_rejections": str(strengthening_audit) if strengthening_audit else "",
         },

@@ -5,7 +5,7 @@ import pandas as pd
 
 import wellscan.opportunities as opportunities
 from wellscan.engine import _select_opportunity
-from wellscan.models import ACTIVE_STRATEGIES, Strategy, TradingSession
+from wellscan.models import ACTIVE_STRATEGIES, NARROW_TIME_STRATEGIES, Strategy, TradingSession
 from wellscan.opportunities import (
     Opportunity,
     liquidity_sweep_reclaim,
@@ -24,6 +24,10 @@ def test_inactive_strategy_cannot_fall_back_into_engine_selection() -> None:
     assert _select_opportunity((_opportunity(Strategy.BREAKOUT),), None, 101., 101., 1.) is None
     active = _opportunity(Strategy.RANGE_REVERSAL)
     assert _select_opportunity((_opportunity(Strategy.BREAKOUT), active), None, 101., 101., 1.) is active
+
+
+def test_production_portfolio_has_no_narrow_time_strategy() -> None:
+    assert not NARROW_TIME_STRATEGIES.intersection(ACTIVE_STRATEGIES)
 
 
 def test_waiting_established_does_not_hide_executable_experimental() -> None:

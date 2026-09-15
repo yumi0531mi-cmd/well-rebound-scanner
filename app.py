@@ -177,8 +177,46 @@ if st.query_params.get("admin") == "backtest":
     _fraction = _report["five_symbols_day_pct"]
     st.write(f"{MIN_UNIQUE_ENTRIES_PER_SESSION}종목 이상 달성 비율: {_fraction}% · 기준 {_report['daily_criterion']}")
     st.caption(_report["metric_note"])
+    st.subheader("장중 임의 접속시각 커버리지")
+    _access = _report.get("access_time_coverage", {})
+    if _access.get("eligible_instants"):
+        _access_columns = st.columns(4)
+        _access_columns[0].metric("검증된 1분 시각", f"{_access['eligible_instants']:,}")
+        _access_columns[1].metric("최소 평가 종목", _access["minimum_candidates_evaluated"])
+        _access_columns[2].metric("최소 진입대기 종목", _access["minimum_actionable_symbols"])
+        _access_columns[3].metric("5종목 충족 시각", f"{_access['actionable_minimum_pass_pct']:.2f}%")
+        if _access["minimum_actionable_symbols"] < MIN_UNIQUE_ENTRIES_PER_SESSION:
+            st.warning("장중 어느 시각에 접속해도 진입대기 종목 5개 이상이라는 기준을 충족하지 못했습니다.")
+    else:
+        st.warning("동시에 5종목 이상을 평가한 1분 시각이 없어 임의 접속시각 기준을 판정할 수 없습니다.")
+    st.caption("각 완료 1분봉 시각의 진입가 대기·진입신호 종목을 동시에 집계하며, 일일 합계로 대체하지 않습니다.")
     if not _report["sample_at_least_50"]:
         st.warning(f"시장별 최소 {MIN_TRADES_PER_MARKET}건 미충족 · 배포 판정 불가")
+    st.subheader("신호 부족 원인 진단")
+    _execution = _report.get("execution_counts", {})
+    _diagnostic_columns = st.columns(5)
+    _diagnostic_columns[0].metric("평가 완료봉", f"{sum(_report.get('stage_counts', {}).values()):,}")
+    _diagnostic_columns[1].metric("전략 구조 형성", f"{_execution.get('structure_match_evaluations', 0):,}")
+    _diagnostic_columns[2].metric("비용 통과 구조", f"{_execution.get('cost_valid_structure_evaluations', 0):,}")
+    _diagnostic_columns[3].metric("위험정책 차단", f"{_execution.get('policy_blocked_evaluations', 0):,}")
+    _diagnostic_columns[4].metric("실제 체결", f"{_execution.get('resolved_entries', 0):,}")
+
+    def _top_counter_rows(field, label, limit=15):
+        values = _report.get(field, {})
+        return [
+            {label: name, "횟수": count}
+            for name, count in sorted(values.items(), key=lambda item: (-item[1], item[0]))[:limit]
+        ]
+
+    _near_misses = _top_counter_rows("opportunity_near_miss_counts", "한 조건만 부족했던 구조")
+    _policy_blocks = _top_counter_rows("policy_block_reason_counts", "위험정책 차단 사유")
+    _left, _right = st.columns(2)
+    with _left:
+        st.caption("필수 조건을 완화하지 않은 전략별 단일 실패 횟수")
+        st.dataframe(_near_misses, use_container_width=True, hide_index=True)
+    with _right:
+        st.caption("수수료·슬리피지·세션·순손익비 적용 후 차단 횟수")
+        st.dataframe(_policy_blocks, use_container_width=True, hide_index=True)
     _probability = _report.get("probability_model", {})
     st.subheader("워크포워드 목표가 확률·EV")
     st.write(f"상태: {_probability.get('status')} · 예측 가능 거래: {_probability.get('predictions', 0)}건")
