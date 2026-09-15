@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-09-15T10:02:56+09:00",
+  "updated_at": "2026-09-15T14:10:26+09:00",
   "current_step": 3,
   "completed_steps": [
     "기존 저장소와 인계 보고서 확인",
@@ -50,7 +50,11 @@
     "분봉 증분 저장 수정 후 운영 회귀 482개 통과; Ruff/pip check 통과",
     "운영 0.8.8 반복 주기 50.30초·후보풀 7개·WebSocket 연결·현재 진입신호 0개 확인",
     "고정 후처리 0.30초 경계 초과를 흡수하도록 요청 종료 여유를 8초로 조정",
-    "8초 종료 여유 수정 후 운영 회귀 482개 통과; Ruff/pip check 통과"
+    "8초 종료 여유 수정 후 운영 회귀 482개 통과; Ruff/pip check 통과",
+    "운영 0.8.9에서 반복 주기 44.10~47.40초·후보풀 31개·WebSocket 연결 확인",
+    "후보별 CockroachDB 신규 연결 누적과 이탈·노후 결과 잔류로 화면 완료봉이 최대 2시간 이상 낡는 결함 확인",
+    "직렬 CockroachDB 연결 재사용·오류 연결 폐기와 현재 후보군/10분 freshness 기반 결과 제거 구현",
+    "라이브 연결·후보 freshness 수정 후 운영 회귀 485개 통과; Ruff/pip check 통과"
   ],
   "files": {
     "config.py": "created; qualification/risk/cost/data/model and scanner deadline-margin settings centralized",
@@ -63,10 +67,11 @@
     "wellscan/probability.py": "causal factors, immutable signal snapshots, resolved-before-signal live estimator implemented",
     "wellscan/validation.py": "signal-time features and unqualified probability/EV persisted",
     "app.py": "point-in-time backtest and explicit live probability training/qualification labels",
-    "wellscan/scanner_service.py": "900/3000 live cache contract, attempted-only rotation, candidate snapshot counters, cycle deadline propagation",
+    "wellscan/scanner_service.py": "900/3000 live cache contract, attempted-only rotation, candidate snapshot counters, deadlines, current-universe/freshness pruning",
     "wellscan/realtime.py": "bounded per-record trailing schema extensions accepted; malformed boundaries rejected",
     "wellscan/kis.py": "thread-local scanner deadline bounds HTTP timeout and retries",
-    "wellscan/history.py": "durable writes limited to new or changed minute bars"
+    "wellscan/history.py": "durable writes limited to new or changed minute bars",
+    "wellscan/bar_store.py": "serialized CockroachDB connection reused across live candidate reads/writes and discarded on failure"
   },
   "verified_metrics": {
     "target1_goal": 0.8,
@@ -89,8 +94,8 @@
     "no_relaxation": true
   },
   "next_actions": [
-    "deploy eight-second finalization margin and verify repeated cycle elapsed below 50 seconds",
-    "measure cold-start candidate coverage time and remove remaining 60-second cycle overrun without relaxing strategy",
+    "deploy app 0.9.0 connection reuse and verify repeated cycle elapsed plus fresh candidate coverage",
+    "verify stale candidate rows disappear and completed-bar timestamps stay within the 10-minute admission contract",
     "run actual KIS 60-day development validation when credentials are available; local credentials currently absent",
     "request separate authorization before any reserved holdout access"
   ]

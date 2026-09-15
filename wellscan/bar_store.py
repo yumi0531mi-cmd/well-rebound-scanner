@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import threading
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from time import monotonic
@@ -63,6 +64,7 @@ class CockroachBarStore:
         self._available = False
         self._last_error = ""
         self._retry_after = 0.0
+        self._connection = None
 
     @classmethod
     def from_environment(cls) -> CockroachBarStore | None:
@@ -74,17 +76,37 @@ class CockroachBarStore:
 
         if monotonic() < self._retry_after:
             raise StoreCooldownError("database retry cooldown active")
+        if self._connection is not None and not self._connection.closed:
+            return self._connection
         root_cert = "/etc/secrets/root.crt"
         if not os.path.isfile(root_cert):
             root_cert = "system"
-        connection = psycopg.connect(
+        self._connection = psycopg.connect(
             self.database_url,
             autocommit=True,
             connect_timeout=10,
             sslrootcert=root_cert,
         )
         self._retry_after = 0.0
-        return connection
+        return self._connection
+
+    def _discard_connection(self) -> None:
+        connection, self._connection = self._connection, None
+        if connection is not None and not connection.closed:
+            try:
+                connection.close()
+            except Exception:
+                pass
+
+    @contextmanager
+    def _connection_session(self):
+        """Reuse one serialized connection and discard it after DB failures."""
+        connection = self._connect()
+        try:
+            yield connection
+        except Exception:
+            self._discard_connection()
+            raise
 
     def _ensure_schema(self, connection) -> None:
         if self._initialized:
@@ -151,7 +173,7 @@ class CockroachBarStore:
 
     def load_sequence_state(self, symbol: str) -> dict[str, Any] | None:
         try:
-            with self._lock, self._connect() as connection:
+            with self._lock, self._connection_session() as connection:
                 self._ensure_schema(connection)
                 with connection.cursor() as cursor:
                     cursor.execute(
@@ -174,7 +196,7 @@ class CockroachBarStore:
         from psycopg.types.json import Jsonb
 
         try:
-            with self._lock, self._connect() as connection:
+            with self._lock, self._connection_session() as connection:
                 self._ensure_schema(connection)
                 with connection.cursor() as cursor:
                     cursor.execute(
@@ -196,7 +218,7 @@ class CockroachBarStore:
     def probe(self) -> bool:
         """Verify connectivity and create the table even when no candidates exist."""
         try:
-            with self._lock, self._connect() as connection:
+            with self._lock, self._connection_session() as connection:
                 self._ensure_schema(connection)
             self._available, self._last_error = True, ""
             return True
@@ -206,7 +228,7 @@ class CockroachBarStore:
 
     def load_auth(self, cache_key: str) -> tuple[str, pd.Timestamp] | None:
         try:
-            with self._lock, self._connect() as connection:
+            with self._lock, self._connection_session() as connection:
                 self._ensure_schema(connection)
                 with connection.cursor() as cursor:
                     cursor.execute(
@@ -222,7 +244,7 @@ class CockroachBarStore:
 
     def save_auth(self, cache_key: str, secret_value: str, expires_at: pd.Timestamp) -> bool:
         try:
-            with self._lock, self._connect() as connection:
+            with self._lock, self._connection_session() as connection:
                 self._ensure_schema(connection)
                 with connection.cursor() as cursor:
                     cursor.execute(
@@ -244,7 +266,7 @@ class CockroachBarStore:
 
     def load_signal_cases(self, engine_version: str | None = None, limit: int = 500) -> list[dict[str, Any]]:
         try:
-            with self._lock, self._connect() as connection:
+            with self._lock, self._connection_session() as connection:
                 self._ensure_schema(connection)
                 with connection.cursor() as cursor:
                     if engine_version is None:
@@ -277,7 +299,7 @@ class CockroachBarStore:
         from psycopg.types.json import Jsonb
 
         try:
-            with self._lock, self._connect() as connection:
+            with self._lock, self._connection_session() as connection:
                 self._ensure_schema(connection)
                 with connection.cursor() as cursor:
                     cursor.execute(
@@ -310,7 +332,7 @@ class CockroachBarStore:
         if not records:
             return True
         try:
-            with self._lock, self._connect() as connection:
+            with self._lock, self._connection_session() as connection:
                 self._ensure_schema(connection)
                 with connection.cursor() as cursor:
                     cursor.executemany(
@@ -328,7 +350,7 @@ class CockroachBarStore:
     def load_candidate_snapshots(self, namespace: str, start: datetime, end: datetime,
                                  limit: int = 500_000) -> list[dict[str, Any]]:
         try:
-            with self._lock, self._connect() as connection:
+            with self._lock, self._connection_session() as connection:
                 self._ensure_schema(connection)
                 with connection.cursor() as cursor:
                     cursor.execute(
@@ -353,7 +375,7 @@ class CockroachBarStore:
 
     def load(self, namespace: str, symbol: str, limit: int = MAX_BARS_PER_SYMBOL) -> pd.DataFrame:
         try:
-            with self._lock, self._connect() as connection:
+            with self._lock, self._connection_session() as connection:
                 self._ensure_schema(connection)
                 with connection.cursor() as cursor:
                     cursor.execute(
@@ -395,7 +417,7 @@ class CockroachBarStore:
             for timestamp, row in data.iterrows()
         ]
         try:
-            with self._lock, self._connect() as connection:
+            with self._lock, self._connection_session() as connection:
                 self._ensure_schema(connection)
                 with connection.cursor() as cursor:
                     cursor.executemany(

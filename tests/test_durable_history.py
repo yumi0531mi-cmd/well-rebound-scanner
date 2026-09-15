@@ -55,6 +55,34 @@ def test_database_failure_uses_cooldown_and_redacts_password() -> None:
         raise AssertionError("cooldown must prevent an immediate reconnect")
 
 
+def test_database_connection_is_reused_until_discarded(monkeypatch) -> None:
+    import psycopg
+
+    class FakeConnection:
+        closed = False
+
+        def close(self):
+            self.closed = True
+
+    created = []
+
+    def connect(*args, **kwargs):
+        del args, kwargs
+        connection = FakeConnection()
+        created.append(connection)
+        return connection
+
+    monkeypatch.setattr(psycopg, "connect", connect)
+    store = CockroachBarStore("postgresql://user:secret@example.com:26257/defaultdb")
+
+    assert store._connect() is store._connect()
+    assert len(created) == 1
+    store._discard_connection()
+    assert created[0].closed
+    assert store._connect() is not created[0]
+    assert len(created) == 2
+
+
 def test_remote_history_restores_empty_local_cache(tmp_path) -> None:
     durable = FakeDurableStore(frame("2026-08-20 09:00", 30))
     cache = HistoryCache(tmp_path, durable_store=durable)  # type: ignore[arg-type]

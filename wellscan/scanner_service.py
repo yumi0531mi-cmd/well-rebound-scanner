@@ -345,13 +345,17 @@ class ScannerService:
         """Return bounded common-engine results for the in-process web UI."""
 
         now = self._aware_now()
+        freshness_cutoff = now - timedelta(seconds=self.config.maximum_completed_bar_age_seconds)
         with self._results_lock:
             sessions = tuple(
                 SessionResultsSnapshot(
                     session=session,
                     day=self._session_result_day[session],
                     updated_at=self._session_result_updated_at[session],
-                    results=tuple(bucket.values()),
+                    results=tuple(
+                        item for item in bucket.values()
+                        if freshness_cutoff <= item[1].evaluated_at <= now
+                    ),
                 )
                 for session, bucket in sorted(self._session_results.items(), key=lambda item: item[0].value)
                 if self._session_result_day[session] == session_day(session, now).isoformat()
@@ -369,6 +373,19 @@ class ScannerService:
             bucket[candidate.key] = (candidate, result)
             while len(bucket) > SESSION_RESULT_LIMIT:
                 bucket.pop(next(iter(bucket)))
+
+    def _prune_session_results(self, session: TradingSession, candidate_keys: set[str]) -> None:
+        """Remove rows no longer present in the latest successful discovery."""
+        with self._results_lock:
+            bucket = self._session_results.get(session)
+            if bucket is not None:
+                for key in tuple(bucket):
+                    if key not in candidate_keys:
+                        bucket.pop(key, None)
+
+    def _drop_result(self, candidate: Candidate) -> None:
+        with self._results_lock:
+            self._session_results.get(candidate.session, {}).pop(candidate.key, None)
 
     def _prepare_session_bucket(
         self,
@@ -613,6 +630,7 @@ class ScannerService:
             if item.market == status.market and item.session == status.session and item.session in ENABLED_SESSIONS[status.market]
         ]
         unique = list({item.key: item for item in candidates}.values())
+        self._prune_session_results(status.session, {item.key for item in unique})
         if not unique:
             return []
         snapshot_writer = getattr(self._durable_store, "save_candidate_snapshot", None)
@@ -726,6 +744,9 @@ class ScannerService:
             except KISDeadlineError:
                 self._counters.budget_exhaustions += 1
                 break
+            except StaleCompletedBarError as exc:
+                self._drop_result(candidate)
+                self._error("candidate", exc, symbol=candidate.key, session=status.session.value)
             except (KISError, ValueError, RuntimeError) as exc:
                 self._error("candidate", exc, symbol=candidate.key, session=status.session.value)
             except Exception as exc:  # keep the daemon alive, but expose the unexpected type

@@ -631,6 +631,40 @@ def test_result_snapshot_never_exposes_prior_session_day(tmp_path):
     assert service.results_snapshot().sessions == ()
 
 
+def test_result_snapshot_excludes_rows_older_than_completed_bar_contract(tmp_path):
+    current = [NOW]
+    service = ScannerService(
+        config(tmp_path), client=FakeClient([]), history=FakeHistory(),
+        sequences=object(), validations=FakeValidation(), clock=lambda: current[0],
+        session_resolver=resolver(), evaluator=lambda *args, **kwargs: None,
+    )
+    candidate = Candidate("005930", "삼성전자", 100, 1, 1, 1)
+    result = SimpleNamespace(stage=Stage.CANDIDATE, final_buy=False, evaluated_at=NOW)
+    service._publish_result(candidate, result)
+
+    current[0] = NOW + timedelta(seconds=601)
+
+    assert service.results_snapshot().sessions[0].results == ()
+
+
+def test_discovery_prunes_results_that_left_the_current_universe(tmp_path):
+    first = Candidate("005930", "삼성전자", 100, 1, 1, 1)
+    second = Candidate("000660", "SK하이닉스", 100, 1, 1, 1)
+    client = FakeClient([first])
+    service = ScannerService(
+        config(tmp_path), client=client, history=FakeHistory(),
+        sequences=object(), validations=FakeValidation(), clock=lambda: NOW,
+        session_resolver=resolver(), evaluator=lambda *args, **kwargs: None,
+    )
+    result = SimpleNamespace(stage=Stage.CANDIDATE, final_buy=False, evaluated_at=NOW)
+    service._publish_result(first, result)
+    service._publish_result(second, result)
+
+    service._discover(SessionStatus(Market.KR, TradingSession.KR_REGULAR, True, "active"), 10)
+
+    assert [item[0].key for item in service.results_snapshot().sessions[0].results] == [first.key]
+
+
 def test_start_is_idempotent_and_stop_is_restart_safe(tmp_path):
     service = ScannerService(
         config(tmp_path, cycle_interval_seconds=10),
