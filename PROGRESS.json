@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-09-21T17:26:31+09:00",
+  "updated_at": "2026-09-21T17:30:20+09:00",
   "current_step": 3,
   "completed_steps": [
     "기존 저장소와 인계 보고서 확인",
@@ -102,7 +102,8 @@
     "전체 테스트 590개 통과 및 Ruff·compileall·pip check 통과",
     "실제 KIS 스캐너의 매 접속분 후보발견·평가·진입대기·즉시진입 종목 수를 CockroachDB에 영구 저장하도록 구현",
     "빈 후보·예산 종료·발견 오류·선조회 오류 시각도 접속 커버리지 실패 기록으로 남겨 미달 시각 은폐 차단",
-    "보류일·holdout 관련 테스트 파일을 실행하지 않고 운영 회귀 517개 및 Ruff·compileall·pip check 통과"
+    "보류일·holdout 관련 테스트 파일을 실행하지 않고 운영 회귀 517개 및 Ruff·compileall·pip check 통과",
+    "커밋 2f305f2를 origin/main에 푸시하고 Render 운영 앱 0.10.5-live-access-evidence 및 health 200 ok 확인"
   ],
   "files": {
     "config.py": "created; qualification/risk/cost/data/model and scanner deadline-margin settings centralized",
@@ -152,7 +153,8 @@
     ,"inactive_16_best_sample_candidate": "D10-failed_breakdown-reclaim KR: 2/2 T1, insufficient sample"
     ,"inactive_16_official_performance": false
     ,"live_access_snapshot_persistence_implemented": true
-    ,"live_access_qualification_status": "COLLECTION_STARTS_AFTER_0.10.5_DEPLOYMENT"
+    ,"live_access_qualification_status": "COLLECTING_FROM_0.10.5_DEPLOYMENT"
+    ,"latest_deployed_commit": "2f305f2"
   },
   "estimated_validation_dates_if_deployed_2026_09_15": {
     "us_60th_session": "2026-12-08",
@@ -179,7 +181,7 @@
   },
   "next_actions": [
     "retain the current active six because none of the remaining 16 has sufficient evidence for promotion; do not promote D10's 2/2 result",
-    "deploy 0.10.5 and verify the first real KIS access snapshot in each active market session",
+    "verify the first real KIS access snapshot in each active market session; 2026-09-21 is Sunday so no active-session sample exists yet",
     "accumulate exact-minute live coverage and count incomplete or missing active-session minutes as failures rather than excluding them",
     "derive a causal setup or target-capacity selection rule from measured bottlenecks; reject it unless both entry count and T1 outcomes improve while 3000-bar structure remains intact",
     "continue actual KIS candidate snapshots, access snapshots, and 60-day minute cache; do not present Yahoo diagnostic results as qualification",
