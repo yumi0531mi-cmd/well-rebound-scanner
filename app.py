@@ -1030,6 +1030,19 @@ if use_daemon_feed:
         f"{service_counters.get('candidate_fallback_symbols', 0)}개 · "
         f"오류 {service_counters.get('candidate_fallback_errors', 0)}건"
     )
+    access_coverage = getattr(service_status, "access_coverage", {})
+    current_access = access_coverage.get(f"{market.value}:{status.session.value}")
+    if current_access:
+        coverage_label = "전체 후보 평가됨" if current_access.get("coverage_complete") else "전체 후보 평가 미완료"
+        st.sidebar.caption(
+            f"실제 접속시각 검증 · 평가 {current_access.get('evaluated_symbols', 0)}개 · "
+            f"진입대기 이상 {current_access.get('actionable_symbols', 0)}개 · "
+            f"즉시진입 {current_access.get('immediate_entry_symbols', 0)}개 · {coverage_label}"
+        )
+    st.sidebar.caption(
+        f"접속시각 기록 {service_counters.get('access_snapshots_written', 0)}회 · "
+        f"오류 {service_counters.get('access_snapshot_errors', 0)}건"
+    )
     if service_status.recent_errors:
         last_daemon_error = service_status.recent_errors[-1]
         st.sidebar.warning(

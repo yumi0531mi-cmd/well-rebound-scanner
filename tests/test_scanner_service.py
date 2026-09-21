@@ -78,9 +78,13 @@ class FakeHistory:
 class SnapshotDurable:
     def __init__(self):
         self.calls = []
+        self.access_calls = []
 
     def save_candidate_snapshot(self, candidates, observed_at):
         self.calls.append((tuple(item.symbol for item in candidates), observed_at))
+
+    def save_access_snapshot(self, market, session, observed_at, payload):
+        self.access_calls.append((market, session, observed_at, dict(payload)))
 
 
 class FakeValidation:
@@ -249,6 +253,50 @@ def test_cycle_uses_last_completed_close_and_common_engine(tmp_path):
     assert len(validation.recorded) == 1
     assert service.snapshot().counters["final_signals_recorded"] == 1
     assert service.results_snapshot().sessions[0].results[0][0].price == 101.25
+
+
+def test_cycle_persists_exact_live_access_coverage(tmp_path):
+    candidate = Candidate("005930", "삼성전자", 100, 1, 1, 1)
+    history, durable = FakeHistory(), SnapshotDurable()
+    history._durable_store = durable
+    service = ScannerService(
+        config(tmp_path), client=FakeClient([candidate]), history=history,
+        sequences=object(), validations=FakeValidation(), clock=lambda: NOW,
+        session_resolver=resolver(),
+        evaluator=lambda *args, **kwargs: SimpleNamespace(
+            final_buy=True, stage=Stage.FINAL_BUY, evaluated_at=kwargs["now"]
+        ),
+        live_revalidator=lambda result, price, now: result,
+    )
+
+    service.run_cycle()
+
+    assert len(durable.access_calls) == 1
+    market, session, observed_at, payload = durable.access_calls[0]
+    assert (market, session, observed_at) == ("KR", "KR_REGULAR", NOW)
+    assert payload["discovered_symbols"] == payload["evaluated_symbols"] == 1
+    assert payload["actionable_symbols"] == payload["immediate_entry_symbols"] == 1
+    assert payload["scan_complete"] is payload["coverage_complete"] is True
+    status = service.snapshot()
+    assert status.counters["access_snapshots_written"] == 1
+    assert status.access_coverage["KR:KR_REGULAR"]["actionable_symbols"] == 1
+
+
+def test_empty_discovery_is_persisted_as_incomplete_access_coverage(tmp_path):
+    history, durable = FakeHistory(), SnapshotDurable()
+    history._durable_store = durable
+    service = ScannerService(
+        config(tmp_path), client=FakeClient([]), history=history,
+        sequences=object(), validations=FakeValidation(), clock=lambda: NOW,
+        session_resolver=resolver(), evaluator=lambda *args, **kwargs: None,
+    )
+
+    service.run_cycle()
+
+    payload = durable.access_calls[0][3]
+    assert payload["discovered_symbols"] == payload["evaluated_symbols"] == 0
+    assert payload["scan_complete"] is True
+    assert payload["coverage_complete"] is False
 
 
 def test_cycle_prefetches_full_candidate_windows_before_individual_refresh(tmp_path):

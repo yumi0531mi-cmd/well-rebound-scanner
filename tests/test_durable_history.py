@@ -166,6 +166,40 @@ def test_database_loads_only_latest_matching_candidate_snapshot() -> None:
     assert [record["symbol"] for record in records] == ["AAPL", "IBM"]
 
 
+def test_database_loads_live_access_snapshots_without_filling_gaps() -> None:
+    current = pd.Timestamp("2026-09-15 07:00", tz="UTC").to_pydatetime()
+
+    class Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            del args
+
+        def execute(self, statement, parameters):
+            assert "market=%s AND session=%s" in statement
+            assert parameters[:2] == ("KR", "KR_REGULAR")
+
+        def fetchall(self):
+            return [(current, {"evaluated_symbols": 12, "actionable_symbols": 5})]
+
+    class Connection:
+        closed = False
+
+        def cursor(self):
+            return Cursor()
+
+    store = CockroachBarStore("postgresql://user:secret@example.com:26257/defaultdb")
+    store._connection, store._initialized = Connection(), True
+
+    records = store.load_access_snapshots("KR", "KR_REGULAR", current, current)
+
+    assert records == [{
+        "observed_at": current, "market": "KR", "session": "KR_REGULAR",
+        "evaluated_symbols": 12, "actionable_symbols": 5,
+    }]
+
+
 def test_remote_history_restores_empty_local_cache(tmp_path) -> None:
     durable = FakeDurableStore(frame("2026-08-20 09:00", 30))
     cache = HistoryCache(tmp_path, durable_store=durable)  # type: ignore[arg-type]

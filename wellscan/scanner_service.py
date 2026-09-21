@@ -27,6 +27,7 @@ import pandas as pd
 from config import (
     CANDIDATE_FALLBACK_MAX_AGE_SECONDS,
     CANDIDATE_SNAPSHOT_INTERVAL_SECONDS,
+    MIN_UNIQUE_ENTRIES_PER_SESSION,
     SCANNER_CYCLE_SECONDS,
     SCANNER_REQUEST_DEADLINE_MARGIN_SECONDS,
     STRUCTURAL_WINDOW_BARS,
@@ -144,6 +145,8 @@ class ScannerCounters:
     candidate_fallbacks: int = 0
     candidate_fallback_symbols: int = 0
     candidate_fallback_errors: int = 0
+    access_snapshots_written: int = 0
+    access_snapshot_errors: int = 0
 
 
 @dataclass(frozen=True)
@@ -158,6 +161,7 @@ class ScannerServiceStatus:
     counters: dict[str, int]
     recent_errors: tuple[dict[str, str], ...]
     budget_contract: dict[str, float | int]
+    access_coverage: dict[str, dict[str, Any]]
 
 
 @dataclass(frozen=True)
@@ -283,6 +287,7 @@ class ScannerService:
         self._results_lock = threading.Lock()
         self._candidate_snapshot_buckets: dict[str, int] = {}
         self._recent_candidates: dict[str, tuple[datetime, tuple[Candidate, ...]]] = {}
+        self._latest_access_coverage: dict[str, dict[str, Any]] = {}
         self._thread: threading.Thread | None = None
         self._started_at = self._aware_now().isoformat()
         self._last_cycle_started_at: str | None = None
@@ -353,6 +358,7 @@ class ScannerService:
                     "max_candidates_per_session": self.config.max_candidates_per_session,
                     "max_tracking_cases": self.config.max_tracking_cases,
                 },
+                access_coverage={key: dict(value) for key, value in self._latest_access_coverage.items()},
             )
 
     def results_snapshot(self) -> ScannerResultsSnapshot:
@@ -423,6 +429,55 @@ class ScannerService:
 
         with self._results_lock:
             self._prepare_session_bucket(session, self._aware_now())
+
+    def _persist_access_snapshot(
+        self,
+        status: SessionStatus,
+        *,
+        discovered: int,
+        selected: int,
+        attempted: int,
+        scan_complete: bool,
+        failure: str = "",
+    ) -> None:
+        """Record what a user could actually see at this live KIS access minute."""
+
+        observed_at = self._aware_now()
+        freshness_cutoff = observed_at - timedelta(seconds=self.config.maximum_completed_bar_age_seconds)
+        with self._results_lock:
+            bucket = self._session_results.get(status.session, {})
+            current = [
+                result for _, result in bucket.values()
+                if freshness_cutoff <= result.evaluated_at <= observed_at
+            ]
+        evaluated = len(current)
+        actionable = sum(result.stage in {Stage.ENTRY_WAIT, Stage.FINAL_BUY} for result in current)
+        immediate = sum(result.final_buy for result in current)
+        payload: dict[str, Any] = {
+            "engine_version": ENGINE_VERSION,
+            "session_day": session_day(status.session, observed_at).isoformat(),
+            "discovered_symbols": discovered,
+            "selected_symbols": selected,
+            "attempted_symbols": attempted,
+            "evaluated_symbols": evaluated,
+            "actionable_symbols": actionable,
+            "immediate_entry_symbols": immediate,
+            "scan_complete": scan_complete,
+            "coverage_complete": bool(scan_complete and discovered > 0 and evaluated >= discovered),
+            "minimum_required": MIN_UNIQUE_ENTRIES_PER_SESSION,
+            "failure": failure,
+        }
+        key = f"{status.market.value}:{status.session.value}"
+        self._latest_access_coverage[key] = {"observed_at": observed_at.isoformat(), **payload}
+        writer = getattr(self._durable_store, "save_access_snapshot", None)
+        if not callable(writer):
+            return
+        try:
+            writer(status.market.value, status.session.value, observed_at, payload)
+            self._counters.access_snapshots_written += 1
+        except Exception as exc:
+            self._counters.access_snapshot_errors += 1
+            self._error("access-snapshot", exc, session=status.session.value)
 
     def _write_status(self, *, running: bool | None = None) -> None:
         status = self.snapshot(running=running)
@@ -706,6 +761,8 @@ class ScannerService:
                 self._counters.candidate_fallbacks += 1
                 self._counters.candidate_fallback_symbols += len(unique)
         if not unique:
+            key = f"{status.market.value}:{status.session.value}"
+            self._rotation_population[key] = 0
             return []
         self._prune_session_results(status.session, {item.key for item in unique})
         snapshot_writer = getattr(self._durable_store, "save_candidate_snapshot", None)
@@ -739,16 +796,30 @@ class ScannerService:
         limit = budgeted_candidate_limit(status.market, seconds_budgeted, self.config.max_candidates_per_session)
         if limit == 0:
             self._counters.budget_exhaustions += 1
+            self._persist_access_snapshot(
+                status, discovered=0, selected=0, attempted=0,
+                scan_complete=False, failure="cycle-budget-before-discovery",
+            )
             return
         try:
             candidates = self._discover(status, limit)
         except KISDeadlineError:
             self._counters.budget_exhaustions += 1
+            self._persist_access_snapshot(
+                status, discovered=0, selected=0, attempted=0,
+                scan_complete=False, failure="discovery-deadline",
+            )
             return
         except Exception as exc:
             self._counters.discovery_errors += 1
             self._error("discovery", exc, session=status.session.value)
+            self._persist_access_snapshot(
+                status, discovered=0, selected=0, attempted=0,
+                scan_complete=False, failure="discovery-error",
+            )
             return
+        rotation_key = f"{status.market.value}:{status.session.value}"
+        discovered = self._rotation_population.get(rotation_key, len(candidates))
         self._counters.candidates_seen += len(candidates)
         preloader = getattr(self.history, "preload_candidates", None)
         if callable(preloader):
@@ -760,6 +831,10 @@ class ScannerService:
             except Exception as exc:
                 self._counters.candidate_prefetch_errors += 1
                 self._error("candidate-prefetch", exc, session=status.session.value)
+                self._persist_access_snapshot(
+                    status, discovered=discovered, selected=len(candidates), attempted=0,
+                    scan_complete=False, failure="candidate-prefetch-error",
+                )
                 return
         attempted = 0
         for candidate in candidates:
@@ -840,6 +915,14 @@ class ScannerService:
                 self._error("candidate-unexpected", exc, symbol=candidate.key, session=status.session.value)
         self._advance_rotation(status, attempted)
         self._publish_session_completion(status.session)
+        self._persist_access_snapshot(
+            status,
+            discovered=discovered,
+            selected=len(candidates),
+            attempted=attempted,
+            scan_complete=attempted == len(candidates),
+            failure="" if attempted == len(candidates) else "candidate-cycle-incomplete",
+        )
 
     def run_cycle(self) -> bool:
         """Run one deterministic bounded cycle; False means another cycle owns the lock."""

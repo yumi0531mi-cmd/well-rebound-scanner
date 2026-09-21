@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-09-16T07:03:00+09:00",
+  "updated_at": "2026-09-21T17:26:31+09:00",
   "current_step": 3,
   "completed_steps": [
     "기존 저장소와 인계 보고서 확인",
@@ -99,7 +99,10 @@
     "관리자 백테스트에 검증 시각 수·최소 평가 종목·최소 진입대기 종목·5종목 충족 시각 비율 및 미달 경고 추가",
     "전체 22개 enum 확장으로 과거 9기법 부분집합 감사가 511개에서 4194303개로 폭증하던 결함을 원래 9기법 원장으로 고정",
     "장중 커버리지에서 평가 종목이 5개 미만인 시각을 숨기지 않고 0% 실패로 포함하는 회귀검사 추가",
-    "전체 테스트 590개 통과 및 Ruff·compileall·pip check 통과"
+    "전체 테스트 590개 통과 및 Ruff·compileall·pip check 통과",
+    "실제 KIS 스캐너의 매 접속분 후보발견·평가·진입대기·즉시진입 종목 수를 CockroachDB에 영구 저장하도록 구현",
+    "빈 후보·예산 종료·발견 오류·선조회 오류 시각도 접속 커버리지 실패 기록으로 남겨 미달 시각 은폐 차단",
+    "보류일·holdout 관련 테스트 파일을 실행하지 않고 운영 회귀 517개 및 Ruff·compileall·pip check 통과"
   ],
   "files": {
     "config.py": "created; qualification/risk/cost/data/model and scanner deadline-margin settings centralized",
@@ -111,12 +114,12 @@
     "wellscan/universe_history.py": "created; future-free candidate membership and stale snapshot rejection",
     "wellscan/probability.py": "causal factors, immutable signal snapshots, resolved-before-signal live estimator implemented",
     "wellscan/validation.py": "signal-time features and unqualified probability/EV persisted",
-    "app.py": "point-in-time backtest, probability labels, full-3000-bar restore, candidate-fallback telemetry, bottleneck tables, and exact-minute access coverage",
-    "wellscan/scanner_service.py": "900/3000 cache contract, rotation, deadlines, freshness pruning, and bounded recent-snapshot recovery for transient empty discovery",
+    "app.py": "point-in-time backtest, probability labels, full-3000-bar restore, candidate-fallback telemetry, bottleneck tables, and live exact-minute access evidence",
+    "wellscan/scanner_service.py": "900/3000 cache contract, rotation, deadlines, freshness pruning, candidate recovery, and durable live access coverage",
     "wellscan/realtime.py": "bounded per-record trailing schema extensions accepted; malformed boundaries rejected",
     "wellscan/kis.py": "thread-local scanner deadline bounds HTTP timeout and retries",
     "wellscan/history.py": "durable writes limited to changed bars; full 3000-bar candidate batch preload; redundant local CSV writes removed when durable DB is active",
-    "wellscan/bar_store.py": "serialized CockroachDB connection reused; full 3000-bar windows restored in bounded 20-symbol queries; latest real candidate snapshot retrieval",
+    "wellscan/bar_store.py": "serialized CockroachDB connection reused; full 3000-bar windows restored in bounded 20-symbol queries; candidate and live access snapshots persisted",
     "tests/controlled_tuning.py": "active portfolio or selected one-strategy profiles; aggregate 80% goal and 70% acceptable floor; reserved dates blocked",
     "tests/research_setup_audit.py": "read-only 3000-bar rejection/near-miss diagnostic; reserved source intervals blocked"
   },
@@ -148,6 +151,8 @@
     ,"inactive_16_target1_hits": 7
     ,"inactive_16_best_sample_candidate": "D10-failed_breakdown-reclaim KR: 2/2 T1, insufficient sample"
     ,"inactive_16_official_performance": false
+    ,"live_access_snapshot_persistence_implemented": true
+    ,"live_access_qualification_status": "COLLECTION_STARTS_AFTER_0.10.5_DEPLOYMENT"
   },
   "estimated_validation_dates_if_deployed_2026_09_15": {
     "us_60th_session": "2026-12-08",
@@ -174,10 +179,10 @@
   },
   "next_actions": [
     "retain the current active six because none of the remaining 16 has sufficient evidence for promotion; do not promote D10's 2/2 result",
-    "add exact intraday checkpoint coverage for actionable plans and immediate entry signals, then test a complementary portfolio without rerunning all 16 independent profiles",
-    "reject narrow-time-only strategies as sole coverage and test the selected complementary portfolio at multiple intraday access checkpoints",
+    "deploy 0.10.5 and verify the first real KIS access snapshot in each active market session",
+    "accumulate exact-minute live coverage and count incomplete or missing active-session minutes as failures rather than excluding them",
     "derive a causal setup or target-capacity selection rule from measured bottlenecks; reject it unless both entry count and T1 outcomes improve while 3000-bar structure remains intact",
-    "continue actual KIS candidate snapshots and 60-day minute cache; do not present Yahoo diagnostic results as qualification",
+    "continue actual KIS candidate snapshots, access snapshots, and 60-day minute cache; do not present Yahoo diagnostic results as qualification",
     "request separate authorization before any reserved holdout access"
   ]
 }
