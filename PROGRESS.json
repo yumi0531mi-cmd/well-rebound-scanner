@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-09-21T17:30:20+09:00",
+  "updated_at": "2026-09-21T18:12:38+09:00",
   "current_step": 3,
   "completed_steps": [
     "기존 저장소와 인계 보고서 확인",
@@ -156,10 +156,19 @@
     ,"live_access_qualification_status": "COLLECTING_FROM_0.10.5_DEPLOYMENT"
     ,"latest_deployed_commit": "2f305f2"
   },
-  "estimated_validation_dates_if_deployed_2026_09_15": {
+  "forward_live_60_session_audit_dates_if_deployed_2026_09_15": {
     "us_60th_session": "2026-12-08",
     "kr_60th_session": "2026-12-11",
-    "qualification_guaranteed": false
+    "qualification_guaranteed": false,
+    "meaning": "conservative forward live audit dates, not the historical-backtest completion estimate"
+  },
+  "historical_kis_validation_plan": {
+    "can_start_immediately": true,
+    "kr_regular": "date-addressable KIS one-minute backfill is implemented",
+    "us_pre_regular_after": "backward-cursor KIS one-minute backfill is implemented",
+    "us_day": "current KIS contract supplies at most one day, so exact 60-day history requires forward collection",
+    "point_in_time_universe": "past bars alone do not recreate past KIS ranking membership; use archived snapshots or causally reconstruct candidates from historical bars",
+    "december_is_not_completion_deadline": true
   },
   "restrictions": {
     "holdout_execution_authorized": false,
@@ -181,6 +190,7 @@
   },
   "next_actions": [
     "retain the current active six because none of the remaining 16 has sufficient evidence for promotion; do not promote D10's 2/2 result",
+    "run immediate KIS historical backfill and causal point-in-time candidate reconstruction for sessions whose API supports it; do not wait for December",
     "verify the first real KIS access snapshot in each active market session; 2026-09-21 is Sunday so no active-session sample exists yet",
     "accumulate exact-minute live coverage and count incomplete or missing active-session minutes as failures rather than excluding them",
     "derive a causal setup or target-capacity selection rule from measured bottlenecks; reject it unless both entry count and T1 outcomes improve while 3000-bar structure remains intact",
