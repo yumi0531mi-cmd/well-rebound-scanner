@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-09-23T01:38:47+09:00",
+  "updated_at": "2026-09-23T02:02:33+09:00",
   "current_step": 3,
   "completed_steps": [
     "기존 저장소와 인계 보고서 확인",
@@ -124,20 +124,20 @@
     "미국 정규장 실제 KIS 후보 36개에서 비활성 눌림목 6·상승추세 6·VWAP 회복 3건 형성, 활성 6개 형성 0건과 상품 분류 미확인 14건을 확인",
     "22개 그림자 형성 뒤 계획 비용·현재 체결구간·현재가 순손익비·상품분류 통과를 분리 계측하고 형성 후보를 관찰화면 우선 노출",
     "화면의 현재가·완료봉·상시엔진·최근 주기 시각에 UTC와 한국 KST를 병기",
-    "금지 데이터 관련 파일 제외 운영 회귀 전체 및 대상 36개 통과; Ruff·compileall·uv pip check 통과"
+    "금지 데이터 관련 파일 제외 운영 회귀 전체 및 대상 36개 통과; Ruff·compileall·uv pip check 통과",
+    "CockroachDB RU Han-do sojin si durable probe silpae -> DB hoero chadan, local KIS cache jadoon jeonhwan (0.11.1-local-fallback); scanner_service 28 + durable/history/KIS 21 tonggwa; Ruff/compileall/uv pip check/git diff--check tonggwa"
   ],
   "files": {
     "config.py": "created; qualification/risk/cost/data/model and scanner deadline-margin settings centralized",
     "state_manager.py": "created; atomic load/save verified",
     "kis_data_fetcher.py": "created; KIS-only 60-day cache path implemented",
     "wellscan/execution.py": "3-bar validated entry contract restored through config.py",
-    "app.py": "web backtest extended to 60 days and 100 symbols; probability calibration shown",
+    "app.py": "point-in-time backtest, 22-strategy independent KIS audit, shadow gate tables and candidate priority, live exact-minute evidence, UTC/KST dual timestamps",
     "wellscan/backtest.py": "60-day contract, point-in-time universe mask, causal probability/EV and strategy-bottleneck diagnostics implemented",
     "wellscan/universe_history.py": "created; future-free candidate membership and stale snapshot rejection",
     "wellscan/probability.py": "causal factors, immutable signal snapshots, resolved-before-signal live estimator implemented",
     "wellscan/validation.py": "signal-time features and unqualified probability/EV persisted",
     "wellscan/engine.py": "strategy-specific timeframe gates; 22-strategy formation, cost, fill-band, product and activation shadow assessments",
-    "app.py": "point-in-time backtest, 22-strategy independent KIS audit, shadow gate tables and candidate priority, live exact-minute evidence, UTC/KST dual timestamps",
     "wellscan/scanner_service.py": "900/3000 cache contract, rotation, deadlines, freshness pruning, candidate recovery, and durable live access coverage",
     "wellscan/realtime.py": "bounded per-record trailing schema extensions accepted; malformed boundaries rejected",
     "wellscan/kis.py": "thread-local scanner deadline bounds HTTP timeout and retries",
@@ -167,29 +167,29 @@
     "v22_smoke_us_net_rr_blocks": 53,
     "historical_original_nine_kr_entries": 29,
     "historical_original_nine_kr_target1_rate": 0.206896551724138,
-    "historical_original_nine_kr_five_symbols_day_pct": 37.5
-    ,"inactive_16_diagnostic_jobs": 319
-    ,"inactive_16_diagnostic_errors": 0
-    ,"inactive_16_resolved_entries": 34
-    ,"inactive_16_target1_hits": 7
-    ,"inactive_16_best_sample_candidate": "D10-failed_breakdown-reclaim KR: 2/2 T1, insufficient sample"
-    ,"inactive_16_official_performance": false
-    ,"live_access_snapshot_persistence_implemented": true
-    ,"live_access_qualification_status": "COLLECTING_FROM_0.10.5_DEPLOYMENT"
-    ,"latest_deployed_commit": "340fac6"
-    ,"strategy_specific_timeframes_implemented": true
-    ,"same_day_reentry_after_rearm_implemented": true
-    ,"strategy_22_kis_admin_audit_implemented": true
-    ,"strategy_22_kis_retest_status": "READY_ON_RENDER_ADMIN_AUTH_REQUIRED"
-    ,"false_shared_overheat_missed_fixed": true
-    ,"non_15m_strategy_downtrend_gate_fixed": true
-    ,"public_strategy_rejection_diagnostics_added": true
-    ,"latest_safe_operational_test_count": 459
-    ,"live_shadow_22_strategy_diagnostics_implemented": true
-    ,"daemon_shadow_22_strategy_diagnostics_implemented": true
-    ,"first_live_shadow_sample": "US_PRE: 6 evaluated, inactive TREND_PULLBACK formed 1, active actionable 0; incomplete cycle"
-    ,"latest_live_shadow_sample": "US_REGULAR: 36 evaluated, inactive TREND_PULLBACK 6 + TREND_CONTINUATION 6 + VWAP_RECLAIM 3 formed, active formations 0, unknown products 14"
-    ,"zero_entry_root_cause": "22-strategy classifier works, but all 15 live formations were outside the six-strategy production allow-list; post-formation cost/fill status was previously not exposed"
+    "historical_original_nine_kr_five_symbols_day_pct": 37.5,
+    "inactive_16_diagnostic_jobs": 319,
+    "inactive_16_diagnostic_errors": 0,
+    "inactive_16_resolved_entries": 34,
+    "inactive_16_target1_hits": 7,
+    "inactive_16_best_sample_candidate": "D10-failed_breakdown-reclaim KR: 2/2 T1, insufficient sample",
+    "inactive_16_official_performance": false,
+    "live_access_snapshot_persistence_implemented": true,
+    "live_access_qualification_status": "COLLECTING_FROM_0.10.5_DEPLOYMENT",
+    "latest_deployed_commit": "340fac6",
+    "strategy_specific_timeframes_implemented": true,
+    "same_day_reentry_after_rearm_implemented": true,
+    "strategy_22_kis_admin_audit_implemented": true,
+    "strategy_22_kis_retest_status": "READY_ON_RENDER_ADMIN_AUTH_REQUIRED",
+    "false_shared_overheat_missed_fixed": true,
+    "non_15m_strategy_downtrend_gate_fixed": true,
+    "public_strategy_rejection_diagnostics_added": true,
+    "latest_safe_operational_test_count": 459,
+    "live_shadow_22_strategy_diagnostics_implemented": true,
+    "daemon_shadow_22_strategy_diagnostics_implemented": true,
+    "first_live_shadow_sample": "US_PRE: 6 evaluated, inactive TREND_PULLBACK formed 1, active actionable 0; incomplete cycle",
+    "latest_live_shadow_sample": "US_REGULAR: 36 evaluated, inactive TREND_PULLBACK 6 + TREND_CONTINUATION 6 + VWAP_RECLAIM 3 formed, active formations 0, unknown products 14",
+    "zero_entry_root_cause": "22-strategy classifier works, but all 15 live formations were outside the six-strategy production allow-list; post-formation cost/fill status was previously not exposed"
   },
   "forward_live_60_session_audit_dates_if_deployed_2026_09_15": {
     "us_60th_session": "2026-12-08",

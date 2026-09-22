@@ -49,7 +49,14 @@ class HistoryCache:
     INITIAL_READY_BARS = HISTORY_INITIAL_READY_BARS
     WARM_TARGET_BARS = HISTORY_WARM_TARGET_BARS
 
-    def __init__(self, root: str | Path = ".scanner_data/history", durable_store: CockroachBarStore | None = None):
+    def __init__(
+        self,
+        root: str | Path = ".scanner_data/history",
+        durable_store: CockroachBarStore | None = None,
+        *,
+        use_environment: bool = True,
+        fallback_reason: str = "",
+    ):
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
         self._metrics: dict[str, BackfillMetrics] = {}
@@ -58,7 +65,10 @@ class HistoryCache:
         self._warm_lock = threading.Lock()
         self._warm_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="history-warm")
         self._warm_futures: dict[str, Future[pd.DataFrame]] = {}
-        self._durable_store = durable_store if durable_store is not None else CockroachBarStore.from_environment()
+        self._durable_store = durable_store if durable_store is not None else (
+            CockroachBarStore.from_environment() if use_environment else None
+        )
+        self._fallback_reason = fallback_reason
         self._durable_loaded: set[tuple[str, str]] = set()
         self._durable_frames: dict[tuple[str, str], pd.DataFrame] = {}
         probe = getattr(self._durable_store, "probe", None)
@@ -191,7 +201,12 @@ class HistoryCache:
 
     def persistence_status(self) -> StoreStatus:
         if self._durable_store is None:
-            return StoreStatus(False, False, "로컬 CSV", "DATABASE_URL 미설정")
+            return StoreStatus(
+                bool(self._fallback_reason),
+                False,
+                "로컬 CSV",
+                self._fallback_reason or "DATABASE_URL 미설정",
+            )
         return self._durable_store.status()
 
     def _domestic_backfill(

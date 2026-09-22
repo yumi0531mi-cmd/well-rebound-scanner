@@ -215,10 +215,24 @@ def shared_runtime_components() -> ScannerRuntimeComponents:
     with _RUNTIME_COMPONENTS_LOCK:
         if _RUNTIME_COMPONENTS is None:
             durable = CockroachBarStore.from_environment()
-            client = KISClient(auth_store=durable)
-            history = HistoryCache(durable_store=durable)
-            sequences = SequenceStore(durable_store=durable)
-            validations = ValidationStore(durable_store=durable, sequence_store=sequences)
+            fallback_reason = ""
+            probe = getattr(durable, "probe", None)
+            if callable(probe) and not probe():
+                fallback_reason = durable.status().last_error
+                LOGGER.error("durable store disabled for this process; local fallback: %s", fallback_reason)
+                durable = None
+            client = KISClient(auth_store=durable, use_environment=False)
+            history = HistoryCache(
+                durable_store=durable,
+                use_environment=False,
+                fallback_reason=fallback_reason,
+            )
+            sequences = SequenceStore(durable_store=durable, use_environment=False)
+            validations = ValidationStore(
+                durable_store=durable,
+                sequence_store=sequences,
+                use_environment=False,
+            )
             _RUNTIME_COMPONENTS = ScannerRuntimeComponents(durable, client, history, sequences, validations)
         return _RUNTIME_COMPONENTS
 

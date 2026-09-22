@@ -810,22 +810,22 @@ def test_default_runtime_uses_one_shared_persistence_graph(monkeypatch, tmp_path
             return value
 
     class Client:
-        def __init__(self, auth_store):
+        def __init__(self, auth_store, **_kwargs):
             self.store = auth_store
 
     class History:
         INITIAL_READY_BARS = 180
         WARM_TARGET_BARS = 1000
 
-        def __init__(self, durable_store):
+        def __init__(self, durable_store, **_kwargs):
             self.store = durable_store
 
     class Sequence:
-        def __init__(self, durable_store):
+        def __init__(self, durable_store, **_kwargs):
             self.store = durable_store
 
     class Validation:
-        def __init__(self, durable_store, sequence_store):
+        def __init__(self, durable_store, sequence_store, **_kwargs):
             self.store = durable_store
             self.sequence = sequence_store
 
@@ -846,6 +846,59 @@ def test_default_runtime_uses_one_shared_persistence_graph(monkeypatch, tmp_path
     assert first.sequences.store is first.durable_store
     assert first.validations.store is first.durable_store
     assert first.validations.sequence is first.sequences
+
+
+def test_failed_durable_probe_disables_database_for_whole_runtime(monkeypatch):
+    import wellscan.scanner_service as module
+
+    observed = {}
+
+    class Durable:
+        @classmethod
+        def from_environment(cls):
+            return cls()
+
+        def probe(self):
+            return False
+
+        def status(self):
+            return SimpleNamespace(last_error="monthly request unit limit")
+
+    class Client:
+        def __init__(self, auth_store, **kwargs):
+            observed["client"] = (auth_store, kwargs)
+
+    class History:
+        INITIAL_READY_BARS = 180
+        WARM_TARGET_BARS = 1000
+
+        def __init__(self, durable_store, **kwargs):
+            observed["history"] = (durable_store, kwargs)
+
+    class Sequence:
+        def __init__(self, durable_store, **kwargs):
+            observed["sequence"] = (durable_store, kwargs)
+
+    class Validation:
+        def __init__(self, durable_store, sequence_store, **kwargs):
+            observed["validation"] = (durable_store, sequence_store, kwargs)
+
+    monkeypatch.setattr(module, "_RUNTIME_COMPONENTS", None)
+    monkeypatch.setattr(module, "CockroachBarStore", Durable)
+    monkeypatch.setattr(module, "KISClient", Client)
+    monkeypatch.setattr(module, "HistoryCache", History)
+    monkeypatch.setattr(module, "SequenceStore", Sequence)
+    monkeypatch.setattr(module, "ValidationStore", Validation)
+
+    runtime = module.shared_runtime_components()
+
+    assert runtime.durable_store is None
+    assert observed["client"] == (None, {"use_environment": False})
+    assert observed["history"][0] is None
+    assert observed["history"][1]["use_environment"] is False
+    assert observed["history"][1]["fallback_reason"] == "monthly request unit limit"
+    assert observed["sequence"][0] is None
+    assert observed["validation"][0] is None
 
 
 def test_render_entrypoint_starts_daemon_before_streamlit_and_stops(monkeypatch):

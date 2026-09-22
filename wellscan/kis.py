@@ -45,7 +45,13 @@ class KISClient:
     _request_lock = threading.Lock()
     _request_at = 0.0
 
-    def __init__(self, cache_root: str | Path = ".scanner_data/auth", auth_store: CockroachBarStore | None = None):
+    def __init__(
+        self,
+        cache_root: str | Path = ".scanner_data/auth",
+        auth_store: CockroachBarStore | None = None,
+        *,
+        use_environment: bool = True,
+    ):
         self.app_key = os.getenv("KIS_APP_KEY", "").strip()
         self.app_secret = os.getenv("KIS_APP_SECRET", "").strip()
         self.base_url = os.getenv("KIS_BASE_URL", "https://openapi.koreainvestment.com:9443").rstrip("/")
@@ -56,7 +62,9 @@ class KISClient:
         self._lock = threading.Lock()
         self._approval_key = ""
         self._approval_expires = datetime.min.replace(tzinfo=UTC)
-        self._auth_store = auth_store if auth_store is not None else CockroachBarStore.from_environment()
+        self._auth_store = auth_store if auth_store is not None else (
+            CockroachBarStore.from_environment() if use_environment else None
+        )
         self._request_budget = threading.local()
 
     @contextmanager
