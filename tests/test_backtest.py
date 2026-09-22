@@ -243,3 +243,51 @@ def test_production_backtest_uses_plan_state_advance_not_legacy_helpers(monkeypa
     assert not report["universe_coverage_complete"]
     assert report["status"] == "PARTIAL"
     assert not report["sample_goal_met"]
+
+
+def test_backtest_allows_a_new_same_day_entry_after_exit_and_nonfinal_rearm(monkeypatch):
+    monkeypatch.setattr("wellscan.backtest.WARMUP_BARS", 1)
+    costs = Costs(.00015, .00015, .002, .001, "0.43 percent contract fixture")
+    instant = pd.Timestamp("2026-08-25 09:31", tz="Asia/Seoul").to_pydatetime()
+
+    def result(stage):
+        return ScanResult(
+            "KR:KRX:KR_REGULAR:TEST", instant, stage, Strategy.RANGE_REVERSAL,
+            RiskState.NORMAL, 100, None, None, None, None,
+            TradeLevels(entry=100, target1=104, target2=106, soft_stop=99,
+                        hard_stop=98.5, structural_stop=98),
+            {"FINAL_BUY": stage == Stage.FINAL_BUY},
+            matched_strategies=(Strategy.RANGE_REVERSAL,) if stage == Stage.FINAL_BUY else (),
+            diagnostics={"atr_3m": 1., "policy_minimum_rr": 1.},
+        )
+
+    evaluations = 0
+
+    def evaluate_twice(*args, **kwargs):
+        nonlocal evaluations
+        evaluations += 1
+        return result(Stage.FINAL_BUY if evaluations in {1, 3} else Stage.CANDIDATE)
+
+    monkeypatch.setattr("wellscan.backtest.evaluate", evaluate_twice)
+    rows, indexes = [], []
+    for day in (24, 25, 26):
+        for minute in range(12):
+            indexes.append(pd.Timestamp(f"2026-08-{day} 09:30") + pd.Timedelta(minutes=minute))
+            rows.append((100, 101, 99.5, 100, 1000))
+    for index in (14, 18):
+        rows[index] = (100, 107, 99.5, 106, 1000)
+    history = pd.DataFrame(
+        rows, columns=["open", "high", "low", "close", "volume"], index=indexes,
+    )
+
+    report = run(
+        None, days=2, top_n=5,
+        candidates_override=[Candidate("TEST", "Test", 100, 0, 1, 1)],
+        history_loader=lambda _: history,
+        policy_provider=lambda _: TradingPolicy(costs, "STOCK"),
+    )
+
+    assert report["errors"] == []
+    assert len(report["trades"]) == 2
+    assert report["execution_counts"]["same_symbol_session_reentries"] == 1
+    assert {trade["entry_at"][:10] for trade in report["trades"]} == {"2026-08-25"}

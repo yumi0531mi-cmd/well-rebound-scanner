@@ -354,6 +354,7 @@ def _build_report(trades: list[dict[str, Any]], market: Market, days: int, candi
             "engine": "실시간과 동일한 wellscan.engine.evaluate",
             "walk_forward": "각 시점까지 확정된 1분봉만 사용",
             "entry": f"신호 다음 {ENTRY_VALID_BARS}개 봉 안에서만 진입",
+            "reentry": "익절·정상 청산 후 신호가 해제되고 새로 형성되면 같은 종목 당일 재진입 허용",
             "exit": "체결봉부터 OHLC 순서 불명 시 보수적 손절 우선(시가 체결 포함), Soft Stop은 2개 종가 확인",
             "session": "국내 15:15 / 미국 세션 종료 10분 전, 청산 시각 데이터 없으면 미해결 오류",
             "costs": "상품별 명시된 비용 설정 적용 · 각 거래 cost_source 참조 · 실계좌 검증 별도",
@@ -445,7 +446,7 @@ def run(client: KISClient, days: int = 3, top_n: int = 10, market: Market = Mark
                 store = SequenceStore(Path(temporary) / candidate.symbol, use_environment=False, memory_only=True)
                 indicator_cache = IndicatorCache()
                 index, armed = WARMUP_BARS, True
-                entered_days: set[date] = set()
+                entries_by_day: dict[date, int] = defaultdict(int)
                 while index < len(bars) - 1:
                     if progress and index % 30 == 0:
                         progress(f"[{number}/{len(candidates)}] {candidate.symbol} 계산 {index}/{len(bars)}봉")
@@ -526,10 +527,6 @@ def run(client: KISClient, days: int = 3, top_n: int = 10, market: Market = Mark
                         execution_counts["continuous_signal_not_rearmed"] += 1
                         index += 1
                         continue
-                    if bar_days[index] in entered_days:
-                        execution_counts["same_symbol_session_day_already_entered"] += 1
-                        index += 1
-                        continue
                     if not _valid_level(result.levels.entry):
                         raise ValueError("진입신호의 진입가 누락 또는 비정상")
                     armed = False
@@ -582,7 +579,10 @@ def run(client: KISClient, days: int = 3, top_n: int = 10, market: Market = Mark
                     fill_time = datetime.fromisoformat(execution_state.entry_at)
                     position_id = plan.plan_id
                     store.mark_filled(candidate.key, position_id, entry_price, stop, fill_time)
-                    entered_days.add(bar_days[entry_idx])
+                    entry_day = bar_days[entry_idx]
+                    if entries_by_day[entry_day]:
+                        execution_counts["same_symbol_session_reentries"] += 1
+                    entries_by_day[entry_day] += 1
                     outcome = _outcome_from_state(execution_state, exit_idx, entry_price)
                     reward = policy.costs.net_return(entry_price, float(result.levels.target1))
                     risk = -policy.costs.net_return(entry_price, stop)

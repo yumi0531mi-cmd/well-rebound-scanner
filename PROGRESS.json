@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-09-21T18:12:38+09:00",
+  "updated_at": "2026-09-22T12:00:00+09:00",
   "current_step": 3,
   "completed_steps": [
     "기존 저장소와 인계 보고서 확인",
@@ -103,7 +103,12 @@
     "실제 KIS 스캐너의 매 접속분 후보발견·평가·진입대기·즉시진입 종목 수를 CockroachDB에 영구 저장하도록 구현",
     "빈 후보·예산 종료·발견 오류·선조회 오류 시각도 접속 커버리지 실패 기록으로 남겨 미달 시각 은폐 차단",
     "보류일·holdout 관련 테스트 파일을 실행하지 않고 운영 회귀 517개 및 Ruff·compileall·pip check 통과",
-    "커밋 2f305f2를 origin/main에 푸시하고 Render 운영 앱 0.10.5-live-access-evidence 및 health 200 ok 확인"
+    "커밋 2f305f2를 origin/main에 푸시하고 Render 운영 앱 0.10.5-live-access-evidence 및 health 200 ok 확인",
+    "기존 15분봉 로직과 22개 기법을 삭제하지 않고 기법별 1·3·5·15분 완료봉 요구사항으로 분리",
+    "15분봉을 쓰지 않는 기법의 공통 15분 관문 제거 및 필요한 시간축만 지표 계산하도록 구현",
+    "익절·정상 청산 뒤 신호 해제와 재형성 시 동일 종목 당일 재진입을 허용하고 연속 중복 신호는 차단",
+    "Render 관리자 화면에 실제 KIS·과거시점 후보군 기반 22개 기법 독립 재테스트 표 추가",
+    "보류일·holdout 테스트 제외 운영 회귀 498개 및 Ruff·compileall·pip check 통과"
   ],
   "files": {
     "config.py": "created; qualification/risk/cost/data/model and scanner deadline-margin settings centralized",
@@ -115,7 +120,7 @@
     "wellscan/universe_history.py": "created; future-free candidate membership and stale snapshot rejection",
     "wellscan/probability.py": "causal factors, immutable signal snapshots, resolved-before-signal live estimator implemented",
     "wellscan/validation.py": "signal-time features and unqualified probability/EV persisted",
-    "app.py": "point-in-time backtest, probability labels, full-3000-bar restore, candidate-fallback telemetry, bottleneck tables, and live exact-minute access evidence",
+    "app.py": "point-in-time backtest, 22-strategy independent KIS audit, bottleneck tables, and live exact-minute access evidence",
     "wellscan/scanner_service.py": "900/3000 cache contract, rotation, deadlines, freshness pruning, candidate recovery, and durable live access coverage",
     "wellscan/realtime.py": "bounded per-record trailing schema extensions accepted; malformed boundaries rejected",
     "wellscan/kis.py": "thread-local scanner deadline bounds HTTP timeout and retries",
@@ -155,6 +160,10 @@
     ,"live_access_snapshot_persistence_implemented": true
     ,"live_access_qualification_status": "COLLECTING_FROM_0.10.5_DEPLOYMENT"
     ,"latest_deployed_commit": "2f305f2"
+    ,"strategy_specific_timeframes_implemented": true
+    ,"same_day_reentry_after_rearm_implemented": true
+    ,"strategy_22_kis_admin_audit_implemented": true
+    ,"strategy_22_kis_retest_status": "PENDING_PRODUCTION_DEPLOYMENT"
   },
   "forward_live_60_session_audit_dates_if_deployed_2026_09_15": {
     "us_60th_session": "2026-12-08",
@@ -189,7 +198,9 @@
     "official_evidence": "actual KIS one-minute bars with point-in-time candidate universe"
   },
   "next_actions": [
-    "retain the current active six because none of the remaining 16 has sufficient evidence for promotion; do not promote D10's 2/2 result",
+    "push the verified exact-file change to origin/main and confirm Render 0.10.6-strategy-frames-reentry health",
+    "run the 22-strategy independent audit in Render with actual KIS minute bars and point-in-time candidate snapshots; report formation, cost pass, fill, and T1 rates without claiming unqualified win rates",
+    "retain the current active six until the new independent KIS audit produces sufficient evidence; do not promote tiny samples",
     "run immediate KIS historical backfill and causal point-in-time candidate reconstruction for sessions whose API supports it; do not wait for December",
     "verify the first real KIS access snapshot in each active market session; 2026-09-21 is Sunday so no active-session sample exists yet",
     "accumulate exact-minute live coverage and count incomplete or missing active-session minutes as failures rather than excluding them",

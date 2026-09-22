@@ -21,9 +21,13 @@ from config import (
     MIN_TRADES_PER_MARKET,
     MIN_UNIQUE_ENTRIES_PER_SESSION,
     PROBABILITY_MIN_TRAINING_TRADES,
+    STRATEGY_FRAME_REQUIREMENTS,
+    TARGET1_HIT_RATE_FLOOR,
+    TARGET1_HIT_RATE_GOAL,
 )
 from kis_data_fetcher import KISMinuteDataFetcher
 from wellscan import APP_VERSION, ENGINE_VERSION
+from wellscan.analysis_cache import AnalysisCache
 from wellscan.background import SnapshotCoordinator, SnapshotState
 from wellscan.candidates import MAX_ANALYSIS_CANDIDATES, UniverseBook
 from wellscan.candidates import analysis_candidates as select_analysis_candidates
@@ -31,7 +35,15 @@ from wellscan.engine import evaluate, revalidate_live
 from wellscan.execution import local_time
 from wellscan.history import HistoryCache
 from wellscan.kis import KISClient, KISError
-from wellscan.models import ACTIVE_STRATEGY_COUNT, Candidate, Market, ScanResult, Stage, TradingSession
+from wellscan.models import (
+    ACTIVE_STRATEGY_COUNT,
+    ALL_ENTRY_STRATEGIES,
+    Candidate,
+    Market,
+    ScanResult,
+    Stage,
+    TradingSession,
+)
 from wellscan.performance import TIMINGS
 from wellscan.policy import session_day
 from wellscan.quotes import QuoteBook
@@ -98,6 +110,7 @@ if st.query_params.get("admin") == "backtest":
     _days = st.slider("조회 거래일 수", BACKTEST_MIN_DAYS, BACKTEST_MAX_DAYS, BACKTEST_LOOKBACK_DAYS)
     _top_n = st.slider("종목 수", BACKTEST_MIN_TOP_N, BACKTEST_MAX_TOP_N, BACKTEST_DEFAULT_TOP_N)
     _point_in_time = st.checkbox("실제 과거시점 후보 스냅샷만 사용", value=True)
+    _audit_all = st.checkbox("22개 기법을 각각 독립 재테스트", value=True)
     if not st.button("▶️ 백테스트 실행"):
         st.stop()
     with st.status("백테스트 실행 중... 몇 분 걸릴 수 있습니다.", expanded=True) as _status:
@@ -141,22 +154,36 @@ if st.query_params.get("admin") == "backtest":
                 if len(_covered_days) < _days:
                     raise RuntimeError(f"과거시점 후보 스냅샷 부족: {_days}일 요청 / {len(_covered_days)}일 보유")
 
-            def _history_loader(candidate, _client=_runtime.client, _history=_research_history, _days=_days):
-                return _history.fetch(_client, candidate, _days)
+            _history_cache = {}
 
-            _report = run(
-                _runtime.client,
-                days=_days,
-                top_n=_top_n,
-                market=_market,
-                progress=_progress_area.caption,
-                session=_selected_session,
+            def _history_loader(candidate, _client=_runtime.client, _history=_research_history, _days=_days):
+                if candidate.key not in _history_cache:
+                    _history_cache[candidate.key] = _history.fetch(_client, candidate, _days)
+                return _history_cache[candidate.key].copy(deep=True)
+
+            _run_args = dict(
+                days=_days, top_n=_top_n, market=_market, session=_selected_session,
                 candidates_override=list(_universe.candidates) if _universe is not None else None,
                 history_loader=_history_loader,
                 candidate_eligibility=_universe.eligible if _universe is not None else None,
             )
-
-            _failed = _report["status"] in {"FAILED", "PARTIAL"}
+            if _audit_all:
+                _batch_reports = {}
+                for _number, _strategy in enumerate(ALL_ENTRY_STRATEGIES, 1):
+                    _progress_area.caption(f"[{_number}/22] {_strategy.value} 독립 재테스트")
+                    _batch_reports[_strategy.value] = run(
+                        _runtime.client, progress=None, strategy_portfolio=(_strategy,),
+                        classification_portfolio=(_strategy,),
+                        analysis_cache=AnalysisCache(max_entries=4096),
+                        analysis_namespace=f"admin-kis-22:{_strategy.value}", **_run_args,
+                    )
+                _failed = any(
+                    report["status"] in {"FAILED", "PARTIAL"}
+                    for report in _batch_reports.values()
+                )
+            else:
+                _report = run(_runtime.client, progress=_progress_area.caption, **_run_args)
+                _failed = _report["status"] in {"FAILED", "PARTIAL"}
             _status.update(label="⚠ 검증 실패 또는 일부 실패" if _failed else "계산 종료 · 수익성 보장 아님",
                            state="error" if _failed else "complete")
         except Exception as _exc:
@@ -168,6 +195,53 @@ if st.query_params.get("admin") == "backtest":
             st.stop()
         finally:
             logging.getLogger().removeHandler(_handler)
+    if _audit_all:
+        def _ratio(numerator, denominator):
+            return round(numerator / denominator * 100, 2) if denominator else None
+
+        _audit_rows = []
+        for _strategy in ALL_ENTRY_STRATEGIES:
+            _item = _batch_reports[_strategy.value]
+            _execution = _item.get("execution_counts", {})
+            _evaluated = _item.get("strategy_evaluation_counts", {}).get(_strategy.value, 0)
+            _formed = _item.get("matched_strategy_counts", {}).get(_strategy.value, 0)
+            _cost_passed = _item.get("cost_valid_strategy_counts", {}).get(_strategy.value, 0)
+            _signals = _execution.get("signal_evaluations", 0)
+            _fills = _item.get("total_trades", 0)
+            _hits = _item.get("target1_hits", 0)
+            _rate = _ratio(_hits, _fills)
+            _qualified = _fills >= MIN_TRADES_PER_MARKET and not _item.get("errors")
+            _verdict = "표본부족"
+            if _qualified and _rate is not None:
+                if _rate >= TARGET1_HIT_RATE_GOAL * 100:
+                    _verdict = "80% 목표 통과"
+                elif _rate >= TARGET1_HIT_RATE_FLOOR * 100:
+                    _verdict = "70% 하한 통과"
+                else:
+                    _verdict = "기준 미달"
+            _audit_rows.append({
+                "기법": _strategy.value,
+                "필요 시간축": "/".join(f"{minutes}분" for minutes in STRATEGY_FRAME_REQUIREMENTS[_strategy.value]),
+                "평가 횟수": _evaluated,
+                "형성 횟수": _formed,
+                "형성률(%)": _ratio(_formed, _evaluated),
+                "비용 통과": _cost_passed,
+                "비용 통과율(%)": _ratio(_cost_passed, _formed),
+                "진입 신호": _signals,
+                "체결": _fills,
+                "체결률(%)": _ratio(_fills, _signals),
+                "T1 도달": _hits,
+                "T1 도달률(%)": _rate,
+                "당일 재진입": _execution.get("same_symbol_session_reentries", 0),
+                "오류": len(_item.get("errors", [])),
+                "판정": _verdict,
+            })
+        st.subheader("22개 기법 독립 KIS 재테스트")
+        st.dataframe(_audit_rows, use_container_width=True, hide_index=True)
+        st.caption("각 기법을 단독 포트폴리오로 실행했습니다. 시장별 비용 모델(국내 왕복 0.43% 가정)과 동일 엔진을 유지합니다.")
+        with st.expander("22개 전체 원본 리포트 JSON"):
+            st.json(_batch_reports)
+        st.stop()
     st.subheader("📊 백테스트 리포트")
     st.subheader("기법별 1차 목표 도달 성적표")
     st.dataframe(_report["strategy_target1"], use_container_width=True)

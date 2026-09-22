@@ -89,6 +89,35 @@ NARROW_TIME_STRATEGY_VALUES = (
     "개장 범위 하단 반전",
     "개장 범위 직접 돌파",
 )
+
+# Minimum completed candles required by each strategy's own pattern logic.
+# Omitted timeframes are deliberately not admission gates for that strategy.
+STRATEGY_FRAME_REQUIREMENTS = {
+    "상승추세": {15: 20, 5: 25, 3: 25},
+    "눌림목": {15: 20, 5: 25, 3: 25},
+    "박스권 반등": {5: 25, 3: 25},
+    "거래량 돌파": {5: 25, 3: 25},
+    "급등 후 눌림": {15: 20, 5: 25, 3: 25},
+    "VWAP 회복": {5: 25, 3: 25},
+    "과매도 반등": {5: 25, 3: 25},
+    "변동성 수축 후 확장": {5: 25, 3: 25},
+    "개장 범위 돌파 후 지지확인": {3: 7},
+    "저점 이탈 후 회복": {3: 9},
+    "개장 범위 하단 반전": {3: 7},
+    "하락쐐기 상단 돌파": {15: 4, 5: 15, 3: 1},
+    "저거래량 1-2-3 반전": {15: 4, 5: 12, 3: 6},
+    "불플래그 돌파": {3: 12},
+    "VWAP 지지 반등": {15: 4, 3: 8},
+    "개장 범위 직접 돌파": {3: 7},
+    "시가 회복 반전": {3: 7},
+    "상승갭 재지지": {3: 7},
+    "인사이드바 돌파": {15: 1, 5: 7},
+    "가격강도 선도주 눌림 재개": {15: 9, 5: 14, 3: 8},
+    "유동성 스윕 후 회복": {3: 10},
+    "전일 고가 돌파 후 재지지": {3: 5},
+}
+if len(STRATEGY_FRAME_REQUIREMENTS) != 22:
+    raise RuntimeError("기법별 시간축 요구사항은 22개 전체를 포함해야 합니다")
 OPENING_RANGE_READY_MINUTES = 21
 OPENING_RANGE_RETEST_MAX_MINUTES = 90
 OPENING_RANGE_LOW_REVERSAL_MAX_MINUTES = 75

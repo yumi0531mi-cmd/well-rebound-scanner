@@ -12,6 +12,7 @@ from config import (
     OPENING_RANGE_LOW_REVERSAL_MAX_MINUTES,
     OPENING_RANGE_READY_MINUTES,
     OPENING_RANGE_RETEST_MAX_MINUTES,
+    STRATEGY_FRAME_REQUIREMENTS,
 )
 
 from .indicators import enriched, pivot_points
@@ -49,6 +50,25 @@ def _last_pivots(data: pd.DataFrame) -> tuple[list[float], list[float]]:
 def _recent(condition: pd.Series, bars: int) -> bool:
     """Return whether an event occurred inside its strategy-specific validity window."""
     return bool(condition.fillna(False).tail(bars).any())
+
+
+def strategy_frames_ready(
+    strategy: Strategy,
+    frames: dict[int, pd.DataFrame],
+) -> bool:
+    """Apply only the completed-candle requirements owned by one strategy."""
+
+    requirements = STRATEGY_FRAME_REQUIREMENTS[strategy.value]
+    return all(len(frames[minutes]) >= count for minutes, count in requirements.items())
+
+
+def strategy_frame_wait_reason(strategy: Strategy, frames: dict[int, pd.DataFrame]) -> str:
+    missing = [
+        f"{minutes}분 {len(frames[minutes])}/{count}"
+        for minutes, count in STRATEGY_FRAME_REQUIREMENTS[strategy.value].items()
+        if len(frames[minutes]) < count
+    ]
+    return "기법별 완료봉 준비: " + " · ".join(missing)
 
 
 def confirmed_reversal(data: pd.DataFrame) -> tuple[float, float] | None:
@@ -949,17 +969,40 @@ def classify(frame15: pd.DataFrame, frame5: pd.DataFrame, frame3: pd.DataFrame, 
              *, prepared: tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame] | None = None,
              audit: dict[str, list[str]] | None = None,
              active_strategies: tuple[Strategy, ...] = ACTIVE_STRATEGIES) -> tuple[Opportunity, ...]:
-    # Opening-range patterns need only seven completed 3-minute candles. Keep
-    # their warm-up separate so the longer, unchanged 20/25/25 contract for
-    # the other strategies cannot make a 21-90 minute setup unreachable.
-    if len(frame3) < 7:
-        return ()
-    prepared3 = prepared[2] if prepared is not None else pd.DataFrame()
-    data3 = prepared3 if not prepared3.empty else enriched(frame3, session)
     opportunities: list[Opportunity] = []
     enabled = frozenset(active_strategies)
+    frames = {15: frame15, 5: frame5, 3: frame3}
+    prepared_frames = prepared or (pd.DataFrame(), pd.DataFrame(), pd.DataFrame())
+    required_minutes = {
+        minutes
+        for strategy in enabled
+        for minutes in STRATEGY_FRAME_REQUIREMENTS[strategy.value]
+    }
+
+    def indicators(position: int, frame: pd.DataFrame) -> pd.DataFrame:
+        cached = prepared_frames[position]
+        return cached if not cached.empty else enriched(frame, session) if not frame.empty else frame.copy()
+
+    data15 = indicators(0, frame15) if 15 in required_minutes else pd.DataFrame()
+    data5 = indicators(1, frame5) if 5 in required_minutes else pd.DataFrame()
+    data3 = indicators(2, frame3) if 3 in required_minutes else pd.DataFrame()
+
+    def collect(specs) -> None:
+        for strategy, factory in specs:
+            if strategy not in enabled:
+                continue
+            if not strategy_frames_ready(strategy, frames):
+                if audit is not None:
+                    audit[strategy.value] = [strategy_frame_wait_reason(strategy, frames)]
+                continue
+            item = factory()
+            if item is not None:
+                opportunities.append(item)
+
     prior3 = data3.iloc[:-1]
     early_breakout = float(prior3.high.tail(20).max()) if not prior3.empty else live_price
+    full_prior_highs, _ = _last_pivots(prior3) if not prior3.empty else ([], [])
+    full_breakout = full_prior_highs[-1] if full_prior_highs else early_breakout
     early_specs = (
         (Strategy.OPENING_RANGE_RETEST, lambda: opening_range_retest(data3, session, audit)),
         (Strategy.FAILED_BREAKDOWN_RECLAIM, lambda: failed_breakdown_reclaim(data3, early_breakout, audit)),
@@ -971,19 +1014,35 @@ def classify(frame15: pd.DataFrame, frame5: pd.DataFrame, frame3: pd.DataFrame, 
         (Strategy.LIQUIDITY_SWEEP_RECLAIM, lambda: liquidity_sweep_reclaim(data3, audit)),
         (Strategy.PRIOR_HIGH_BREAKOUT_RETEST, lambda: prior_high_breakout_retest(data3, session, audit)),
     )
-    early_active = tuple(
-        item for strategy, factory in early_specs if strategy in enabled
-        for item in (factory(),)
-        if item is not None
+    collect(early_specs)
+    full_specs = (
+        (Strategy.DESCENDING_WEDGE_BREAK,
+         lambda: descending_wedge_break(data15, data5, data3, full_breakout, audit)),
+        (Strategy.QUIET_123_REVERSAL, lambda: quiet_123_reversal(data15, data5, data3, audit)),
+        (Strategy.VWAP_PULLBACK_HOLD, lambda: vwap_pullback_hold(data15, data3, audit)),
+        (Strategy.INSIDE_BAR_BREAKOUT, lambda: inside_bar_breakout(data15, data5, audit)),
+        (Strategy.PRICE_STRENGTH_PULLBACK_RESUME,
+         lambda: price_strength_pullback_resume(data15, data5, data3, audit)),
     )
-    if len(frame15) < 20 or len(frame5) < 25 or len(frame3) < 25:
-        opportunities.extend(early_active)
+    collect(full_specs)
+    core_strategies = (
+        Strategy.TREND_CONTINUATION, Strategy.TREND_PULLBACK, Strategy.RANGE_REVERSAL,
+        Strategy.BREAKOUT, Strategy.MOMENTUM_PULLBACK, Strategy.VWAP_RECLAIM,
+        Strategy.OVERSOLD_REVERSAL, Strategy.VOLATILITY_EXPANSION,
+    )
+    if audit is not None:
+        for strategy in core_strategies:
+            if strategy in enabled and not strategy_frames_ready(strategy, frames):
+                audit[strategy.value] = [strategy_frame_wait_reason(strategy, frames)]
+    core_enabled = frozenset(
+        strategy for strategy in core_strategies
+        if strategy in enabled and strategy_frames_ready(strategy, frames)
+    )
+    if not core_enabled:
         return tuple(sorted(opportunities, key=lambda item: item.strength, reverse=True))
-    if prepared is None:
-        data15, data5 = enriched(frame15, session), enriched(frame5, session)
-    else:
-        data15, data5 = prepared[0], prepared[1]
-    last15, last5, last3 = data15.iloc[-1], data5.iloc[-1], data3.iloc[-1]
+    last5, last3 = data5.iloc[-1], data3.iloc[-1]
+    full_15_ready = len(data15) >= STRATEGY_FRAME_REQUIREMENTS[Strategy.TREND_CONTINUATION.value][15]
+    last15 = data15.iloc[-1] if full_15_ready else None
     highs, lows = _last_pivots(data3)
     support = max([value for value in lows + [float(last3.ema20), float(last3.vwap)] if np.isfinite(value) and value < live_price], default=float(data3.low.tail(12).min()))
     prior = data3.iloc[:-1]
@@ -999,8 +1058,14 @@ def classify(frame15: pd.DataFrame, frame5: pd.DataFrame, frame3: pd.DataFrame, 
     atr = float(last3.atr)
     box = confirmed_box(prior, atr)
     box_low, box_high = box if box is not None else (range_low, range_high)
-    ema_up = bool(last15.ema9 > last15.ema20 and data15.ema20.iloc[-1] > data15.ema20.iloc[-4])
-    aligned = bool(pd.notna(last15.ma60) and last15.close > last15.ma5 > last15.ma20 > last15.ma60)
+    ema_up = bool(
+        full_15_ready and last15.ema9 > last15.ema20
+        and data15.ema20.iloc[-1] > data15.ema20.iloc[-4]
+    )
+    aligned = bool(
+        full_15_ready and pd.notna(last15.ma60)
+        and last15.close > last15.ma5 > last15.ma20 > last15.ma60
+    )
     # Event conditions may form over adjacent completed bars. Their numeric
     # thresholds stay unchanged; only their documented validity windows differ.
     volume_expansion = _recent(data3.volume_ratio >= 1.25, 3)  # 9 minutes
@@ -1015,7 +1080,10 @@ def classify(frame15: pd.DataFrame, frame5: pd.DataFrame, frame3: pd.DataFrame, 
     # accepted solely because they were true on an earlier bar.
     breakout = bool(live_price >= breakout_level and prior.close.iloc[-1] < breakout_level)
     compression = bool(data5.atr.tail(5).mean() < data5.atr.tail(20).mean() * 0.82)
-    momentum = bool(last15.close > last15.ema20 and data15.close.pct_change(4).iloc[-1] > 0.015)
+    momentum = bool(
+        full_15_ready and last15.close > last15.ema20
+        and data15.close.pct_change(4).iloc[-1] > 0.015
+    )
     # ATR/VWAP based extension gates react to the current chart's volatility.
     # A fixed percentage gate allowed already-extended stocks to be chased.
     not_overheated = bool(
@@ -1099,7 +1167,7 @@ def classify(frame15: pd.DataFrame, frame5: pd.DataFrame, frame3: pd.DataFrame, 
         ),
     ]
     for strategy, conditions, entry, stop_support, basis in specs:
-        if strategy not in enabled:
+        if strategy not in core_enabled:
             continue
         # KR-only controlled experiment; US gates and all price levels stay fixed.
         if strategy == Strategy.TREND_PULLBACK and session == TradingSession.KR_REGULAR:
@@ -1116,19 +1184,6 @@ def classify(frame15: pd.DataFrame, frame5: pd.DataFrame, frame3: pd.DataFrame, 
             opportunities.append(item)
         elif audit is not None:
             audit[strategy.value] = ["유효 진입·지지·손절 구조 없음"]
-    opportunities.extend(early_active)
-    full_specs = (
-        (Strategy.DESCENDING_WEDGE_BREAK,
-         lambda: descending_wedge_break(data15, data5, data3, breakout_level, audit)),
-        (Strategy.QUIET_123_REVERSAL, lambda: quiet_123_reversal(data15, data5, data3, audit)),
-        (Strategy.VWAP_PULLBACK_HOLD, lambda: vwap_pullback_hold(data15, data3, audit)),
-        (Strategy.INSIDE_BAR_BREAKOUT, lambda: inside_bar_breakout(data15, data5, audit)),
-        (Strategy.PRICE_STRENGTH_PULLBACK_RESUME,
-         lambda: price_strength_pullback_resume(data15, data5, data3, audit)),
-    )
-    for strategy, factory in full_specs:
-        if strategy in enabled and (item := factory()) is not None:
-            opportunities.append(item)
     return tuple(sorted(opportunities, key=lambda item: item.strength, reverse=True))
 
 

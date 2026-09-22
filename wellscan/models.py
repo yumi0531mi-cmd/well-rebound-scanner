@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 
-from config import ACTIVE_STRATEGY_VALUES, NARROW_TIME_STRATEGY_VALUES
+from config import ACTIVE_STRATEGY_VALUES, NARROW_TIME_STRATEGY_VALUES, STRATEGY_FRAME_REQUIREMENTS
 
 
 class Stage(StrEnum):
@@ -102,6 +102,8 @@ EXPERIMENTAL_STRATEGIES = (
 ALL_ENTRY_STRATEGIES = CORE_STRATEGIES + EXPANSION_STRATEGIES + EXPERIMENTAL_STRATEGIES
 if len(ALL_ENTRY_STRATEGIES) != 22 or len(set(ALL_ENTRY_STRATEGIES)) != 22:
     raise RuntimeError("진입 전략 전체 목록은 중복 없이 22개여야 합니다")
+if set(STRATEGY_FRAME_REQUIREMENTS) != {strategy.value for strategy in ALL_ENTRY_STRATEGIES}:
+    raise RuntimeError("config.py 기법별 시간축 설정이 22개 전략 원장과 다릅니다")
 ACTIVE_STRATEGIES = tuple(Strategy(value) for value in ACTIVE_STRATEGY_VALUES)
 NARROW_TIME_STRATEGIES = frozenset(Strategy(value) for value in NARROW_TIME_STRATEGY_VALUES)
 if ACTIVE_STRATEGIES != ESTABLISHED_ACTIVE_STRATEGIES + EXPERIMENTAL_STRATEGIES:

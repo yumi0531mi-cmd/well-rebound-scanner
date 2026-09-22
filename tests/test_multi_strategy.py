@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from config import STRATEGY_FRAME_REQUIREMENTS
 from wellscan.indicators import completed_resample
 from wellscan.models import (
     ACTIVE_STRATEGIES,
@@ -12,7 +13,7 @@ from wellscan.models import (
     EXPERIMENTAL_STRATEGIES,
     Strategy,
 )
-from wellscan.opportunities import classify, estimate_minutes
+from wellscan.opportunities import classify, enriched, estimate_minutes, strategy_frames_ready
 from wellscan.strengthening import strategy_diagnostic_profiles
 
 
@@ -44,6 +45,78 @@ def test_research_registry_covers_all_22_strategies_independently() -> None:
         strategy.value for strategy in ALL_ENTRY_STRATEGIES
     )
     assert all(len(profile.strategy_portfolio) == 1 for profile in profiles)
+
+
+def test_strategy_frame_registry_covers_all_22_without_shared_timeframe_gate() -> None:
+    assert set(STRATEGY_FRAME_REQUIREMENTS) == {strategy.value for strategy in ALL_ENTRY_STRATEGIES}
+    frames = {15: pd.DataFrame(index=range(0)), 5: pd.DataFrame(index=range(25)),
+              3: pd.DataFrame(index=range(25))}
+
+    assert strategy_frames_ready(Strategy.RANGE_REVERSAL, frames)
+    assert strategy_frames_ready(Strategy.OVERSOLD_REVERSAL, frames)
+    assert not strategy_frames_ready(Strategy.MOMENTUM_PULLBACK, frames)
+
+
+def test_three_minute_strategy_is_not_blocked_by_missing_five_or_fifteen_minute_frames() -> None:
+    frames = {15: pd.DataFrame(), 5: pd.DataFrame(), 3: pd.DataFrame(index=range(10))}
+
+    assert strategy_frames_ready(Strategy.LIQUIDITY_SWEEP_RECLAIM, frames)
+    assert not strategy_frames_ready(Strategy.PRICE_STRENGTH_PULLBACK_RESUME, frames)
+
+
+def test_three_minute_strategy_only_enriches_its_own_timeframe(monkeypatch) -> None:
+    called = []
+
+    def fake_enriched(frame, session):
+        called.append(frame.attrs["minutes"])
+        return enriched(frame, session)
+
+    def raw(minutes):
+        values = np.linspace(100, 101, 25)
+        frame = pd.DataFrame(
+            {"open": values, "high": values + .2, "low": values - .2,
+             "close": values + .1, "volume": np.full(25, 1000)},
+            index=pd.date_range("2026-08-20 09:03", periods=25, freq=f"{minutes}min"),
+        )
+        frame.attrs["minutes"] = minutes
+        return frame
+
+    monkeypatch.setattr("wellscan.opportunities.enriched", fake_enriched)
+    classify(
+        raw(15), raw(5), raw(3), 101.0, None,
+        active_strategies=(Strategy.LIQUIDITY_SWEEP_RECLAIM,),
+    )
+
+    assert called == [3]
+
+
+def test_range_reversal_can_form_without_an_unused_fifteen_minute_frame(monkeypatch) -> None:
+    def frame(minutes: int) -> pd.DataFrame:
+        close = np.linspace(100, 100.2, 25)
+        return pd.DataFrame(
+            {"open": close - .05, "high": close + .2, "low": close - .2,
+             "close": close, "volume": np.full(25, 1000)},
+            index=pd.date_range("2026-08-20 09:03", periods=25, freq=f"{minutes}min"),
+        )
+
+    monkeypatch.setattr("wellscan.opportunities.confirmed_box", lambda *_: (99.0, 110.0))
+    monkeypatch.setattr("wellscan.opportunities.confirmed_reversal", lambda *_: (100.1, 99.5))
+    monkeypatch.setattr("wellscan.opportunities._last_pivots", lambda *_: ([110.0], [99.5]))
+    monkeypatch.setattr("wellscan.opportunities._recent", lambda *_: True)
+
+    frame5, frame3 = frame(5), frame(3)
+    data5, data3 = enriched(frame5, None), enriched(frame3, None)
+    data5.loc[data5.index[-1], "stoch_k"] = 50.0
+    data5.loc[data5.index[-1], "stoch_d"] = 40.0
+
+    audit = {}
+    items = classify(
+        pd.DataFrame(), frame5, frame3, 100.0, None,
+        prepared=(pd.DataFrame(), data5, data3),
+        audit=audit, active_strategies=(Strategy.RANGE_REVERSAL,),
+    )
+
+    assert [item.strategy for item in items] == [Strategy.RANGE_REVERSAL], audit
 
 
 def rising_bars(count: int = 960) -> pd.DataFrame:
