@@ -1241,11 +1241,22 @@ with st.expander("처리 시간 실측 · 미충족 이유"):
     st.caption("조건 검사 목표 p95 500ms · API 수집/화면 표시 지연과 별개 · 실측 표본이 없으면 성능 판정 불가")
     st.write({stage.value: number for stage, number in counts.items()})
     rejected_reasons: dict[str, int] = {}
+    strategy_rejected_reasons: dict[str, int] = {}
     for _, item in results:
         if not item.final_buy:
             for reason in item.reasons:
                 rejected_reasons[reason] = rejected_reasons.get(reason, 0) + 1
+        opportunity_rejections = item.diagnostics.get("opportunity_rejections", {})
+        if isinstance(opportunity_rejections, dict):
+            for strategy, reasons in opportunity_rejections.items():
+                if not isinstance(reasons, (list, tuple)):
+                    continue
+                for reason in reasons:
+                    key = f"{strategy} · {reason}"
+                    strategy_rejected_reasons[key] = strategy_rejected_reasons.get(key, 0) + 1
     st.write(rejected_reasons)
+    st.caption("기법별 실제 미충족 조건 · 같은 후보에서 여러 조건이 함께 집계될 수 있습니다")
+    st.write(dict(sorted(strategy_rejected_reasons.items(), key=lambda item: item[1], reverse=True)))
 st.caption(
     f"후보풀 {len(total_pool)} · 모드 통과 {len(filtered)} · 내부 분석 {len(results)} · 표시 {len(visible)} · "
     f"현재 진입 조건 충족 {counts[Stage.FINAL_BUY]} · 진입대기 {counts[Stage.ENTRY_WAIT]} · 데이터수집 {counts[Stage.DATA_WAIT]}"

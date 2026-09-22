@@ -6,7 +6,12 @@ from datetime import UTC, datetime
 import numpy as np
 import pandas as pd
 
-from config import MAX_COMPLETED_BAR_AGE_SECONDS, STRUCTURAL_WINDOW_BARS, WARMUP_BARS
+from config import (
+    MAX_COMPLETED_BAR_AGE_SECONDS,
+    STRATEGY_FRAME_REQUIREMENTS,
+    STRUCTURAL_WINDOW_BARS,
+    WARMUP_BARS,
+)
 
 from .analysis_cache import AnalysisCache, analysis_key
 from .indicators import IndicatorCache, completed_resample, enriched, normalize_bars, pivot_points
@@ -401,7 +406,13 @@ def evaluate(
     completed_entry_confirmation = bool(primary and confirmation_close is not None and confirmation_close >= primary.entry)
     breakout = completed_entry_confirmation
     overheated = bool(latest3 is not None and (latest3.stoch_k >= 85 or signal_price > latest3.ema20 * 1.05))
-    missed = bool(latest3 is not None and rebound_high and signal_price > rebound_high + latest3.atr * 1.2)
+    # A generic oscillator reading cannot prove that an entry was missed.
+    # Only a formed strategy with its own trigger can become too extended.
+    missed = bool(
+        primary is not None
+        and latest3 is not None
+        and signal_price > primary.entry + latest3.atr * 1.2
+    )
     sequence_store = store or SequenceStore()
     cycle = sequence_store.load(symbol)
     active_plan = cycle.stage in {Stage.ENTRY_WAIT, Stage.FINAL_BUY} and cycle.entry_price is not None and cycle.entry_hard_stop is not None
@@ -422,7 +433,15 @@ def evaluate(
     shakeout = bool(latest3 is not None and risk_stop and latest3.low < risk_stop <= latest3.close)
     risk_state = RiskState.HARD_EXIT if hard_exit else RiskState.REAL_BREAKDOWN if two_close_breakdown else RiskState.SHAKEOUT if shakeout else RiskState.NORMAL
     countertrend_confirmed = bool(primary and primary.strategy in COUNTERTREND_STRATEGIES)
-    excluded = bool((trend_label == "하향" and not countertrend_confirmed) or two_close_breakdown or hard_exit)
+    requires_15m_trend = bool(
+        primary is not None
+        and 15 in STRATEGY_FRAME_REQUIREMENTS[primary.strategy.value]
+    )
+    excluded = bool(
+        (requires_15m_trend and trend_label == "하향" and not countertrend_confirmed)
+        or two_close_breakdown
+        or hard_exit
+    )
     sequence_ready = transition_ready or primary is not None
 
     state = cycle
@@ -448,7 +467,7 @@ def evaluate(
             vwap_recovery=vwap_recovery,
             setup_ready=primary is not None,
             breakout=breakout,
-            missed=missed or overheated,
+            missed=missed,
             excluded=excluded,
             exclusion_cooldown=False,
             hard_kill=cycle.hard_kill_date == risk_day(evaluated_at, session),
@@ -554,6 +573,7 @@ def evaluate(
             "completed_bar_at": completed_bar_at.isoformat() if completed_bar_at is not None else None,
             "entry_confirmation_timeframe": "completed_1m",
             "overheated": overheated,
+            "requires_15m_trend": requires_15m_trend,
             "countertrend_confirmation": countertrend_confirmed,
             "cycle_breakdowns_today": cycle.breakdown_count,
             "cooldown_until": cycle.cooldown_until,

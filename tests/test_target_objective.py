@@ -4,6 +4,7 @@ import pandas as pd
 import pytest
 from test_policy import costs, signal
 
+from config import STRATEGY_FRAME_REQUIREMENTS
 from wellscan.backtest import _build_report
 from wellscan.models import Candidate, Market, Strategy
 from wellscan.opportunities import _levels
@@ -165,7 +166,7 @@ def test_waiting_plan_failure_is_not_a_daily_realized_stop(monkeypatch, tmp_path
     assert state.entry_price is None
 
 
-def test_downtrend_without_plan_does_not_create_future_cooldown(monkeypatch, tmp_path):
+def test_downtrend_without_strategy_setup_is_not_a_global_exclusion(monkeypatch, tmp_path):
     from test_audit_regressions import frame
 
     from wellscan.engine import evaluate
@@ -176,8 +177,28 @@ def test_downtrend_without_plan_does_not_create_future_cooldown(monkeypatch, tmp
     monkeypatch.setattr("wellscan.engine.trend_description", lambda *a, **k: ("하향", None))
     store = SequenceStore(tmp_path, memory_only=True)
     result = evaluate("WATCH", frame(), 100, store)
-    assert result.stage == Stage.EXCLUDED
+    assert result.stage != Stage.EXCLUDED
     assert store.load("WATCH").cooldown_until == ""
+
+
+def test_shared_overheat_does_not_mark_missed_without_formed_strategy(monkeypatch, tmp_path):
+    from test_audit_regressions import frame
+
+    from wellscan.engine import evaluate
+    from wellscan.models import Stage
+    from wellscan.sequence import SequenceStore
+
+    source = frame()
+    index = source.index[-90:]
+    closes = [100 + number * 0.4 for number in range(len(index))]
+    source.loc[index, "open"] = [close - 0.2 for close in closes]
+    source.loc[index, "high"] = [close + 0.4 for close in closes]
+    source.loc[index, "low"] = [close - 0.4 for close in closes]
+    source.loc[index, "close"] = closes
+    monkeypatch.setattr("wellscan.engine.classify", lambda *a, **k: ())
+    result = evaluate("HOT-WATCH", source, closes[-1], SequenceStore(tmp_path, memory_only=True))
+    assert result.diagnostics["overheated"] is True
+    assert result.stage != Stage.MISSED
 
 
 @pytest.mark.parametrize("strategy,excluded", [
@@ -185,8 +206,10 @@ def test_downtrend_without_plan_does_not_create_future_cooldown(monkeypatch, tmp
     (Strategy.OVERSOLD_REVERSAL, False),
     (Strategy.RANGE_REVERSAL, False),
     (Strategy.LIQUIDITY_SWEEP_RECLAIM, False),
-    (Strategy.VWAP_RECLAIM, True),
-    (Strategy.OPENING_RANGE_RETEST, True),
+    (Strategy.VWAP_RECLAIM, False),
+    (Strategy.OPENING_RANGE_RETEST, False),
+    (Strategy.PRIOR_HIGH_BREAKOUT_RETEST, False),
+    (Strategy.PRICE_STRENGTH_PULLBACK_RESUME, True),
 ])
 def test_downtrend_gate_respects_independent_reversal_strategy(monkeypatch, tmp_path, strategy, excluded):
     from test_audit_regressions import frame
@@ -200,6 +223,13 @@ def test_downtrend_gate_respects_independent_reversal_strategy(monkeypatch, tmp_
     monkeypatch.setattr("wellscan.engine.classify", lambda *a, **k: (item,))
     monkeypatch.setattr("wellscan.engine.trend_description", lambda *a, **k: ("하향", None))
     source = frame().assign(open=100, high=101, low=99, close=100)
-    result = evaluate("DOWN", source, 100, SequenceStore(tmp_path, memory_only=True))
+    result = evaluate(
+        "DOWN",
+        source,
+        100,
+        SequenceStore(tmp_path, memory_only=True),
+        strategy_portfolio=(strategy,),
+        classification_portfolio=(strategy,),
+    )
     assert (result.stage == Stage.EXCLUDED) is excluded
-    assert result.diagnostics["countertrend_confirmation"] is not excluded
+    assert result.diagnostics["requires_15m_trend"] is (15 in STRATEGY_FRAME_REQUIREMENTS[strategy.value])
