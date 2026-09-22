@@ -40,7 +40,7 @@ from .engine import MAX_COMPLETED_BAR_AGE_SECONDS, evaluate, revalidate_live
 from .history import HistoryCache
 from .indicators import normalize_bars
 from .kis import KISClient, KISDeadlineError, KISError
-from .models import Candidate, Market, ScanResult, Stage, TradingSession
+from .models import ALL_ENTRY_STRATEGIES, Candidate, Market, ScanResult, Stage, TradingSession
 from .policy import session_day
 from .sequence import SequenceStore
 from .sessions import (
@@ -873,6 +873,7 @@ class ScannerService:
                     session=status.session,
                     require_fresh=True,
                     policy=policy,
+                    classification_portfolio=ALL_ENTRY_STRATEGIES,
                 )
                 self._counters.candidates_evaluated += 1
                 published_candidate = candidate

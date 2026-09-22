@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-09-22T20:26:19+09:00",
+  "updated_at": "2026-09-22T20:29:45+09:00",
   "current_step": 3,
   "completed_steps": [
     "기존 저장소와 인계 보고서 확인",
@@ -116,7 +116,9 @@
     "커밋 8b806f1을 origin/main에 푸시하고 Render 운영 앱 0.10.7-entry-gate-diagnostics·엔진 multi-strategy-entry-gates-v2·health 200 확인",
     "실전 진입 포트폴리오 6개는 유지하면서 모든 실제 KIS 후보를 22개 기법으로 그림자 평가해 형성 수와 개별 실패조건을 공개하도록 구현",
     "비활성 16개 그림자 형성이 ENTRY_WAIT·진입신호로 승격되지 않는 회귀검사를 추가하고 보류 데이터 제외 운영 회귀 458개·Ruff·compileall·uv pip check 통과",
-    "커밋 51063ed를 origin/main에 푸시하고 Render 운영 앱 0.10.8-live-shadow-22·엔진 multi-strategy-live-shadow-22·health 200 확인"
+    "커밋 51063ed를 origin/main에 푸시하고 Render 운영 앱 0.10.8-live-shadow-22·엔진 multi-strategy-live-shadow-22·health 200 확인",
+    "미국 프리장 실제 KIS 후보 21개 운영 점검에서 웹 직접평가와 달리 상시 데몬이 22개 그림자 포트폴리오를 전달하지 않아 활성 6개 실패조건만 집계되는 경로 누락 확인",
+    "상시 데몬 평가에도 ALL_ENTRY_STRATEGIES 그림자 분류를 전달하고 비활성 전략 실전승격 방지 유지; 보류 데이터 제외 운영 회귀 458개·Ruff·compileall·uv pip check 통과"
   ],
   "files": {
     "config.py": "created; qualification/risk/cost/data/model and scanner deadline-margin settings centralized",
@@ -178,6 +180,7 @@
     ,"public_strategy_rejection_diagnostics_added": true
     ,"latest_safe_operational_test_count": 458
     ,"live_shadow_22_strategy_diagnostics_implemented": true
+    ,"daemon_shadow_22_strategy_diagnostics_implemented": true
   },
   "forward_live_60_session_audit_dates_if_deployed_2026_09_15": {
     "us_60th_session": "2026-12-08",

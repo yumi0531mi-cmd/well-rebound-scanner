@@ -9,7 +9,7 @@ import pandas as pd
 
 from wellscan.history import HistoryCache
 from wellscan.kis import KISDeadlineError, KISError
-from wellscan.models import Candidate, Market, Stage, TradingSession
+from wellscan.models import ALL_ENTRY_STRATEGIES, Candidate, Market, Stage, TradingSession
 from wellscan.policy import estimated_costs
 from wellscan.scanner_service import (
     ScannerService,
@@ -249,6 +249,7 @@ def test_cycle_uses_last_completed_close_and_common_engine(tmp_path):
     assert observed["revalidated_price"] == 101.25
     assert observed["kwargs"]["require_fresh"] is True
     assert observed["kwargs"]["session"] == TradingSession.KR_REGULAR
+    assert observed["kwargs"]["classification_portfolio"] == ALL_ENTRY_STRATEGIES
     assert client.price_calls == [("KR", "005930")]
     assert len(validation.recorded) == 1
     assert service.snapshot().counters["final_signals_recorded"] == 1
