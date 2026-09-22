@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-09-22T15:34:01+09:00",
+  "updated_at": "2026-09-22T15:37:50+09:00",
   "current_step": 3,
   "completed_steps": [
     "기존 저장소와 인계 보고서 확인",
@@ -113,7 +113,9 @@
     "실제 운영 화면에서 오전 후보 25개 중 전략 형성 0·공통 과열 기반 타점지남 6개와 기법별 실패조건 은폐를 확인",
     "전략 미형성 후보를 공통 과열값만으로 타점지남 처리하던 결함과 15분 비사용 기법에 남은 하락추세 공통 관문을 제거",
     "공개 운영 진단에 기법별 실제 미충족 조건 집계를 추가하고 보류 데이터 테스트 제외 운영 회귀 457개·Ruff·compileall·pip check 통과",
-    "커밋 8b806f1을 origin/main에 푸시하고 Render 운영 앱 0.10.7-entry-gate-diagnostics·엔진 multi-strategy-entry-gates-v2·health 200 확인"
+    "커밋 8b806f1을 origin/main에 푸시하고 Render 운영 앱 0.10.7-entry-gate-diagnostics·엔진 multi-strategy-entry-gates-v2·health 200 확인",
+    "실전 진입 포트폴리오 6개는 유지하면서 모든 실제 KIS 후보를 22개 기법으로 그림자 평가해 형성 수와 개별 실패조건을 공개하도록 구현",
+    "비활성 16개 그림자 형성이 ENTRY_WAIT·진입신호로 승격되지 않는 회귀검사를 추가하고 보류 데이터 제외 운영 회귀 458개·Ruff·compileall·uv pip check 통과"
   ],
   "files": {
     "config.py": "created; qualification/risk/cost/data/model and scanner deadline-margin settings centralized",
@@ -126,7 +128,7 @@
     "wellscan/probability.py": "causal factors, immutable signal snapshots, resolved-before-signal live estimator implemented",
     "wellscan/validation.py": "signal-time features and unqualified probability/EV persisted",
     "wellscan/engine.py": "strategy-specific timeframe gates; generic overheat cannot create MISSED; 15m downtrend gate applies only to strategies declaring 15m",
-    "app.py": "point-in-time backtest, 22-strategy independent KIS audit, bottleneck tables, live exact-minute access evidence, and public per-strategy rejection counts",
+    "app.py": "point-in-time backtest, 22-strategy independent KIS audit, bottleneck tables, live exact-minute access evidence, and public 22-strategy shadow formation/rejection counts",
     "wellscan/scanner_service.py": "900/3000 cache contract, rotation, deadlines, freshness pruning, candidate recovery, and durable live access coverage",
     "wellscan/realtime.py": "bounded per-record trailing schema extensions accepted; malformed boundaries rejected",
     "wellscan/kis.py": "thread-local scanner deadline bounds HTTP timeout and retries",
@@ -173,7 +175,8 @@
     ,"false_shared_overheat_missed_fixed": true
     ,"non_15m_strategy_downtrend_gate_fixed": true
     ,"public_strategy_rejection_diagnostics_added": true
-    ,"latest_safe_operational_test_count": 457
+    ,"latest_safe_operational_test_count": 458
+    ,"live_shadow_22_strategy_diagnostics_implemented": true
   },
   "forward_live_60_session_audit_dates_if_deployed_2026_09_15": {
     "us_60th_session": "2026-12-08",

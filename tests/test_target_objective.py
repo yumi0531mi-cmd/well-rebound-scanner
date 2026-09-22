@@ -201,6 +201,30 @@ def test_shared_overheat_does_not_mark_missed_without_formed_strategy(monkeypatc
     assert result.stage != Stage.MISSED
 
 
+def test_shadow_classification_reports_inactive_strategy_without_enabling_it(monkeypatch, tmp_path):
+    from test_audit_regressions import frame
+
+    from wellscan.engine import evaluate
+    from wellscan.models import Stage
+    from wellscan.opportunities import Opportunity
+    from wellscan.sequence import SequenceStore
+
+    item = Opportunity(Strategy.BREAKOUT, 100, 100, 98, 105, 107, 99, "shadow", {"mock": True})
+    monkeypatch.setattr("wellscan.engine.classify", lambda *a, **k: (item,))
+    result = evaluate(
+        "SHADOW",
+        frame(),
+        100,
+        SequenceStore(tmp_path, memory_only=True),
+        strategy_portfolio=(Strategy.RANGE_REVERSAL,),
+        classification_portfolio=(Strategy.RANGE_REVERSAL, Strategy.BREAKOUT),
+    )
+    assert result.matched_strategies == ()
+    assert result.stage not in {Stage.ENTRY_WAIT, Stage.FINAL_BUY}
+    assert result.diagnostics["classification_matches"] == (Strategy.BREAKOUT.value,)
+    assert result.diagnostics["classification_strategy_count"] == 2
+
+
 @pytest.mark.parametrize("strategy,excluded", [
     (Strategy.TREND_CONTINUATION, True),
     (Strategy.OVERSOLD_REVERSAL, False),

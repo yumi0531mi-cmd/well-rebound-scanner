@@ -842,6 +842,7 @@ def structure_results(
                 session=candidate.session,
                 require_fresh=True,
                 policy=policy,
+                classification_portfolio=ALL_ENTRY_STRATEGIES,
             )
             # Structural signals are fixed by the common engine on completed
             # bars. Only this tick-level result is published and persisted.
@@ -1242,11 +1243,16 @@ with st.expander("처리 시간 실측 · 미충족 이유"):
     st.write({stage.value: number for stage, number in counts.items()})
     rejected_reasons: dict[str, int] = {}
     strategy_rejected_reasons: dict[str, int] = {}
+    strategy_formed_counts: dict[str, int] = {}
     for _, item in results:
         if not item.final_buy:
             for reason in item.reasons:
                 rejected_reasons[reason] = rejected_reasons.get(reason, 0) + 1
-        opportunity_rejections = item.diagnostics.get("opportunity_rejections", {})
+        classification_matches = item.diagnostics.get("classification_matches", ())
+        if isinstance(classification_matches, (list, tuple)):
+            for strategy in classification_matches:
+                strategy_formed_counts[str(strategy)] = strategy_formed_counts.get(str(strategy), 0) + 1
+        opportunity_rejections = item.diagnostics.get("classification_rejections", {})
         if isinstance(opportunity_rejections, dict):
             for strategy, reasons in opportunity_rejections.items():
                 if not isinstance(reasons, (list, tuple)):
@@ -1255,7 +1261,9 @@ with st.expander("처리 시간 실측 · 미충족 이유"):
                     key = f"{strategy} · {reason}"
                     strategy_rejected_reasons[key] = strategy_rejected_reasons.get(key, 0) + 1
     st.write(rejected_reasons)
-    st.caption("기법별 실제 미충족 조건 · 같은 후보에서 여러 조건이 함께 집계될 수 있습니다")
+    st.caption("22개 기법 그림자 평가 형성 수 · 실전 활성화나 매수 신호를 뜻하지 않습니다")
+    st.write(dict(sorted(strategy_formed_counts.items(), key=lambda item: item[1], reverse=True)))
+    st.caption("22개 기법별 실제 미충족 조건 · 같은 후보에서 여러 조건이 함께 집계될 수 있습니다")
     st.write(dict(sorted(strategy_rejected_reasons.items(), key=lambda item: item[1], reverse=True)))
 st.caption(
     f"후보풀 {len(total_pool)} · 모드 통과 {len(filtered)} · 내부 분석 {len(results)} · 표시 {len(visible)} · "

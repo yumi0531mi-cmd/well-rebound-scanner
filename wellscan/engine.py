@@ -580,9 +580,14 @@ def evaluate(
             "hard_kill_date": cycle.hard_kill_date,
             "level_status": "confirmed" if stage == Stage.FINAL_BUY else "watch" if entry else "pending",
             "matched_strategy_count": len(opportunities),
+            "classification_strategy_count": len(classified_strategies),
+            "classification_matches": tuple(item.strategy.value for item in structure.opportunities),
             "opportunity_rejections": {
                 strategy: reasons for strategy, reasons in structure.opportunity_rejections
                 if Strategy(strategy) in selected_strategies
+            },
+            "classification_rejections": {
+                strategy: reasons for strategy, reasons in structure.opportunity_rejections
             },
             "strengthening_profile": strengthening_profile.profile_id if strengthening_profile is not None else "baseline",
             "strengthening_rejections": str(strengthening_audit) if strengthening_audit else "",
