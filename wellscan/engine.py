@@ -110,6 +110,73 @@ def valid_long_targets(entry: float | None, target1: float | None, target2: floa
     return bool(all(value is not None and np.isfinite(value) for value in (entry, target1, target2)) and 0 < entry < target1 < target2)
 
 
+def _classification_assessment(
+    item: Opportunity,
+    policy: TradingPolicy | None,
+    completed_close: float | None,
+    atr: float | None,
+    *,
+    active: bool,
+) -> dict[str, object]:
+    """Explain every post-formation gate without promoting shadow strategies."""
+    product_valid = bool(policy is not None and policy.product in {"STOCK", "ETF"})
+    assessment: dict[str, object] = {
+        "active": active,
+        "product_valid": product_valid,
+        "planned_net_rr": None,
+        "planned_cost_pass": False,
+        "fill_band_pass": False,
+        "current_net_rr": None,
+        "current_cost_pass": False,
+        "shadow_ready": False,
+        "policy_ready": False,
+    }
+    if policy is None or policy.costs is None:
+        assessment["block_reason"] = "거래 비용 미확인"
+        return assessment
+    try:
+        structural_stop = item.structural_stop if item.structural_stop is not None else item.hard_stop
+        planned_stop = capped_stop(item.entry, structural_stop)
+        planned_loss = -policy.costs.net_return(item.entry, planned_stop)
+        planned_reward = policy.costs.net_return(item.entry, item.target1)
+        planned_rr = planned_reward / planned_loss if planned_loss > 0 else None
+        planned_pass = bool(planned_rr is not None and planned_rr >= policy.minimum_rr)
+        assessment["planned_net_rr"] = planned_rr
+        assessment["planned_cost_pass"] = planned_pass
+        fill_band = bool(
+            completed_close is not None and atr is not None and np.isfinite(atr) and atr > 0
+            and item.entry <= completed_close <= item.entry + atr * ENTRY_MAX_PREMIUM_ATR
+        )
+        assessment["fill_band_pass"] = fill_band
+        if completed_close is not None and completed_close > 0:
+            current_stop = capped_stop(completed_close, structural_stop)
+            current_loss = -policy.costs.net_return(completed_close, current_stop)
+            current_reward = policy.costs.net_return(completed_close, item.target1)
+            current_rr = current_reward / current_loss if current_loss > 0 else None
+            current_pass = bool(current_rr is not None and current_rr >= policy.minimum_rr)
+            assessment["current_net_rr"] = current_rr
+            assessment["current_cost_pass"] = current_pass
+        assessment["shadow_ready"] = bool(
+            product_valid and planned_pass and fill_band and assessment["current_cost_pass"]
+        )
+        assessment["policy_ready"] = bool(active and assessment["shadow_ready"])
+        blocks = []
+        if not active:
+            blocks.append("운영 비활성 기법")
+        if not product_valid:
+            blocks.append("상품 분류 미확인")
+        if not planned_pass:
+            blocks.append("계획 순손익비 미달")
+        if not fill_band:
+            blocks.append("현재 완료봉이 체결구간 밖")
+        if fill_band and not assessment["current_cost_pass"]:
+            blocks.append("현재가 순손익비 미달")
+        assessment["block_reason"] = " | ".join(blocks)
+    except ValueError as exc:
+        assessment["block_reason"] = str(exc)
+    return assessment
+
+
 def _select_opportunity(opportunities: tuple[Opportunity, ...], policy: TradingPolicy | None,
                         completed_close: float | None, _live_price_ignored: float, atr: float | None,
                         allowed_strategies: tuple[Strategy, ...] = ACTIVE_STRATEGIES) -> Opportunity | None:
@@ -384,6 +451,7 @@ def evaluate(
     data3 = structure.recent3
     latest3 = data3.iloc[-1] if not data3.empty else None
     confirmation_close = float(bars.close.iloc[-1]) if not bars.empty else None
+    current_atr = float(latest3.atr) if latest3 is not None else None
     opportunities = tuple(item for item in structure.opportunities if item.strategy in selected_strategies)
     strengthening_audit = {}
     if strengthening_profile is not None:
@@ -391,8 +459,15 @@ def evaluate(
                                              audit=strengthening_audit)
     primary = _select_opportunity(opportunities, policy,
                                   confirmation_close, signal_price,
-                                  float(latest3.atr) if latest3 is not None else None,
+                                  current_atr,
                                   selected_strategies)
+    classification_assessments = {
+        item.strategy.value: _classification_assessment(
+            item, policy, confirmation_close, current_atr,
+            active=item.strategy in selected_strategies,
+        )
+        for item in structure.opportunities
+    }
     strategy = primary.strategy if primary else legacy_strategy
     trend_label, structural_swing = structure.trend_info
     if structural_swing is not None:
@@ -582,6 +657,7 @@ def evaluate(
             "matched_strategy_count": len(opportunities),
             "classification_strategy_count": len(classified_strategies),
             "classification_matches": tuple(item.strategy.value for item in structure.opportunities),
+            "classification_assessments": classification_assessments,
             "opportunity_rejections": {
                 strategy: reasons for strategy, reasons in structure.opportunity_rejections
                 if Strategy(strategy) in selected_strategies

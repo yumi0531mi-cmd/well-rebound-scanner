@@ -50,7 +50,7 @@ from wellscan.quotes import QuoteBook
 from wellscan.realtime import RealtimeHub
 from wellscan.scanner_service import daemon_results_snapshot, daemon_service_status, shared_runtime_components
 from wellscan.sequence import SequenceStore
-from wellscan.sessions import ENABLED_SESSIONS, session_exchange, session_status
+from wellscan.sessions import ENABLED_SESSIONS, KST, session_exchange, session_status
 from wellscan.universe_history import PointInTimeUniverse
 from wellscan.validation import SignalCase, ValidationStore
 from wellscan.web_status import (
@@ -417,12 +417,20 @@ def utc_timestamp_text(value: datetime | None, unavailable: str = "시각 미수
         return unavailable
     if value.tzinfo is None:
         return f"{value.isoformat(timespec='seconds')} (시간대 미확인)"
-    return value.astimezone(UTC).strftime("%H:%M:%S UTC")
+    utc_text = value.astimezone(UTC).strftime("%m-%d %H:%M:%S UTC")
+    kst_text = value.astimezone(KST).strftime("%m-%d %H:%M:%S KST")
+    return f"{utc_text} · 한국 {kst_text}"
 
 
 def diagnostic_timestamp_text(value: object, unavailable: str = "엔진 미제공") -> str:
     """Display the engine-supplied completed-bar marker without deriving it in the UI."""
-    return unavailable if value is None or value == "" else str(value)
+    if value is None or value == "":
+        return unavailable
+    try:
+        instant = value if isinstance(value, datetime) else datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return str(value)
+    return utc_timestamp_text(instant, unavailable)
 
 
 def eta_minutes_text(value: object, unavailable: str = "기록 없음") -> str:
@@ -601,6 +609,14 @@ def render_result(candidate: Candidate, result: ScanResult, *, actionable: bool 
             result = revalidate_live(result, quote[0], datetime.now(UTC))
             TIMINGS.record("수신 후 조건 검사 CPU", perf_counter() - check_started)
     levels = result.levels
+    shadow_assessments = result.diagnostics.get("classification_assessments", {})
+    shadow_assessments = shadow_assessments if isinstance(shadow_assessments, dict) else {}
+    shadow_text = " · ".join(
+        f"{strategy}({('비용통과' if details.get('planned_cost_pass') else '비용미달')}"
+        f"/{('체결구간' if details.get('fill_band_pass') else '체결대기')})"
+        for strategy, details in shadow_assessments.items()
+        if isinstance(details, dict)
+    )
     if actionable:
         tile_class = "buy" if result.final_buy and quote_available else "waiting"
         engine_status_text = _stage_text(result.stage)
@@ -646,6 +662,8 @@ def render_result(candidate: Candidate, result: ScanResult, *, actionable: bool 
             f"{quote[3]} · 구조 무효 {structural_text} · "
             f"최대 Hard Stop {price_text(levels.hard_stop, '하드스탑 미산출')}"
         )
+        if shadow_text:
+            st.caption("22개 기법 형성·정책 상태: " + shadow_text)
         return
     stage_class = "good" if result.stage == Stage.FINAL_BUY else "bad" if result.stage in {Stage.EXCLUDED, Stage.MISSED} else "wait"
     with st.container(border=True):
@@ -659,7 +677,7 @@ def render_result(candidate: Candidate, result: ScanResult, *, actionable: bool 
         summary[0].metric("1차 순손익비", price_text(result.diagnostics.get("net_rr_target1")))
         summary[1].metric("추세", result.trend_label)
         summary[2].metric("Swing 폭", price_text(result.net_swing_pct) + "%" if result.net_swing_pct is not None else "미확정")
-        summary[3].metric("해당 기법", f"{len(result.matched_strategies)}개")
+        summary[3].metric("활성 기법", f"{len(result.matched_strategies)}개")
         levels = result.levels
         level_columns = st.columns(4)
         entry_label = "확정 진입가" if result.stage == Stage.FINAL_BUY else "관찰 진입가"
@@ -681,6 +699,8 @@ def render_result(candidate: Candidate, result: ScanResult, *, actionable: bool 
         st.caption(f"산출근거 {levels.basis} · 예상시간은 해당 방향 흐름이 유지될 때만 표시되며 보장값이 아님")
         if result.matched_strategies:
             st.caption("해당 매매기법: " + " · ".join(item.value for item in result.matched_strategies))
+        if shadow_text:
+            st.caption("22개 기법 형성·정책 상태: " + shadow_text)
         with st.expander("단계 조건·근거"):
             for name, passed in result.conditions.items():
                 st.write(f"{'✅' if passed else '⬜'} {name}")
@@ -1081,7 +1101,7 @@ if use_daemon_feed:
     daemon_snapshot = snapshot_from_daemon(market, status.session)
     scan_state = SnapshotState(snapshot=daemon_snapshot, running=daemon_snapshot is None, error=None)
     st.sidebar.success("상시 스캐너 실행 중")
-    cycle_at = service_status.last_cycle_started_at or "첫 실행 대기"
+    cycle_at = diagnostic_timestamp_text(service_status.last_cycle_started_at, "첫 실행 대기")
     elapsed = (
         f"{service_status.last_cycle_elapsed_seconds:.2f}초"
         if service_status.last_cycle_elapsed_seconds is not None
@@ -1166,7 +1186,10 @@ if use_daemon_feed:
     if realtime_candidates:
         realtime().configure(realtime_candidates)
     daemon_feed_marker = daemon_session_updated_at(status.session)
-    st.caption(f"상시 공통엔진 결과 갱신 {daemon_feed_marker or '첫 결과 대기'}")
+    st.caption(
+        "상시 공통엔진 결과 갱신 "
+        + diagnostic_timestamp_text(daemon_feed_marker, "첫 결과 대기")
+    )
 
     @st.fragment(run_every=2)
     def poll_daemon_snapshot() -> None:
@@ -1231,11 +1254,37 @@ stage_priority = {
     Stage.MISSED: 1,
     Stage.EXCLUDED: 0,
 }
-ordered = sorted(results, key=lambda item: (stage_priority[item[1].stage], item[1].score), reverse=True)
+def shadow_priority(result: ScanResult) -> tuple[int, int, int]:
+    assessments = result.diagnostics.get("classification_assessments", {})
+    if not isinstance(assessments, dict):
+        return 0, 0, 0
+    rows = [value for value in assessments.values() if isinstance(value, dict)]
+    return (
+        sum(bool(row.get("shadow_ready")) for row in rows),
+        sum(bool(row.get("planned_cost_pass")) for row in rows),
+        len(rows),
+    )
+
+
+ordered = sorted(
+    results,
+    key=lambda item: (stage_priority[item[1].stage], *shadow_priority(item[1]), item[1].score),
+    reverse=True,
+)
 final_buy_results = [item for item in ordered if item[1].stage == Stage.FINAL_BUY]
 entry_wait_results = [item for item in ordered if item[1].stage == Stage.ENTRY_WAIT]
 watch_results = [item for item in ordered if item[1].stage not in {Stage.FINAL_BUY, Stage.ENTRY_WAIT}][:display_count]
 visible = final_buy_results + entry_wait_results + watch_results
+shadow_formed_results = [
+    (candidate, result)
+    for candidate, result in ordered
+    if shadow_priority(result)[2] > 0
+]
+shadow_ready_results = [
+    (candidate, result)
+    for candidate, result in shadow_formed_results
+    if shadow_priority(result)[0] > 0
+]
 counts = {stage: sum(result.stage == stage for _, result in results) for stage in Stage}
 with st.expander("처리 시간 실측 · 미충족 이유"):
     st.json(TIMINGS.summary())
@@ -1244,7 +1293,11 @@ with st.expander("처리 시간 실측 · 미충족 이유"):
     rejected_reasons: dict[str, int] = {}
     strategy_rejected_reasons: dict[str, int] = {}
     strategy_formed_counts: dict[str, int] = {}
-    for _, item in results:
+    strategy_cost_pass_counts: dict[str, int] = {}
+    strategy_fill_band_counts: dict[str, int] = {}
+    strategy_shadow_ready_counts: dict[str, int] = {}
+    shadow_rows: list[dict[str, object]] = []
+    for candidate, item in results:
         if not item.final_buy:
             for reason in item.reasons:
                 rejected_reasons[reason] = rejected_reasons.get(reason, 0) + 1
@@ -1252,6 +1305,29 @@ with st.expander("처리 시간 실측 · 미충족 이유"):
         if isinstance(classification_matches, (list, tuple)):
             for strategy in classification_matches:
                 strategy_formed_counts[str(strategy)] = strategy_formed_counts.get(str(strategy), 0) + 1
+        assessments = item.diagnostics.get("classification_assessments", {})
+        if isinstance(assessments, dict):
+            for strategy, details in assessments.items():
+                if not isinstance(details, dict):
+                    continue
+                if details.get("planned_cost_pass"):
+                    strategy_cost_pass_counts[str(strategy)] = strategy_cost_pass_counts.get(str(strategy), 0) + 1
+                if details.get("fill_band_pass"):
+                    strategy_fill_band_counts[str(strategy)] = strategy_fill_band_counts.get(str(strategy), 0) + 1
+                if details.get("shadow_ready"):
+                    strategy_shadow_ready_counts[str(strategy)] = strategy_shadow_ready_counts.get(str(strategy), 0) + 1
+                shadow_rows.append({
+                    "종목": f"{candidate.symbol} · {candidate.name}",
+                    "기법": str(strategy),
+                    "운영활성": bool(details.get("active")),
+                    "상품확인": bool(details.get("product_valid")),
+                    "계획 순손익비": details.get("planned_net_rr"),
+                    "비용통과": bool(details.get("planned_cost_pass")),
+                    "체결구간": bool(details.get("fill_band_pass")),
+                    "현재가 비용통과": bool(details.get("current_cost_pass")),
+                    "그림자 진입준비": bool(details.get("shadow_ready")),
+                    "차단원인": details.get("block_reason", ""),
+                })
         opportunity_rejections = item.diagnostics.get("classification_rejections", {})
         if isinstance(opportunity_rejections, dict):
             for strategy, reasons in opportunity_rejections.items():
@@ -1263,6 +1339,14 @@ with st.expander("처리 시간 실측 · 미충족 이유"):
     st.write(rejected_reasons)
     st.caption("22개 기법 그림자 평가 형성 수 · 실전 활성화나 매수 신호를 뜻하지 않습니다")
     st.write(dict(sorted(strategy_formed_counts.items(), key=lambda item: item[1], reverse=True)))
+    st.caption("형성 뒤 단계별 통과 수 · 비용 0.43%/세션별 추정비용과 순손익비 1.0 기준 유지")
+    st.write({
+        "비용 통과": dict(sorted(strategy_cost_pass_counts.items(), key=lambda item: item[1], reverse=True)),
+        "현재 체결구간": dict(sorted(strategy_fill_band_counts.items(), key=lambda item: item[1], reverse=True)),
+        "상품·비용·체결 전부 통과": dict(sorted(strategy_shadow_ready_counts.items(), key=lambda item: item[1], reverse=True)),
+    })
+    if shadow_rows:
+        st.dataframe(shadow_rows, hide_index=True, use_container_width=True)
     st.caption("22개 기법별 실제 미충족 조건 · 같은 후보에서 여러 조건이 함께 집계될 수 있습니다")
     st.write(dict(sorted(strategy_rejected_reasons.items(), key=lambda item: item[1], reverse=True)))
 st.caption(
@@ -1280,8 +1364,18 @@ def live_cards() -> None:
         st.rerun()
     buy_names = " · ".join(candidate.name for candidate, _ in final_buy_results) or "없음"
     wait_names = " · ".join(candidate.name for candidate, _ in entry_wait_results) or "없음"
+    shadow_names = " · ".join(candidate.name for candidate, _ in shadow_formed_results) or "없음"
+    shadow_ready_names = " · ".join(candidate.name for candidate, _ in shadow_ready_results) or "없음"
     st.markdown(f"**직전 구조 계산의 진입신호 (현재 상태는 각 카드 확인):** {html.escape(buy_names)}")
     st.markdown(f"**진입 대기:** {html.escape(wait_names)}")
+    st.markdown(
+        "**22개 전체 기법 형성 후보(운영 비활성 포함·매수신호 아님):** "
+        + html.escape(shadow_names)
+    )
+    st.markdown(
+        "**상품·비용·현재 체결구간까지 통과한 그림자 후보(승률 검증 전·매수신호 아님):** "
+        + html.escape(shadow_ready_names)
+    )
     if final_buy_results:
         st.subheader("진입신호 발생 기록 · 현재 상태 재확인")
         for candidate, result in final_buy_results:

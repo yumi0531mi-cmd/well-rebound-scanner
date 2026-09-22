@@ -223,6 +223,7 @@ def test_running_daemon_feed_prevents_a_second_browser_heavy_scan(monkeypatch):
         rendered = "\n".join(item.value for item in app.markdown)
         for label in ("적용기법", "현재가 미수신", "진입가", "구조 STOP", "최대 Hard Stop", "T1", "T2", "진입 ETA", "구조 기준 완료봉", "현재가 수신"):
             assert label in rendered
+        assert "한국" in rendered
         assert "지금 매수 금지" in rendered
         assert any("6개 활성 매매기법 전체의 실제 ENTRY를 합산" in item.value for item in app.caption)
         assert any("아직 기록 없음" in item.value for item in app.info)

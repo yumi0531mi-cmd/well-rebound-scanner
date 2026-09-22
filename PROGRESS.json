@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-09-22T20:29:45+09:00",
+  "updated_at": "2026-09-23T01:38:47+09:00",
   "current_step": 3,
   "completed_steps": [
     "기존 저장소와 인계 보고서 확인",
@@ -118,7 +118,13 @@
     "비활성 16개 그림자 형성이 ENTRY_WAIT·진입신호로 승격되지 않는 회귀검사를 추가하고 보류 데이터 제외 운영 회귀 458개·Ruff·compileall·uv pip check 통과",
     "커밋 51063ed를 origin/main에 푸시하고 Render 운영 앱 0.10.8-live-shadow-22·엔진 multi-strategy-live-shadow-22·health 200 확인",
     "미국 프리장 실제 KIS 후보 21개 운영 점검에서 웹 직접평가와 달리 상시 데몬이 22개 그림자 포트폴리오를 전달하지 않아 활성 6개 실패조건만 집계되는 경로 누락 확인",
-    "상시 데몬 평가에도 ALL_ENTRY_STRATEGIES 그림자 분류를 전달하고 비활성 전략 실전승격 방지 유지; 보류 데이터 제외 운영 회귀 458개·Ruff·compileall·uv pip check 통과"
+    "상시 데몬 평가에도 ALL_ENTRY_STRATEGIES 그림자 분류를 전달하고 비활성 전략 실전승격 방지 유지; 보류 데이터 제외 운영 회귀 458개·Ruff·compileall·uv pip check 통과",
+    "커밋 340fac6을 origin/main에 푸시하고 Render 운영 앱 0.10.9-daemon-shadow-22·엔진 multi-strategy-daemon-shadow-22·health 200 확인",
+    "미국 프리장 실제 KIS 후보 6개 첫 그림자 표본에서 비활성 눌림목 1건 형성·활성 진입대기 0건 확인; 전체 후보 평가 미완료 표본이므로 성과율로 사용 금지",
+    "미국 정규장 실제 KIS 후보 36개에서 비활성 눌림목 6·상승추세 6·VWAP 회복 3건 형성, 활성 6개 형성 0건과 상품 분류 미확인 14건을 확인",
+    "22개 그림자 형성 뒤 계획 비용·현재 체결구간·현재가 순손익비·상품분류 통과를 분리 계측하고 형성 후보를 관찰화면 우선 노출",
+    "화면의 현재가·완료봉·상시엔진·최근 주기 시각에 UTC와 한국 KST를 병기",
+    "금지 데이터 관련 파일 제외 운영 회귀 전체 및 대상 36개 통과; Ruff·compileall·uv pip check 통과"
   ],
   "files": {
     "config.py": "created; qualification/risk/cost/data/model and scanner deadline-margin settings centralized",
@@ -130,8 +136,8 @@
     "wellscan/universe_history.py": "created; future-free candidate membership and stale snapshot rejection",
     "wellscan/probability.py": "causal factors, immutable signal snapshots, resolved-before-signal live estimator implemented",
     "wellscan/validation.py": "signal-time features and unqualified probability/EV persisted",
-    "wellscan/engine.py": "strategy-specific timeframe gates; generic overheat cannot create MISSED; 15m downtrend gate applies only to strategies declaring 15m",
-    "app.py": "point-in-time backtest, 22-strategy independent KIS audit, bottleneck tables, live exact-minute access evidence, and public 22-strategy shadow formation/rejection counts",
+    "wellscan/engine.py": "strategy-specific timeframe gates; 22-strategy formation, cost, fill-band, product and activation shadow assessments",
+    "app.py": "point-in-time backtest, 22-strategy independent KIS audit, shadow gate tables and candidate priority, live exact-minute evidence, UTC/KST dual timestamps",
     "wellscan/scanner_service.py": "900/3000 cache contract, rotation, deadlines, freshness pruning, candidate recovery, and durable live access coverage",
     "wellscan/realtime.py": "bounded per-record trailing schema extensions accepted; malformed boundaries rejected",
     "wellscan/kis.py": "thread-local scanner deadline bounds HTTP timeout and retries",
@@ -170,7 +176,7 @@
     ,"inactive_16_official_performance": false
     ,"live_access_snapshot_persistence_implemented": true
     ,"live_access_qualification_status": "COLLECTING_FROM_0.10.5_DEPLOYMENT"
-    ,"latest_deployed_commit": "51063ed"
+    ,"latest_deployed_commit": "340fac6"
     ,"strategy_specific_timeframes_implemented": true
     ,"same_day_reentry_after_rearm_implemented": true
     ,"strategy_22_kis_admin_audit_implemented": true
@@ -178,9 +184,12 @@
     ,"false_shared_overheat_missed_fixed": true
     ,"non_15m_strategy_downtrend_gate_fixed": true
     ,"public_strategy_rejection_diagnostics_added": true
-    ,"latest_safe_operational_test_count": 458
+    ,"latest_safe_operational_test_count": 459
     ,"live_shadow_22_strategy_diagnostics_implemented": true
     ,"daemon_shadow_22_strategy_diagnostics_implemented": true
+    ,"first_live_shadow_sample": "US_PRE: 6 evaluated, inactive TREND_PULLBACK formed 1, active actionable 0; incomplete cycle"
+    ,"latest_live_shadow_sample": "US_REGULAR: 36 evaluated, inactive TREND_PULLBACK 6 + TREND_CONTINUATION 6 + VWAP_RECLAIM 3 formed, active formations 0, unknown products 14"
+    ,"zero_entry_root_cause": "22-strategy classifier works, but all 15 live formations were outside the six-strategy production allow-list; post-formation cost/fill status was previously not exposed"
   },
   "forward_live_60_session_audit_dates_if_deployed_2026_09_15": {
     "us_60th_session": "2026-12-08",
@@ -215,6 +224,7 @@
     "official_evidence": "actual KIS one-minute bars with point-in-time candidate universe"
   },
   "next_actions": [
+    "persist hypothetical three-bar fills and T1 outcomes for cost-qualified shadow formations without enabling unqualified strategies",
     "after the user manually authenticates the Render admin page, run the 22-strategy independent audit with actual KIS minute bars and point-in-time candidate snapshots",
     "report formation, cost pass, fill, and T1 rates without claiming unqualified win rates; keep 2026-08-17 through 19 and holdout-candidates excluded",
     "retain the current active six until the new independent KIS audit produces sufficient evidence; do not promote tiny samples",

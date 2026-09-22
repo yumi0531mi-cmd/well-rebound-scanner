@@ -225,6 +225,26 @@ def test_shadow_classification_reports_inactive_strategy_without_enabling_it(mon
     assert result.diagnostics["classification_strategy_count"] == 2
 
 
+def test_shadow_assessment_separates_technical_readiness_from_activation():
+    from wellscan.engine import _classification_assessment
+    from wellscan.opportunities import Opportunity
+
+    item = Opportunity(Strategy.TREND_PULLBACK, 100, 100, 98, 105, 107, 99, "shadow", {"mock": True})
+    assessment = _classification_assessment(
+        item,
+        TradingPolicy(costs(), "STOCK"),
+        100.1,
+        1.0,
+        active=False,
+    )
+    assert assessment["planned_cost_pass"] is True
+    assert assessment["fill_band_pass"] is True
+    assert assessment["current_cost_pass"] is True
+    assert assessment["shadow_ready"] is True
+    assert assessment["policy_ready"] is False
+    assert "운영 비활성 기법" in assessment["block_reason"]
+
+
 @pytest.mark.parametrize("strategy,excluded", [
     (Strategy.TREND_CONTINUATION, True),
     (Strategy.OVERSOLD_REVERSAL, False),
