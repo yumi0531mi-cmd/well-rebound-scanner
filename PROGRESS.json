@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-09-22T15:28:14+09:00",
+  "updated_at": "2026-09-22T15:34:01+09:00",
   "current_step": 3,
   "completed_steps": [
     "기존 저장소와 인계 보고서 확인",
@@ -112,7 +112,8 @@
     "커밋 b8e286b를 origin/main에 푸시하고 Render 운영 앱 0.10.6-strategy-frames-reentry·엔진 multi-strategy-22-frame-specific-reentry·health 200 확인",
     "실제 운영 화면에서 오전 후보 25개 중 전략 형성 0·공통 과열 기반 타점지남 6개와 기법별 실패조건 은폐를 확인",
     "전략 미형성 후보를 공통 과열값만으로 타점지남 처리하던 결함과 15분 비사용 기법에 남은 하락추세 공통 관문을 제거",
-    "공개 운영 진단에 기법별 실제 미충족 조건 집계를 추가하고 보류 데이터 테스트 제외 운영 회귀 457개·Ruff·compileall·pip check 통과"
+    "공개 운영 진단에 기법별 실제 미충족 조건 집계를 추가하고 보류 데이터 테스트 제외 운영 회귀 457개·Ruff·compileall·pip check 통과",
+    "커밋 8b806f1을 origin/main에 푸시하고 Render 운영 앱 0.10.7-entry-gate-diagnostics·엔진 multi-strategy-entry-gates-v2·health 200 확인"
   ],
   "files": {
     "config.py": "created; qualification/risk/cost/data/model and scanner deadline-margin settings centralized",
@@ -164,7 +165,7 @@
     ,"inactive_16_official_performance": false
     ,"live_access_snapshot_persistence_implemented": true
     ,"live_access_qualification_status": "COLLECTING_FROM_0.10.5_DEPLOYMENT"
-    ,"latest_deployed_commit": "b8e286b"
+    ,"latest_deployed_commit": "8b806f1"
     ,"strategy_specific_timeframes_implemented": true
     ,"same_day_reentry_after_rearm_implemented": true
     ,"strategy_22_kis_admin_audit_implemented": true
