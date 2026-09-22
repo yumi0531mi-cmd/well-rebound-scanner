@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-09-22T12:00:00+09:00",
+  "updated_at": "2026-09-22T09:10:00+09:00",
   "current_step": 3,
   "completed_steps": [
     "기존 저장소와 인계 보고서 확인",
@@ -108,7 +108,8 @@
     "15분봉을 쓰지 않는 기법의 공통 15분 관문 제거 및 필요한 시간축만 지표 계산하도록 구현",
     "익절·정상 청산 뒤 신호 해제와 재형성 시 동일 종목 당일 재진입을 허용하고 연속 중복 신호는 차단",
     "Render 관리자 화면에 실제 KIS·과거시점 후보군 기반 22개 기법 독립 재테스트 표 추가",
-    "보류일·holdout 테스트 제외 운영 회귀 498개 및 Ruff·compileall·pip check 통과"
+    "보류일·holdout 테스트 제외 운영 회귀 498개 및 Ruff·compileall·pip check 통과",
+    "커밋 b8e286b를 origin/main에 푸시하고 Render 운영 앱 0.10.6-strategy-frames-reentry·엔진 multi-strategy-22-frame-specific-reentry·health 200 확인"
   ],
   "files": {
     "config.py": "created; qualification/risk/cost/data/model and scanner deadline-margin settings centralized",
@@ -159,11 +160,11 @@
     ,"inactive_16_official_performance": false
     ,"live_access_snapshot_persistence_implemented": true
     ,"live_access_qualification_status": "COLLECTING_FROM_0.10.5_DEPLOYMENT"
-    ,"latest_deployed_commit": "2f305f2"
+    ,"latest_deployed_commit": "b8e286b"
     ,"strategy_specific_timeframes_implemented": true
     ,"same_day_reentry_after_rearm_implemented": true
     ,"strategy_22_kis_admin_audit_implemented": true
-    ,"strategy_22_kis_retest_status": "PENDING_PRODUCTION_DEPLOYMENT"
+    ,"strategy_22_kis_retest_status": "READY_ON_RENDER_ADMIN_AUTH_REQUIRED"
   },
   "forward_live_60_session_audit_dates_if_deployed_2026_09_15": {
     "us_60th_session": "2026-12-08",
@@ -198,8 +199,8 @@
     "official_evidence": "actual KIS one-minute bars with point-in-time candidate universe"
   },
   "next_actions": [
-    "push the verified exact-file change to origin/main and confirm Render 0.10.6-strategy-frames-reentry health",
-    "run the 22-strategy independent audit in Render with actual KIS minute bars and point-in-time candidate snapshots; report formation, cost pass, fill, and T1 rates without claiming unqualified win rates",
+    "after the user manually authenticates the Render admin page, run the 22-strategy independent audit with actual KIS minute bars and point-in-time candidate snapshots",
+    "report formation, cost pass, fill, and T1 rates without claiming unqualified win rates; keep 2026-08-17 through 19 and holdout-candidates excluded",
     "retain the current active six until the new independent KIS audit produces sufficient evidence; do not promote tiny samples",
     "run immediate KIS historical backfill and causal point-in-time candidate reconstruction for sessions whose API supports it; do not wait for December",
     "verify the first real KIS access snapshot in each active market session; 2026-09-21 is Sunday so no active-session sample exists yet",
