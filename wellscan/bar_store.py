@@ -117,8 +117,8 @@ class CockroachBarStore:
             cursor.execute(
                 f"""
                 CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
-                    namespace STRING NOT NULL,
-                    symbol STRING NOT NULL,
+                    namespace TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
                     timestamp TIMESTAMPTZ NOT NULL,
                     open FLOAT8 NOT NULL,
                     high FLOAT8 NOT NULL,
@@ -133,8 +133,8 @@ class CockroachBarStore:
             cursor.execute(
                 f"""
                 CREATE TABLE IF NOT EXISTS {SIGNAL_TABLE_NAME} (
-                    case_id STRING PRIMARY KEY,
-                    engine_version STRING NOT NULL,
+                    case_id TEXT PRIMARY KEY,
+                    engine_version TEXT NOT NULL,
                     signaled_at TIMESTAMPTZ NOT NULL,
                     payload JSONB NOT NULL,
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -144,8 +144,8 @@ class CockroachBarStore:
             cursor.execute(
                 f"""
                 CREATE TABLE IF NOT EXISTS {AUTH_TABLE_NAME} (
-                    cache_key STRING PRIMARY KEY,
-                    secret_value STRING NOT NULL,
+                    cache_key TEXT PRIMARY KEY,
+                    secret_value TEXT NOT NULL,
                     expires_at TIMESTAMPTZ NOT NULL,
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
                 )
@@ -154,7 +154,7 @@ class CockroachBarStore:
             cursor.execute(
                 f"""
                 CREATE TABLE IF NOT EXISTS {SEQUENCE_TABLE_NAME} (
-                    symbol STRING PRIMARY KEY,
+                    symbol TEXT PRIMARY KEY,
                     payload JSONB NOT NULL,
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
                 )
@@ -164,8 +164,8 @@ class CockroachBarStore:
                 f"""
                 CREATE TABLE IF NOT EXISTS {CANDIDATE_TABLE_NAME} (
                     observed_at TIMESTAMPTZ NOT NULL,
-                    namespace STRING NOT NULL,
-                    symbol STRING NOT NULL,
+                    namespace TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
                     payload JSONB NOT NULL,
                     PRIMARY KEY (observed_at, namespace, symbol)
                 )
@@ -175,8 +175,8 @@ class CockroachBarStore:
                 f"""
                 CREATE TABLE IF NOT EXISTS {ACCESS_TABLE_NAME} (
                     observed_at TIMESTAMPTZ NOT NULL,
-                    market STRING NOT NULL,
-                    session STRING NOT NULL,
+                    market TEXT NOT NULL,
+                    session TEXT NOT NULL,
                     payload JSONB NOT NULL,
                     PRIMARY KEY (observed_at, market, session)
                 )
@@ -185,7 +185,7 @@ class CockroachBarStore:
             cursor.execute(
                 f"""
                 CREATE TABLE IF NOT EXISTS {SHADOW_OUTCOME_TABLE_NAME} (
-                    plan_id STRING PRIMARY KEY,
+                    plan_id TEXT PRIMARY KEY,
                     signaled_at TIMESTAMPTZ NOT NULL,
                     payload JSONB NOT NULL,
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
