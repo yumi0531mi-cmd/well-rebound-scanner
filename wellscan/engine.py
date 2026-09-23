@@ -130,6 +130,16 @@ def _classification_assessment(
         "current_cost_pass": False,
         "shadow_ready": False,
         "policy_ready": False,
+        # Shadow-ledger plan inputs: the formed opportunity levels that a
+        # hypothetical paper execution would use. Always present so the
+        # ledger can build execution Plans without re-running formation.
+        "plan_entry": item.entry,
+        "plan_target1": item.target1,
+        "plan_target2": item.target2,
+        "plan_structural_stop": item.structural_stop,
+        "plan_hard_stop": item.hard_stop,
+        "plan_soft_stop": item.soft_stop,
+        "plan_atr": atr,
     }
     if policy is None or policy.costs is None:
         assessment["block_reason"] = "거래 비용 미확인"

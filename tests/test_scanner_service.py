@@ -340,6 +340,48 @@ def test_kis_ranking_records_endpoint_counts(tmp_path, monkeypatch):
     assert client.discovery_endpoint_counts()["NAS:거래량TOP100"] == {"rows": 1, "valid": 1}
 
 
+def test_scan_cycle_opens_shadow_plans(tmp_path):
+    from wellscan.policy import estimated_costs as _estimated_costs
+
+    candidate = Candidate("005930", "S", 70000, 1, 100, 1000)
+    assessments = {
+        "D02": {
+            "shadow_ready": True,
+            "plan_entry": 100.0,
+            "plan_target1": 104.0,
+            "plan_target2": 106.0,
+            "plan_structural_stop": 99.0,
+            "plan_hard_stop": 99.0,
+            "plan_soft_stop": 99.5,
+            "plan_atr": 1.0,
+        }
+    }
+
+    def evaluator(symbol, frame, price, store, **kwargs):
+        return SimpleNamespace(
+            final_buy=False,
+            stage=Stage.CANDIDATE,
+            evaluated_at=kwargs["now"],
+            diagnostics={"classification_assessments": assessments},
+        )
+
+    client = FakeClient([candidate])
+    client.trading_policy = lambda item: SimpleNamespace(
+        costs=_estimated_costs(Market.KR, TradingSession.KR_REGULAR),
+        minimum_rr=1.0,
+        product="STOCK",
+    )
+    service = ScannerService(
+        config(tmp_path), client=client, history=FakeHistory(),
+        sequences=object(), validations=FakeValidation(), clock=lambda: NOW,
+        session_resolver=resolver(), evaluator=evaluator,
+        live_revalidator=lambda result, price, now: result,
+    )
+    assert service.run_cycle()
+    assert service.snapshot().counters["shadow_plans_opened"] == 1
+    assert list((tmp_path / "shadow").rglob("*.json")) != []
+
+
 def test_discovery_rotation_advances_only_by_attempted_candidates(tmp_path):
     candidates = [Candidate(f"{index:06d}", str(index), 100, 1, 1, 1) for index in range(5)]
     service = ScannerService(

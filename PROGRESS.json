@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-09-23T10:49:51+09:00",
+  "updated_at": "2026-09-23T10:59:00+09:00",
   "current_step": 3,
   "completed_steps": [
     "기존 저장소와 인계 보고서 확인",
@@ -128,7 +128,8 @@
     "CockroachDB RU 한도 소진 시 durable probe 실패 → DB 회로 차단, 로컬 KIS 캐시 자동 전환 (0.11.1-local-fallback); scanner_service 28 + durable/history/KIS 21 통과; Ruff·compileall·uv pip check·git diff--check 통과",
     "durable 유무와 무관한 로컬 후보 스냅샷 저장·복구 구현 (0.11.2-local-snapshot); fresh만 저장·복구본 재저장 금지·원래 발견시각 보존·동일 세션 8시간 이내만 복구; scanner_service 32 + durable/history/KIS 21 통과; Ruff·compileall·git diff--check 통과",
     "UptimeRobot에 스캐너 health 모니터 추가 (5분 간격, 기존 github.com 1개 외 신규; Render free 슬립·cold 3000봉 RU 폭풍 방지; 인계보고서 누락이었음)",
-    "발견 단계 정밀 계측 구현 (0.11.3-discovery-funnel); KIS 엔드포인트별 원응답·유효건 + 합집합·세션·중복제거·선택·시도·분봉·상품미확인·평가·진입 분리 기록, 화면 처리시간 Expander에 JSON 노출; scanner_service 36 + durable/history/KIS 21 통과; Ruff·compileall·git diff--check 통과"
+    "발견 단계 정밀 계측 구현 (0.11.3-discovery-funnel); KIS 엔드포인트별 원응답·유효건 + 합집합·세션·중복제거·선택·시도·분봉·상품미확인·평가·진입 분리 기록, 화면 처리시간 Expander에 JSON 노출; scanner_service 36 + durable/history/KIS 21 통과; Ruff·compileall·git diff--check 통과",
+    "그림자 가상체결 장부 구현 (0.11.4-shadow-ledger); 비용통과 형성의 Plan을 공통 execution 엔진으로 3봉 가상 정산(T1/T2/손절/만료/미체결), 로컬 outbox 영속·durable 복귀 시 재전송, 공식 성과와 분리; scanner 37 + ledger 7 + execution/backtest/multi/durable 70 통과; Ruff·compileall·git diff--check 통과"
   ],
   "files": {
     "config.py": "created; qualification/risk/cost/data/model and scanner deadline-margin settings centralized",
@@ -188,7 +189,7 @@
     "non_15m_strategy_downtrend_gate_fixed": true,
     "public_strategy_rejection_diagnostics_added": true,
     "latest_safe_operational_test_count": 459,
-    "latest_deployed_version": "0.11.1-local-fallback",
+    "latest_deployed_version": "0.11.4-shadow-ledger",
     "post_04fc8ab_targeted_tests": 49,
     "post_04fc8ab_test_note": "04fc8ab verified with 28 scanner_service + 21 durable/history/KIS targeted tests only; full 459 was not re-run after 04fc8ab",
     "live_shadow_22_strategy_diagnostics_implemented": true,
@@ -232,7 +233,8 @@
     "official_evidence": "actual KIS one-minute bars with point-in-time candidate universe"
   },
   "next_actions": [
-    "implement durable-independent local candidate snapshot fallback: always save, restore same-session max 8h only, never extend lifetime by re-saving restores",
+    "verify >=5 entry symbols and T1 reach on real KIS data after scanner completion; record evidence and report",
+    "add 1-minute scalping variants as OFF/shadow profiles only; keep 22 strategies, active six, costs, RR, stops unchanged",
     "persist hypothetical three-bar fills and T1 outcomes for cost-qualified shadow formations without enabling unqualified strategies",
     "after the user manually authenticates the Render admin page, run the 22-strategy independent audit with actual KIS minute bars and point-in-time candidate snapshots",
     "report formation, cost pass, fill, and T1 rates without claiming unqualified win rates; keep 2026-08-17 through 19 and holdout-candidates excluded",

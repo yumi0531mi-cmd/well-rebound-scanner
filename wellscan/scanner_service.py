@@ -55,6 +55,7 @@ from .sessions import (
     session_status,
     us_session_window,
 )
+from .shadow_ledger import ShadowLedger
 from .validation import ValidationStore
 
 LOGGER = logging.getLogger(__name__)
@@ -144,6 +145,19 @@ class ScannerCounters:
     candidate_local_snapshot_errors: int = 0
     candidate_local_fallbacks: int = 0
     candidate_local_fallback_symbols: int = 0
+    shadow_plans_opened: int = 0
+    shadow_plans_rejected: int = 0
+    shadow_plans_settled: int = 0
+    shadow_t1: int = 0
+    shadow_t2: int = 0
+    shadow_stops: int = 0
+    shadow_expired: int = 0
+    shadow_unfilled: int = 0
+    shadow_errors: int = 0
+    shadow_observe_errors: int = 0
+    shadow_settle_errors: int = 0
+    shadow_retransmitted: int = 0
+    shadow_retransmit_errors: int = 0
     candidate_prefetches: int = 0
     candidate_prefetch_symbols: int = 0
     candidate_prefetch_errors: int = 0
@@ -275,6 +289,7 @@ class ScannerService:
         sequences: SequenceStore | Any | None = None,
         validations: ValidationStore | Any | None = None,
         local_snapshots: LocalCandidateSnapshotStore | Any | None = None,
+        shadows: ShadowLedger | Any | None = None,
         clock: Callable[[], datetime] | None = None,
         monotonic: Callable[[], float] | None = None,
         session_resolver: Callable[[Market, datetime], SessionStatus] | None = None,
@@ -304,6 +319,9 @@ class ScannerService:
             self._local_snapshots = LocalCandidateSnapshotStore(
                 self.config.status_path.parent / "candidate_snapshots"
             )
+        self._shadows = shadows if shadows is not None else ShadowLedger(
+            self.config.status_path.parent / "shadow"
+        )
         self._clock = clock or (lambda: datetime.now(UTC))
         self._monotonic = monotonic or time.monotonic
         self._session_resolver = session_resolver or session_status
@@ -909,6 +927,33 @@ class ScannerService:
         )
         return selected
 
+    def _settle_shadow_ledger(self) -> None:
+        """Advance open shadow plans on locally cached bars.
+
+        Local bars only: no extra KIS calls and no durable usage.  Never
+        breaks the scan cycle.
+        """
+        try:
+            increments = self._shadows.settle(
+                lambda symbol, namespace: self.history.load(symbol, namespace),
+                self._aware_now(),
+            )
+        except Exception as exc:
+            self._counters.shadow_settle_errors += 1
+            self._error("shadow-settle", exc)
+            return
+        for key, value in increments.items():
+            field = f"shadow_{key}"
+            if hasattr(self._counters, field):
+                setattr(self._counters, field, getattr(self._counters, field) + int(value))
+            else:
+                self._counters.shadow_errors += int(value)
+        try:
+            self._counters.shadow_retransmitted += int(self._shadows.retransmit(self._durable_store))
+        except Exception as exc:
+            self._counters.shadow_retransmit_errors += 1
+            self._error("shadow-retransmit", exc)
+
     def _advance_rotation(self, status: SessionStatus, attempted: int) -> None:
         key = f"{status.market.value}:{status.session.value}"
         population = self._rotation_population.get(key, 0)
@@ -1009,6 +1054,22 @@ class ScannerService:
                 )
                 self._counters.candidates_evaluated += 1
                 evaluated_gates += 1
+                try:
+                    diagnostics = result.diagnostics if isinstance(result.diagnostics, dict) else {}
+                    signaled_at = getattr(result, "evaluated_at", None) or current
+                    opened, rejected = self._shadows.observe(
+                        candidate,
+                        diagnostics.get("classification_assessments", {})
+                        if isinstance(diagnostics.get("classification_assessments"), dict) else {},
+                        policy,
+                        signaled_at,
+                        HistoryCache._namespace(candidate),
+                    )
+                    self._counters.shadow_plans_opened += opened
+                    self._counters.shadow_plans_rejected += rejected
+                except Exception as exc:
+                    self._counters.shadow_observe_errors += 1
+                    self._error("shadow-observe", exc, symbol=candidate.key, session=status.session.value)
                 if result.final_buy:
                     final_buys += 1
                 elif result.stage == Stage.ENTRY_WAIT:
@@ -1105,6 +1166,8 @@ class ScannerService:
                 session_scope = request_deadline(session_request_deadline) if callable(request_deadline) else nullcontext()
                 with session_scope:
                     self._scan_session(status, session_deadline, share)
+            if self._monotonic() < cycle_deadline:
+                self._settle_shadow_ledger()
             self._counters.cycles += 1
             return True
         except Exception as exc:
@@ -1165,3 +1228,16 @@ def daemon_results_snapshot() -> ScannerResultsSnapshot | None:
     with _SINGLETON_LOCK:
         service = _SINGLETON
     return service.results_snapshot() if service is not None else None
+
+
+def daemon_shadow_summary() -> dict[str, Any] | None:
+    """Expose the hypothetical shadow-execution ledger summary."""
+
+    with _SINGLETON_LOCK:
+        service = _SINGLETON
+    if service is None:
+        return None
+    try:
+        return dict(service._shadows.summary())
+    except Exception:
+        return None

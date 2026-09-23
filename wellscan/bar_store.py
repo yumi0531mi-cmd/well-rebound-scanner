@@ -25,6 +25,7 @@ SIGNAL_TABLE_NAME = "scanner_signal_cases"
 SEQUENCE_TABLE_NAME = "scanner_sequence_states"
 CANDIDATE_TABLE_NAME = "scanner_candidate_snapshots"
 ACCESS_TABLE_NAME = "scanner_access_snapshots"
+SHADOW_OUTCOME_TABLE_NAME = "scanner_shadow_outcomes"
 MAX_BARS_PER_SYMBOL = BACKTEST_MAX_STORED_BARS
 DB_RETRY_COOLDOWN_SECONDS = 60
 
@@ -181,6 +182,16 @@ class CockroachBarStore:
                 )
                 """
             )
+            cursor.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS {SHADOW_OUTCOME_TABLE_NAME} (
+                    plan_id STRING PRIMARY KEY,
+                    signaled_at TIMESTAMPTZ NOT NULL,
+                    payload JSONB NOT NULL,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+                """
+            )
         self._initialized = True
 
     def load_sequence_state(self, symbol: str) -> dict[str, Any] | None:
@@ -329,6 +340,34 @@ class CockroachBarStore:
         except Exception as exc:
             self._record_error(exc)
             raise StoreUnavailableError(self._last_error or "영구 모의신호 저장 실패") from exc
+
+    def save_shadow_outcome(self, plan_id: str, signaled_at: datetime, payload: dict[str, Any]) -> bool:
+        """Persist one settled shadow (hypothetical) execution outcome.
+
+        Shadow outcomes never enter official performance ledgers; they live
+        in their own table and are only read by shadow diagnostics.
+        """
+        from psycopg.types.json import Jsonb
+
+        try:
+            with self._lock, self._connection_session() as connection:
+                self._ensure_schema(connection)
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        f"""
+                        INSERT INTO {SHADOW_OUTCOME_TABLE_NAME} (plan_id, signaled_at, payload)
+                        VALUES (%s, %s, %s)
+                        ON CONFLICT (plan_id) DO UPDATE SET
+                            payload = excluded.payload,
+                            updated_at = now()
+                        """,
+                        (plan_id, signaled_at, Jsonb(payload)),
+                    )
+            self._available, self._last_error = True, ""
+            return True
+        except Exception as exc:
+            self._record_error(exc)
+            raise StoreUnavailableError(self._last_error or "그림자 결과 저장 실패") from exc
 
     def save_candidate_snapshot(self, candidates: list[Any], observed_at: datetime) -> bool:
         from psycopg.types.json import Jsonb

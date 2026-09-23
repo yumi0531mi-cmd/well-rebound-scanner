@@ -48,7 +48,7 @@ from wellscan.performance import TIMINGS
 from wellscan.policy import session_day
 from wellscan.quotes import QuoteBook
 from wellscan.realtime import RealtimeHub
-from wellscan.scanner_service import daemon_results_snapshot, daemon_service_status, shared_runtime_components
+from wellscan.scanner_service import daemon_results_snapshot, daemon_service_status, daemon_shadow_summary, shared_runtime_components
 from wellscan.sequence import SequenceStore
 from wellscan.sessions import ENABLED_SESSIONS, KST, session_exchange, session_status
 from wellscan.universe_history import PointInTimeUniverse
@@ -1295,6 +1295,14 @@ with st.expander("처리 시간 실측 · 미충족 이유"):
     if _discovery_breakdown:
         st.caption("발견 단계 계측 · 원응답→세션→중복제거→선택→분봉→상품→평가→진입")
         st.json(_discovery_breakdown)
+    _shadow_summary = None
+    try:
+        _shadow_summary = daemon_shadow_summary()
+    except Exception:
+        _shadow_summary = None
+    if _shadow_summary:
+        st.caption("그림자 가상체결 장부 · 비용통과 형성의 3봉 가상 정산(공식 성과 아님)")
+        st.json(_shadow_summary)
     rejected_reasons: dict[str, int] = {}
     strategy_rejected_reasons: dict[str, int] = {}
     strategy_formed_counts: dict[str, int] = {}
