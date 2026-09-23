@@ -49,3 +49,14 @@ running any of the following:
 Routine read-only work (reading files, searching code, running tests,
 static checks) does not need approval. When in doubt whether an action is
 destructive, treat it as destructive and ask.
+
+## 4. Cross-market time awareness
+
+- Never infer the whole scanner's operating state from the market currently
+  selected in the web UI. The selected tab is a view, not the daemon state.
+- Before saying that the market or scanner is closed, evaluate both KR and US
+  session status from the same timezone-aware instant. If either enabled
+  market session is active, identify that active session explicitly.
+- Operational reports must show or reason from KST and New York local time;
+  keep UTC for machine timestamps. Account for DST and exchange holidays via
+  `wellscan.sessions.session_status`, never by fixed-hour mental arithmetic.
