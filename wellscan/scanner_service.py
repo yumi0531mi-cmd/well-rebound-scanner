@@ -145,6 +145,8 @@ class ScannerCounters:
     candidate_local_snapshot_errors: int = 0
     candidate_local_fallbacks: int = 0
     candidate_local_fallback_symbols: int = 0
+    warming_provisional: int = 0
+    warming_signals: int = 0
     shadow_plans_opened: int = 0
     shadow_plans_rejected: int = 0
     shadow_plans_settled: int = 0
@@ -1006,6 +1008,11 @@ class ScannerService:
                 return
         attempted = 0
         bars_ready = 0
+        warming_provisional = 0
+        warming_signals = 0
+        bars_counts: list[int] = []
+        bars_target = 0
+        warming_sequences = None
         product_unknown = 0
         evaluated_gates = 0
         final_buys = 0
@@ -1020,6 +1027,7 @@ class ScannerService:
                 break
             try:
                 history_target = self._initial_history_target(candidate)
+                bars_target = history_target
                 reserved = self._call_reserve(candidate, history_target)
                 if self._monotonic() + reserved * KIS_REQUEST_INTERVAL_SECONDS > deadline:
                     self._counters.budget_exhaustions += 1
@@ -1031,27 +1039,59 @@ class ScannerService:
                     target_bars=history_target,
                 )
                 session_bars = filter_session_bars(normalize_bars(bars), status.session)
+                bars_counts.append(len(session_bars))
+                warming = False
                 if len(session_bars) < history_target:
-                    self._counters.data_wait_observations += 1
-                    if status.session != TradingSession.US_DAY:
-                        continue
+                    if (status.session == TradingSession.US_DAY
+                            or len(session_bars) < HistoryCache.INITIAL_READY_BARS):
+                        self._counters.data_wait_observations += 1
+                        if status.session != TradingSession.US_DAY:
+                            continue
+                    else:
+                        # Warming band (180~900): evaluate provisionally so
+                        # formations stay visible, but nothing here may
+                        # become official. Qualification still needs 900.
+                        warming = True
                 else:
                     bars_ready += 1
                 close = self._latest_completed_close(bars, status.session, current)
                 policy = self.client.trading_policy(candidate)
                 if getattr(policy, "product", "") == "UNKNOWN":
                     product_unknown += 1
+                if warming:
+                    if warming_sequences is None:
+                        # Isolated memory-only sequences: provisional runs
+                        # must not contaminate official ENTRY state.
+                        warming_sequences = SequenceStore(
+                            root=self.config.status_path.parent / "sequences-warming",
+                            memory_only=True,
+                            use_environment=False,
+                        )
+                    eval_store = warming_sequences
+                else:
+                    eval_store = self.sequences
                 result = self._evaluator(
                     candidate.key,
                     bars,
                     close,
-                    self.sequences,
+                    eval_store,
                     now=current,
                     session=status.session,
                     require_fresh=True,
                     policy=policy,
                     classification_portfolio=ALL_ENTRY_STRATEGIES,
                 )
+                if warming:
+                    warming_provisional += 1
+                    self._counters.warming_provisional += 1
+                    if result.final_buy:
+                        warming_signals += 1
+                        self._counters.warming_signals += 1
+                    result = replace(
+                        result,
+                        stage=Stage.CANDIDATE,
+                        reasons=tuple(getattr(result, "reasons", None) or ()) + ("예열중: 분봉 900 미만·비공식",),
+                    )
                 self._counters.candidates_evaluated += 1
                 evaluated_gates += 1
                 try:
@@ -1113,10 +1153,17 @@ class ScannerService:
             except Exception as exc:  # keep the daemon alive, but expose the unexpected type
                 self._error("candidate-unexpected", exc, symbol=candidate.key, session=status.session.value)
         self._advance_rotation(status, attempted)
+        ordered_counts = sorted(bars_counts)
+        bars_median = ordered_counts[len(ordered_counts) // 2] if ordered_counts else 0
         self._record_discovery_stage(
             rotation_key,
             attempted=attempted,
             bars_ready=bars_ready,
+            warming_provisional=warming_provisional,
+            warming_signals=warming_signals,
+            bars_median=bars_median,
+            bars_max=ordered_counts[-1] if ordered_counts else 0,
+            bars_target=bars_target,
             product_unknown=product_unknown,
             evaluated=evaluated_gates,
             final_buy=final_buys,

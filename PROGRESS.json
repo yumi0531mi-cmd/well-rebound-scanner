@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-09-23T20:56:28+09:00",
+  "updated_at": "2026-09-23T22:55:07+09:00",
   "current_step": 3,
   "completed_steps": [
     "기존 저장소와 인계 보고서 확인",
@@ -132,7 +132,8 @@
     "그림자 가상체결 장부 구현 (0.11.4-shadow-ledger); 비용통과 형성의 Plan을 공통 execution 엔진으로 3봉 가상 정산(T1/T2/손절/만료/미체결), 로컬 outbox 영속·durable 복귀 시 재전송, 공식 성과와 분리; scanner 37 + ledger 7 + execution/backtest/multi/durable 70 통과; Ruff·compileall·git diff--check 통과",
     "전수 감사 1호: 상품 마스터 다운로드 실패 시 검증된 stale 파일로 폴백(없는 종목은 UNKNOWN 유지·차단 지속); instruments 10 통과; Ruff 통과",
     "Render 빌드 실패 복구: 3순위 계측이 object.__new__ 클라이언트에서 _lock 없이 터지던 버그를 방어적으로 수정; Render 동일 전체 521 통과·실패 0·Ruff 전체 통과",
-    "즉시 복구용 PG 호환 (0.11.5-pg-compat); DDL의 Cockroach 전용 STRING형을 양쪽 모두 되는 TEXT로 교체, 무료 Supabase 교체 시 코드 변경 없이 URL만 교체; durable 계열 69 통과"
+    "즉시 복구용 PG 호환 (0.11.5-pg-compat); DDL의 Cockroach 전용 STRING형을 양쪽 모두 되는 TEXT로 교체, 무료 Supabase 교체 시 코드 변경 없이 URL만 교체; durable 계열 69 통과",
+    "3단계 게이트 예열 평가 (0.11.6-warming-gates); 180~900봉은 격리된 메모리 시퀀스로 평가 후 CANDIDATE·예열중 사유로만 게시, 공식 기록·ENTRY 승격 차단, 900·비용·RR 불변; 전체 522 통과·실패 0·Ruff 전체 통과"
   ],
   "files": {
     "config.py": "created; qualification/risk/cost/data/model and scanner deadline-margin settings centralized",
@@ -192,7 +193,7 @@
     "non_15m_strategy_downtrend_gate_fixed": true,
     "public_strategy_rejection_diagnostics_added": true,
     "latest_safe_operational_test_count": 459,
-    "latest_deployed_version": "0.11.5-pg-compat",
+    "latest_deployed_version": "0.11.6-warming-gates",
     "post_04fc8ab_targeted_tests": 49,
     "post_04fc8ab_test_note": "04fc8ab verified with 28 scanner_service + 21 durable/history/KIS targeted tests only; full 459 was not re-run after 04fc8ab",
     "live_shadow_22_strategy_diagnostics_implemented": true,

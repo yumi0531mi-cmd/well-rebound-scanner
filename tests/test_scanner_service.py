@@ -9,7 +9,7 @@ import pandas as pd
 
 from wellscan.history import HistoryCache
 from wellscan.kis import KISClient, KISDeadlineError, KISError
-from wellscan.models import ALL_ENTRY_STRATEGIES, Candidate, Market, Stage, TradingSession
+from wellscan.models import ALL_ENTRY_STRATEGIES, Candidate, Market, RiskState, ScanResult, Stage, Strategy, TradeLevels, TradingSession
 from wellscan.policy import estimated_costs, session_day
 from wellscan.scanner_service import (
     ScannerService,
@@ -313,6 +313,8 @@ def test_scan_cycle_records_gate_breakdown(tmp_path):
     breakdown = service.snapshot().discovery_breakdown["KR:KR_REGULAR"]
     assert breakdown["attempted"] == 2
     assert breakdown["bars_ready"] == 2
+    assert breakdown["bars_target"] == 2
+    assert breakdown["bars_max"] >= 2
     assert breakdown["product_unknown"] == 0
     assert breakdown["evaluated"] == 2
     assert breakdown["final_buy"] == 1
@@ -380,6 +382,47 @@ def test_scan_cycle_opens_shadow_plans(tmp_path):
     assert service.run_cycle()
     assert service.snapshot().counters["shadow_plans_opened"] == 1
     assert list((tmp_path / "shadow").rglob("*.json")) != []
+
+
+def test_warming_band_evaluates_provisionally_without_official_record(tmp_path):
+    warm_bars = pd.DataFrame(
+        {"open": 100.0, "high": 101.0, "low": 99.0, "close": 100.5, "volume": 1000.0},
+        index=pd.date_range(end="2026-09-07 10:00", periods=200, freq="min"),
+    )
+
+    class WarmHistory(FakeHistory):
+        def backfill_candidate(self, client, candidate, target_bars):
+            self.calls.append((candidate.key, target_bars))
+            return warm_bars.copy()
+
+    def evaluator(symbol, frame, price, store, **kwargs):
+        return ScanResult(
+            symbol, kwargs["now"], Stage.FINAL_BUY, Strategy.RANGE_REVERSAL,
+            RiskState.NORMAL, 100, None, None, None, None,
+            TradeLevels(entry=100, target1=104, target2=106, hard_stop=99, soft_stop=99.5),
+            {"FINAL_BUY": True}, diagnostics={"classification_assessments": {}},
+        )
+
+    validation = FakeValidation()
+    service = ScannerService(
+        config(tmp_path, initial_history_bars=250),
+        client=FakeClient([Candidate("005930", "S", 70000, 1, 100, 1000)]),
+        history=WarmHistory(), sequences=object(), validations=validation,
+        clock=lambda: NOW, session_resolver=resolver(), evaluator=evaluator,
+        live_revalidator=lambda result, price, now: result,
+    )
+    assert service.run_cycle()
+    assert validation.recorded == []
+    published = service.results_snapshot().sessions[0].results[0][1]
+    assert published.stage == Stage.CANDIDATE
+    assert any("예열중" in str(reason) for reason in published.reasons)
+    breakdown = service.snapshot().discovery_breakdown["KR:KR_REGULAR"]
+    assert breakdown["attempted"] == 1
+    assert breakdown["bars_ready"] == 0
+    assert breakdown["warming_provisional"] == 1
+    assert breakdown["warming_signals"] == 1
+    assert breakdown["evaluated"] == 1
+    assert breakdown["final_buy"] == 0
 
 
 def test_discovery_rotation_advances_only_by_attempted_candidates(tmp_path):
@@ -550,8 +593,8 @@ def test_empty_discovery_publishes_completed_empty_session(tmp_path):
     assert snapshot.sessions[0].results == ()
 
 
-def test_cold_cache_keeps_warming_to_1000_without_evaluating(tmp_path):
-    index = pd.date_range("2026-09-05 09:00", periods=180, freq="min")
+def test_cold_cache_warms_provisionally_below_full_target(tmp_path):
+    index = pd.date_range(end="2026-09-07 10:00", periods=180, freq="min")
     frame = pd.DataFrame(
         {
             "open": 100.0,
@@ -563,26 +606,35 @@ def test_cold_cache_keeps_warming_to_1000_without_evaluating(tmp_path):
         index=index,
     )
     history = FakeHistory(frame)
-    evaluated = []
     validation = FakeValidation()
     service = ScannerService(
         config(tmp_path, initial_history_bars=HistoryCache.WARM_TARGET_BARS),
-        client=FakeClient([Candidate("005930", "삼성전자", 100, 1, 1, 1)]),
+        client=FakeClient([Candidate("005930", "S", 100, 1, 1, 1)]),
         history=history,
         sequences=object(),
         validations=validation,
         clock=lambda: NOW,
         session_resolver=resolver(),
-        evaluator=lambda *args, **kwargs: evaluated.append((args, kwargs)),
+        evaluator=lambda *args, **kwargs: ScanResult(
+            args[0], kwargs["now"], Stage.FINAL_BUY, Strategy.RANGE_REVERSAL,
+            RiskState.NORMAL, 100, None, None, None, None,
+            TradeLevels(entry=100, target1=104, target2=106, hard_stop=99, soft_stop=99.5),
+            {"FINAL_BUY": True}, diagnostics={"classification_assessments": {}},
+        ),
         live_revalidator=lambda result, price, now: result,
     )
 
     service.run_cycle()
 
     assert history.calls == [("KR:KRX:KR_REGULAR:005930", HistoryCache.WARM_TARGET_BARS)]
-    assert not evaluated
     assert not validation.recorded
-    assert service.snapshot().counters["data_wait_observations"] == 1
+    published = service.results_snapshot().sessions[0].results[0][1]
+    assert published.stage == Stage.CANDIDATE
+    assert any("예열중" in str(reason) for reason in published.reasons)
+    counters = service.snapshot().counters
+    assert counters["data_wait_observations"] == 0
+    assert counters["warming_provisional"] == 1
+    assert counters["warming_signals"] == 1
 
 
 def test_cold_cache_work_does_not_start_without_worst_case_call_budget(tmp_path):
