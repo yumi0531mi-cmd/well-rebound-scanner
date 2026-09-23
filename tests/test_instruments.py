@@ -78,6 +78,26 @@ def test_daily_master_cache_and_uppercase_archive(tmp_path, monkeypatch):
     assert len(calls) == 3
 
 
+def test_stale_master_file_used_when_download_fails(tmp_path, monkeypatch):
+    import json
+
+    from wellscan.instruments import MasterCatalog
+    from wellscan.models import Candidate
+
+    stale = {"schema": 1, "retrieved_at": "2020-01-01T00:00:00+00:00",
+             "source": "test", "products": {"KR:KRX:005930": "STOCK"}}
+    (tmp_path / "KR.json").write_text(json.dumps(stale), encoding="utf-8")
+
+    def fail(url, **kwargs):
+        raise OSError("mock outage")
+
+    monkeypatch.setattr("wellscan.instruments.requests.get", fail)
+    catalog = MasterCatalog(tmp_path)
+    # Previously verified symbols stay usable; absent symbols stay UNKNOWN.
+    assert catalog.product(Candidate("005930", "m", 100, 0, 100, 10000)) == "STOCK"
+    assert catalog.product(Candidate("000660", "m", 100, 0, 100, 10000)) == "UNKNOWN"
+
+
 def test_failed_master_refresh_has_retry_backoff(tmp_path, monkeypatch):
     from wellscan.instruments import MasterCatalog
     from wellscan.models import Market

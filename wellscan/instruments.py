@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 import threading
 import time
 import zipfile
@@ -18,6 +19,8 @@ import requests
 from filelock import FileLock
 
 from .models import Candidate, Market
+
+LOGGER = logging.getLogger(__name__)
 
 BASE = "https://new.real.download.dws.co.kr/common/master/"
 SOURCES = {Market.KR: ("kospi_code.mst", "kosdaq_code.mst"),
@@ -71,6 +74,24 @@ class MasterCatalog:
         stamp = datetime.fromisoformat(payload["retrieved_at"])
         return payload.get("schema") == 1 and stamp.tzinfo is not None and 0 <= (datetime.now(UTC) - stamp).total_seconds() < 86400
 
+    def _read_stale_file(self, market: Market) -> dict | None:
+        """Return a previously verified file, or None when unusable.
+
+        Stale data can still confirm the symbols it contains; absent
+        symbols stay UNKNOWN. It is never a guess, only an older fact.
+        """
+        try:
+            stale_path = self.root / f"{market.value}.json"
+            if not stale_path.exists():
+                return None
+            stale = json.loads(stale_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        if (isinstance(stale, dict) and stale.get("schema") == 1
+                and isinstance(stale.get("products"), dict)):
+            return stale
+        return None
+
     def refresh(self, market: Market) -> dict:
         """Heavy-worker only. One daily batch, failures explicit and rate-limited."""
         with self._lock:
@@ -79,6 +100,10 @@ class MasterCatalog:
                 return cached
             failure = self._failure.get(market)
             if failure and time.monotonic() - failure[0] < 300:
+                stale = self._read_stale_file(market)
+                if stale is not None:
+                    self._cache[market] = stale
+                    return stale
                 raise RuntimeError(failure[1])
             self.root.mkdir(parents=True, exist_ok=True)
             path = self.root / f"{market.value}.json"
@@ -113,8 +138,17 @@ class MasterCatalog:
                     self._cache[market] = payload
                     return payload
             except Exception as exc:
-                message = f"상품 마스터 확인 실패: {type(exc).__name__}: {exc}"
+                message = 'instrument master refresh failed: ' + type(exc).__name__ + ': ' + str(exc)
                 self._failure[market] = (time.monotonic(), message)
+                # Availability without guessing: a previously verified file
+                # can still confirm the symbols it contains; symbols absent
+                # from it stay UNKNOWN and remain blocked.
+                stale = self._read_stale_file(market)
+                if stale is not None:
+                    LOGGER.warning('instrument master stale fallback market=%s error=%s',
+                                   market.value, message)
+                    self._cache[market] = stale
+                    return stale
                 raise RuntimeError(message) from exc
 
     def product(self, candidate: Candidate) -> str:
