@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-09-24T02:55:33+09:00",
+  "updated_at": "2026-09-24T03:06:17+09:00",
   "current_step": 3,
   "completed_steps": [
     "기존 저장소와 인계 보고서 확인",
@@ -243,6 +243,7 @@
     "official_evidence": "actual KIS one-minute bars with point-in-time candidate universe"
   },
   "next_actions": [
+    "record live US probe: 2 cycles 35 attempted, 31-33 warming provisional, 34 evaluated/published, 0 false officials, VWAP formed-but-blocked 1; provisional gates proven at scale",
     "verify >=5 entry symbols and T1 reach on real KIS data after scanner completion; record evidence and report",
     "add 1-minute scalping variants as OFF/shadow profiles only; keep 22 strategies, active six, costs, RR, stops unchanged",
     "persist hypothetical three-bar fills and T1 outcomes for cost-qualified shadow formations without enabling unqualified strategies",
