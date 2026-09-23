@@ -400,14 +400,24 @@ class KISClient:
         return candidates
 
     def _record_endpoint_counts(self, key: str, rows: int, valid: int) -> None:
-        """Remember per-endpoint raw/valid counts for discovery diagnostics."""
-        with self._lock:
-            self._endpoint_counts[key] = {"rows": int(rows), "valid": int(valid)}
+        """Remember per-endpoint raw/valid counts for discovery diagnostics.
+
+        Best-effort: partially constructed clients (unit tests) may lack
+        instance state; diagnostics must never break discovery.
+        """
+        lock = self.__dict__.get("_lock")
+        if lock is None:
+            return
+        with lock:
+            self.__dict__.setdefault("_endpoint_counts", {})[key] = {"rows": int(rows), "valid": int(valid)}
 
     def discovery_endpoint_counts(self) -> dict[str, dict[str, int]]:
         """Return the latest per-endpoint discovery counts (copy)."""
-        with self._lock:
-            return {key: dict(value) for key, value in self._endpoint_counts.items()}
+        lock = self.__dict__.get("_lock")
+        if lock is None:
+            return dict(self.__dict__.get("_endpoint_counts", {}))
+        with lock:
+            return {key: dict(value) for key, value in self.__dict__.get("_endpoint_counts", {}).items()}
 
     def trading_policy(self, candidate: Candidate):
         from .policy import instrument_policy
