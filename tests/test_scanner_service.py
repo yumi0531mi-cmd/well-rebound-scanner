@@ -425,6 +425,37 @@ def test_warming_band_evaluates_provisionally_without_official_record(tmp_path):
     assert breakdown["final_buy"] == 0
 
 
+def test_stale_symbol_skipped_after_three_strikes(tmp_path):
+    service = ScannerService(
+        config(tmp_path),
+        client=FakeClient([Candidate("005930", "S", 70000, 1, 100, 1000)]),
+        history=FakeHistory(), validations=FakeValidation(), clock=lambda: NOW,
+        session_resolver=resolver(), evaluator=lambda *args, **kwargs: None,
+        live_revalidator=lambda result, price, now: result,
+    )
+    day = session_day(TradingSession.KR_REGULAR, NOW).isoformat()
+    service._stale_streak[f"KR:KRX:KR_REGULAR:005930|{day}"] = 3
+    assert service.run_cycle()
+    assert service.snapshot().counters["candidate_stale_skips"] == 1
+
+
+def test_stale_error_increments_streak(tmp_path):
+    old = pd.DataFrame(
+        {"open": 100.0, "high": 101.0, "low": 99.0, "close": 100.5, "volume": 1000.0},
+        index=pd.date_range(end="2026-09-01 10:00", periods=3, freq="min"),
+    )
+    service = ScannerService(
+        config(tmp_path),
+        client=FakeClient([Candidate("005930", "S", 70000, 1, 100, 1000)]),
+        history=FakeHistory(old), validations=FakeValidation(), clock=lambda: NOW,
+        session_resolver=resolver(), evaluator=lambda *args, **kwargs: None,
+        live_revalidator=lambda result, price, now: result,
+    )
+    assert service.run_cycle()
+    day = session_day(TradingSession.KR_REGULAR, NOW).isoformat()
+    assert service._stale_streak == {f"KR:KRX:KR_REGULAR:005930|{day}": 1}
+
+
 def test_discovery_rotation_advances_only_by_attempted_candidates(tmp_path):
     candidates = [Candidate(f"{index:06d}", str(index), 100, 1, 1, 1) for index in range(5)]
     service = ScannerService(

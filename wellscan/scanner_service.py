@@ -145,6 +145,7 @@ class ScannerCounters:
     candidate_local_snapshot_errors: int = 0
     candidate_local_fallbacks: int = 0
     candidate_local_fallback_symbols: int = 0
+    candidate_stale_skips: int = 0
     warming_provisional: int = 0
     warming_signals: int = 0
     shadow_plans_opened: int = 0
@@ -350,6 +351,7 @@ class ScannerService:
         self._recent_errors: deque[dict[str, str]] = deque(maxlen=RECENT_ERROR_LIMIT)
         self._rotation: dict[str, int] = {}
         self._rotation_population: dict[str, int] = {}
+        self._stale_streak: dict[str, int] = {}
         self._tracking_offset = 0
         self._session_results: dict[TradingSession, dict[str, tuple[Candidate, ScanResult]]] = {}
         self._session_result_day: dict[TradingSession, str] = {}
@@ -1017,6 +1019,7 @@ class ScannerService:
         evaluated_gates = 0
         final_buys = 0
         entry_waits = 0
+        stale_skipped = 0
         for candidate in candidates:
             if self._monotonic() >= deadline:
                 self._counters.budget_exhaustions += 1
@@ -1025,6 +1028,20 @@ class ScannerService:
             current_status = self._session_resolver(status.market, current)
             if not current_status.active or current_status.session != status.session:
                 break
+            stale_day = session_day(status.session, current).isoformat()
+            stale_key = f"{candidate.key}|{stale_day}"
+            if len(self._stale_streak) > 5000:
+                self._stale_streak = {
+                    key: value for key, value in self._stale_streak.items()
+                    if key.endswith(stale_day)
+                }
+            if self._stale_streak.get(stale_key, 0) >= 3:
+                # Persistently stale symbol (no fresh completed bars for
+                # three straight cycles): skip the costly backfill so the
+                # cycle budget goes to symbols that can actually evaluate.
+                self._counters.candidate_stale_skips += 1
+                stale_skipped += 1
+                continue
             try:
                 history_target = self._initial_history_target(candidate)
                 bars_target = history_target
@@ -1055,6 +1072,7 @@ class ScannerService:
                 else:
                     bars_ready += 1
                 close = self._latest_completed_close(bars, status.session, current)
+                self._stale_streak.pop(stale_key, None)
                 policy = self.client.trading_policy(candidate)
                 if getattr(policy, "product", "") == "UNKNOWN":
                     product_unknown += 1
@@ -1146,6 +1164,7 @@ class ScannerService:
                 self._counters.budget_exhaustions += 1
                 break
             except StaleCompletedBarError as exc:
+                self._stale_streak[stale_key] = self._stale_streak.get(stale_key, 0) + 1
                 self._drop_result(candidate)
                 self._error("candidate", exc, symbol=candidate.key, session=status.session.value)
             except (KISError, ValueError, RuntimeError) as exc:
@@ -1168,6 +1187,7 @@ class ScannerService:
             evaluated=evaluated_gates,
             final_buy=final_buys,
             entry_wait=entry_waits,
+            stale_skipped=stale_skipped,
         )
         self._publish_session_completion(status.session)
         self._persist_access_snapshot(
