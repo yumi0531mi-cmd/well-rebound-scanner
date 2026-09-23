@@ -65,6 +65,7 @@ class KISClient:
         self._auth_store = auth_store if auth_store is not None else (
             CockroachBarStore.from_environment() if use_environment else None
         )
+        self._endpoint_counts: dict[str, dict[str, int]] = {}
         self._request_budget = threading.local()
 
     @contextmanager
@@ -362,6 +363,7 @@ class KISClient:
 
     def _ranking(self, sort_code: str, source: str, limit: int = 100) -> list[Candidate]:
         candidates: list[Candidate] = []
+        rows_seen = 0
         continuation = ""
         for _ in range(10):
             payload, next_continuation = self.get(
@@ -385,6 +387,7 @@ class KISClient:
             for row in payload.get("output", []):
                 if not isinstance(row, dict):
                     continue
+                rows_seen += 1
                 candidate = self._domestic_rank_candidate(row, source)
                 if candidate is not None:
                     candidates.append(candidate)
@@ -393,7 +396,18 @@ class KISClient:
             if len(candidates) >= limit or next_continuation not in {"M", "F"}:
                 break
             continuation = "N"
+        self._record_endpoint_counts(f"KR:{source}", rows_seen, len(candidates))
         return candidates
+
+    def _record_endpoint_counts(self, key: str, rows: int, valid: int) -> None:
+        """Remember per-endpoint raw/valid counts for discovery diagnostics."""
+        with self._lock:
+            self._endpoint_counts[key] = {"rows": int(rows), "valid": int(valid)}
+
+    def discovery_endpoint_counts(self) -> dict[str, dict[str, int]]:
+        """Return the latest per-endpoint discovery counts (copy)."""
+        with self._lock:
+            return {key: dict(value) for key, value in self._endpoint_counts.items()}
 
     def trading_policy(self, candidate: Candidate):
         from .policy import instrument_policy
@@ -469,6 +483,7 @@ class KISClient:
                 exchange=exchange,
                 session=session,
             ))
+        self._record_endpoint_counts(f"{exchange}:{source}", len(rows), len(results))
         return results
 
     def overseas_candidate_union(self, session: TradingSession, limit_each: int = 100) -> list[Candidate]:

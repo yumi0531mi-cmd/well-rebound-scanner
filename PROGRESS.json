@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-09-23T10:41:22+09:00",
+  "updated_at": "2026-09-23T10:49:51+09:00",
   "current_step": 3,
   "completed_steps": [
     "기존 저장소와 인계 보고서 확인",
@@ -127,7 +127,8 @@
     "금지 데이터 관련 파일 제외 운영 회귀 전체 및 대상 36개 통과; Ruff·compileall·uv pip check 통과",
     "CockroachDB RU 한도 소진 시 durable probe 실패 → DB 회로 차단, 로컬 KIS 캐시 자동 전환 (0.11.1-local-fallback); scanner_service 28 + durable/history/KIS 21 통과; Ruff·compileall·uv pip check·git diff--check 통과",
     "durable 유무와 무관한 로컬 후보 스냅샷 저장·복구 구현 (0.11.2-local-snapshot); fresh만 저장·복구본 재저장 금지·원래 발견시각 보존·동일 세션 8시간 이내만 복구; scanner_service 32 + durable/history/KIS 21 통과; Ruff·compileall·git diff--check 통과",
-    "UptimeRobot에 스캐너 health 모니터 추가 (5분 간격, 기존 github.com 1개 외 신규; Render free 슬립·cold 3000봉 RU 폭풍 방지; 인계보고서 누락이었음)"
+    "UptimeRobot에 스캐너 health 모니터 추가 (5분 간격, 기존 github.com 1개 외 신규; Render free 슬립·cold 3000봉 RU 폭풍 방지; 인계보고서 누락이었음)",
+    "발견 단계 정밀 계측 구현 (0.11.3-discovery-funnel); KIS 엔드포인트별 원응답·유효건 + 합집합·세션·중복제거·선택·시도·분봉·상품미확인·평가·진입 분리 기록, 화면 처리시간 Expander에 JSON 노출; scanner_service 36 + durable/history/KIS 21 통과; Ruff·compileall·git diff--check 통과"
   ],
   "files": {
     "config.py": "created; qualification/risk/cost/data/model and scanner deadline-margin settings centralized",
@@ -214,7 +215,9 @@
     "holdout_execution_authorized": false,
     "prohibited_data": "2026-08-17 through 2026-08-19 and holdout-candidates",
     "official_performance_source": "KIS one-minute bars only",
-    "no_relaxation": true
+    "no_relaxation": true,
+    "paid_actions_authorized": false,
+    "standing_approval_2026_09_23": "all scanner-completion approvals pre-authorized except any paid action; after completion verify >=5 entry symbols and T1 reaches, record and report"
   },
   "immutable_acceptance_contract": {
     "structural_analysis_bars": 3000,

@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pandas as pd
 
 from wellscan.history import HistoryCache
-from wellscan.kis import KISDeadlineError, KISError
+from wellscan.kis import KISClient, KISDeadlineError, KISError
 from wellscan.models import ALL_ENTRY_STRATEGIES, Candidate, Market, Stage, TradingSession
 from wellscan.policy import estimated_costs, session_day
 from wellscan.scanner_service import (
@@ -256,6 +256,88 @@ def test_local_fallback_restore_does_not_extend_lifetime(tmp_path):
     )
     assert [item.symbol for item in service._discover(status, 10)] == ["005930"]
     assert snapshot_file.read_text(encoding="utf-8") == before
+
+
+def test_discover_records_funnel_breakdown(tmp_path):
+    service = ScannerService(
+        config(tmp_path),
+        client=FakeClient([Candidate("005930", "S", 70000, 1, 100, 1000)]),
+        history=FakeHistory(), validations=FakeValidation(), clock=lambda: NOW,
+    )
+    status = SessionStatus(Market.KR, TradingSession.KR_REGULAR, True, "active")
+    service._discover(status, 10)
+    breakdown = service.snapshot().discovery_breakdown["KR:KR_REGULAR"]
+    assert breakdown["union_raw"] == 1
+    assert breakdown["session_matched"] == 1
+    assert breakdown["deduplicated"] == 1
+    assert breakdown["selected"] == 1
+    assert breakdown["from_fallback"] is False
+    assert breakdown["endpoint"] == {}
+
+
+def test_discover_includes_client_endpoint_counts(tmp_path):
+    client = FakeClient([Candidate("005930", "S", 70000, 1, 100, 1000)])
+    client.discovery_endpoint_counts = lambda: {"KR:XYZ": {"rows": 50, "valid": 40}}
+    service = ScannerService(
+        config(tmp_path), client=client, history=FakeHistory(),
+        validations=FakeValidation(), clock=lambda: NOW,
+    )
+    status = SessionStatus(Market.KR, TradingSession.KR_REGULAR, True, "active")
+    service._discover(status, 10)
+    assert service.snapshot().discovery_breakdown["KR:KR_REGULAR"]["endpoint"] == {
+        "KR:XYZ": {"rows": 50, "valid": 40}
+    }
+
+
+def test_scan_cycle_records_gate_breakdown(tmp_path):
+    candidates = [
+        Candidate("005930", "A", 70000, 1, 100, 1000),
+        Candidate("000660", "B", 100000, 1, 100, 1000),
+    ]
+
+    def evaluator(symbol, frame, price, store, **kwargs):
+        final = symbol == "KR:KRX:KR_REGULAR:005930"
+        return SimpleNamespace(
+            final_buy=final,
+            stage=Stage.FINAL_BUY if final else Stage.CANDIDATE,
+            evaluated_at=kwargs["now"],
+        )
+
+    service = ScannerService(
+        config(tmp_path), client=FakeClient(candidates), history=FakeHistory(),
+        sequences=object(), validations=FakeValidation(), clock=lambda: NOW,
+        session_resolver=resolver(), evaluator=evaluator,
+        live_revalidator=lambda result, price, now: result,
+    )
+    assert service.run_cycle()
+    breakdown = service.snapshot().discovery_breakdown["KR:KR_REGULAR"]
+    assert breakdown["attempted"] == 2
+    assert breakdown["bars_ready"] == 2
+    assert breakdown["product_unknown"] == 0
+    assert breakdown["evaluated"] == 2
+    assert breakdown["final_buy"] == 1
+    assert breakdown["entry_wait"] == 0
+
+
+def test_kis_ranking_records_endpoint_counts(tmp_path, monkeypatch):
+    client = KISClient(cache_root=tmp_path / "auth", use_environment=False)
+    rows = [
+        {"mksc_shrn_iscd": "005930", "hts_kor_isnm": "삼성전자", "stck_prpr": "70000",
+         "prdy_ctrt": "1", "prdy_vrss_sign": "2", "acml_vol": "100", "acml_tr_pbmn": "1000"},
+        {"mksc_shrn_iscd": "", "hts_kor_isnm": "x"},
+        {"mksc_shrn_iscd": "000660", "hts_kor_isnm": "SK하이닉스", "stck_prpr": "100000",
+         "prdy_ctrt": "1", "prdy_vrss_sign": "2", "acml_vol": "100", "acml_tr_pbmn": "1000"},
+    ]
+    monkeypatch.setattr(KISClient, "get", lambda self, *args, **kwargs: ({"output": rows}, ""))
+    assert [item.symbol for item in client._ranking("0", "거래량TOP100", 100)] == ["005930", "000660"]
+    assert client.discovery_endpoint_counts() == {"KR:거래량TOP100": {"rows": 3, "valid": 2}}
+    overseas = [{"symb": "AAPL", "name": "Apple", "last": "200", "rate": "1", "tvol": "10", "tamt": "20"}]
+    monkeypatch.setattr(
+        KISClient, "get",
+        lambda self, *args, **kwargs: ({"output2": overseas, "keyb": ""}, ""),
+    )
+    assert [item.symbol for item in client._overseas_ranking("NAS", "거래량TOP100", 10, TradingSession.US_REGULAR)] == ["AAPL"]
+    assert client.discovery_endpoint_counts()["NAS:거래량TOP100"] == {"rows": 1, "valid": 1}
 
 
 def test_discovery_rotation_advances_only_by_attempted_candidates(tmp_path):

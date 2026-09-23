@@ -168,6 +168,7 @@ class ScannerServiceStatus:
     recent_errors: tuple[dict[str, str], ...]
     budget_contract: dict[str, float | int]
     access_coverage: dict[str, dict[str, Any]]
+    discovery_breakdown: dict[str, dict[str, Any]]
 
 
 @dataclass(frozen=True)
@@ -316,6 +317,8 @@ class ScannerService:
         self._results_lock = threading.Lock()
         self._candidate_snapshot_buckets: dict[str, int] = {}
         self._local_snapshot_buckets: dict[str, int] = {}
+        self._discovery_breakdown: dict[str, dict[str, Any]] = {}
+        self._discovery_lock = threading.Lock()
         self._recent_candidates: dict[str, tuple[datetime, tuple[Candidate, ...]]] = {}
         self._latest_access_coverage: dict[str, dict[str, Any]] = {}
         self._thread: threading.Thread | None = None
@@ -389,6 +392,7 @@ class ScannerService:
                     "max_tracking_cases": self.config.max_tracking_cases,
                 },
                 access_coverage={key: dict(value) for key, value in self._latest_access_coverage.items()},
+                discovery_breakdown=self._discovery_breakdown_snapshot(),
             )
 
     def results_snapshot(self) -> ScannerResultsSnapshot:
@@ -717,6 +721,16 @@ class ScannerService:
                 self._error("tracking-expiry", exc)
         return all_attempted
 
+    def _discovery_breakdown_snapshot(self) -> dict[str, dict[str, Any]]:
+        """Return a copy of the latest per-session discovery funnel."""
+        with self._discovery_lock:
+            return {key: dict(value) for key, value in self._discovery_breakdown.items()}
+
+    def _record_discovery_stage(self, key: str, **stages: Any) -> None:
+        with self._discovery_lock:
+            entry = self._discovery_breakdown.setdefault(key, {})
+            entry.update(stages)
+
     def _snapshot_records_to_candidates(
         self,
         records: list[dict[str, Any]],
@@ -814,6 +828,13 @@ class ScannerService:
         unique = list({item.key: item for item in candidates}.values())
         observed_at = self._aware_now()
         fresh = bool(unique)
+        endpoint_counts: dict[str, dict[str, int]] = {}
+        endpoint_reader = getattr(self.client, "discovery_endpoint_counts", None)
+        if callable(endpoint_reader):
+            try:
+                endpoint_counts = dict(endpoint_reader())
+            except Exception:
+                endpoint_counts = {}
         if not fresh:
             self._counters.candidate_empty_discoveries += 1
             unique = self._fallback_candidates(status, observed_at)
@@ -823,6 +844,17 @@ class ScannerService:
         if not unique:
             key = f"{status.market.value}:{status.session.value}"
             self._rotation_population[key] = 0
+            self._record_discovery_stage(
+                key,
+                endpoint=dict(endpoint_counts),
+                union_raw=len(source),
+                session_matched=len(candidates),
+                deduplicated=0,
+                rotation_population=0,
+                selected=0,
+                from_fallback=not fresh,
+                observed_at=observed_at.isoformat(),
+            )
             return []
         self._prune_session_results(status.session, {item.key for item in unique})
         snapshot_writer = getattr(self._durable_store, "save_candidate_snapshot", None)
@@ -864,6 +896,17 @@ class ScannerService:
         rotated = unique[offset:] + unique[:offset]
         selected = rotated[:limit]
         self._rotation_population[key] = len(unique)
+        self._record_discovery_stage(
+            key,
+            endpoint=dict(endpoint_counts),
+            union_raw=len(source),
+            session_matched=len(candidates),
+            deduplicated=len(unique),
+            rotation_population=len(unique),
+            selected=len(selected),
+            from_fallback=not fresh,
+            observed_at=observed_at.isoformat(),
+        )
         return selected
 
     def _advance_rotation(self, status: SessionStatus, attempted: int) -> None:
@@ -917,6 +960,11 @@ class ScannerService:
                 )
                 return
         attempted = 0
+        bars_ready = 0
+        product_unknown = 0
+        evaluated_gates = 0
+        final_buys = 0
+        entry_waits = 0
         for candidate in candidates:
             if self._monotonic() >= deadline:
                 self._counters.budget_exhaustions += 1
@@ -942,8 +990,12 @@ class ScannerService:
                     self._counters.data_wait_observations += 1
                     if status.session != TradingSession.US_DAY:
                         continue
+                else:
+                    bars_ready += 1
                 close = self._latest_completed_close(bars, status.session, current)
                 policy = self.client.trading_policy(candidate)
+                if getattr(policy, "product", "") == "UNKNOWN":
+                    product_unknown += 1
                 result = self._evaluator(
                     candidate.key,
                     bars,
@@ -956,6 +1008,11 @@ class ScannerService:
                     classification_portfolio=ALL_ENTRY_STRATEGIES,
                 )
                 self._counters.candidates_evaluated += 1
+                evaluated_gates += 1
+                if result.final_buy:
+                    final_buys += 1
+                elif result.stage == Stage.ENTRY_WAIT:
+                    entry_waits += 1
                 published_candidate = candidate
                 if result.stage in {Stage.FINAL_BUY, Stage.ENTRY_WAIT}:
                     live_price, checked_at = self._live_price(candidate)
@@ -995,6 +1052,15 @@ class ScannerService:
             except Exception as exc:  # keep the daemon alive, but expose the unexpected type
                 self._error("candidate-unexpected", exc, symbol=candidate.key, session=status.session.value)
         self._advance_rotation(status, attempted)
+        self._record_discovery_stage(
+            rotation_key,
+            attempted=attempted,
+            bars_ready=bars_ready,
+            product_unknown=product_unknown,
+            evaluated=evaluated_gates,
+            final_buy=final_buys,
+            entry_wait=entry_waits,
+        )
         self._publish_session_completion(status.session)
         self._persist_access_snapshot(
             status,

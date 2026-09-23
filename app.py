@@ -1290,6 +1290,11 @@ with st.expander("처리 시간 실측 · 미충족 이유"):
     st.json(TIMINGS.summary())
     st.caption("조건 검사 목표 p95 500ms · API 수집/화면 표시 지연과 별개 · 실측 표본이 없으면 성능 판정 불가")
     st.write({stage.value: number for stage, number in counts.items()})
+    _daemon_breakdown_source = daemon_service_status()
+    _discovery_breakdown = getattr(_daemon_breakdown_source, "discovery_breakdown", None) or {}
+    if _discovery_breakdown:
+        st.caption("발견 단계 계측 · 원응답→세션→중복제거→선택→분봉→상품→평가→진입")
+        st.json(_discovery_breakdown)
     rejected_reasons: dict[str, int] = {}
     strategy_rejected_reasons: dict[str, int] = {}
     strategy_formed_counts: dict[str, int] = {}
