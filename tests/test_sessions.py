@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 import pandas as pd
 
 from wellscan.models import Market, TradingSession
-from wellscan.sessions import filter_session_bars, session_exchange, session_status
+from wellscan.sessions import filter_session_bars, preferred_market, session_exchange, session_status
 
 
 def test_domestic_regular_only() -> None:
@@ -15,6 +15,16 @@ def test_us_dst_sessions() -> None:
     assert session_status(Market.US, datetime(2026, 8, 21, 15, 0, tzinfo=UTC)).session == TradingSession.US_REGULAR
     assert session_status(Market.US, datetime(2026, 8, 21, 21, 30, tzinfo=UTC)).session == TradingSession.CLOSED
     assert session_status(Market.US, datetime(2026, 8, 21, 9, 0, tzinfo=UTC)).session == TradingSession.US_PRE
+
+
+def test_active_us_market_is_preferred_when_kr_is_closed() -> None:
+    # 2026-09-24 02:30 KST is 2026-09-23 13:30 New York: US regular session.
+    assert preferred_market(datetime(2026, 9, 23, 17, 30, tzinfo=UTC)) == Market.US
+
+
+def test_kr_remains_default_when_both_supported_markets_are_active() -> None:
+    # KR regular and KIS US day sessions overlap at this instant.
+    assert preferred_market(datetime(2026, 8, 21, 1, 0, tzinfo=UTC)) == Market.KR
 
 
 def test_us_standard_time_day_and_exchange_mapping() -> None:

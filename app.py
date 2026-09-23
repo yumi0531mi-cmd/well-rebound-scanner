@@ -50,7 +50,7 @@ from wellscan.quotes import QuoteBook
 from wellscan.realtime import RealtimeHub
 from wellscan.scanner_service import daemon_results_snapshot, daemon_service_status, daemon_shadow_summary, shared_runtime_components
 from wellscan.sequence import SequenceStore
-from wellscan.sessions import ENABLED_SESSIONS, KST, session_exchange, session_status
+from wellscan.sessions import ENABLED_SESSIONS, KST, NEW_YORK, preferred_market, session_exchange, session_status
 from wellscan.universe_history import PointInTimeUniverse
 from wellscan.validation import SignalCase, ValidationStore
 from wellscan.web_status import (
@@ -712,9 +712,23 @@ def render_result(candidate: Candidate, result: ScanResult, *, actionable: bool 
 with st.sidebar:
     st.title("다중전략 스캐너")
     st.caption("거래 대상: 국내 정규장 · 미국 데이/프리/정규장 (애프터 제외)")
-    market_label = st.radio("시장", ["국내주식", "미국주식"], horizontal=True)
-    market = Market.KR if market_label == "국내주식" else Market.US
-    status = session_status(market)
+    market_now = datetime.now(UTC)
+    kr_status = session_status(Market.KR, market_now)
+    us_status = session_status(Market.US, market_now)
+    market_mode = st.radio("시장", ["자동(활성 시장)", "국내주식", "미국주식"], horizontal=True)
+    market = (
+        preferred_market(market_now) if market_mode == "자동(활성 시장)"
+        else Market.KR if market_mode == "국내주식" else Market.US
+    )
+    status = kr_status if market == Market.KR else us_status
+    st.caption(
+        f"현재 시각: 한국 {market_now.astimezone(KST):%m-%d %H:%M KST} · "
+        f"미국 {market_now.astimezone(NEW_YORK):%m-%d %H:%M %Z}"
+    )
+    st.caption(
+        f"전체 장 상태: 국내 {kr_status.label}{' 감시중' if kr_status.active else ''} · "
+        f"미국 {us_status.label}{' 감시중' if us_status.active else ''}"
+    )
     st.info(f"현재 세션: {status.label}" + (" · 감시 중" if status.active else " · 신규 신호 중지"))
     mode = st.radio("후보 모드", ["전체", "일반주", "급등주"], horizontal=True)
     display_count = st.slider("표시 후보", 5, 10, 5)

@@ -139,6 +139,14 @@ def session_status(market: Market, now: datetime | None = None) -> SessionStatus
     return SessionStatus(market, TradingSession.CLOSED, False, "미국 장 마감")
 
 
+def preferred_market(now: datetime | None = None) -> Market:
+    """Prefer the sole active market; keep KR as the deterministic fallback."""
+    instant = now or datetime.now(UTC)
+    kr_active = session_status(Market.KR, instant).active
+    us_active = session_status(Market.US, instant).active
+    return Market.US if us_active and not kr_active else Market.KR
+
+
 def session_exchange(exchange: str, session: TradingSession) -> str:
     if session != TradingSession.US_DAY:
         return exchange

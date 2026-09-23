@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-09-24T02:31:19+09:00",
+  "updated_at": "2026-09-24T02:38:44+09:00",
   "current_step": 3,
   "completed_steps": [
     "기존 저장소와 인계 보고서 확인",
@@ -136,7 +136,8 @@
     "3단계 게이트 예열 평가 (0.11.6-warming-gates); 180~900봉은 격리된 메모리 시퀀스로 평가 후 CANDIDATE·예열중 사유로만 게시, 공식 기록·ENTRY 승격 차단, 900·비용·RR 불변; 전체 522 통과·실패 0·Ruff 전체 통과",
     "같은 종목 연속 분봉 정체 시 3회 후 스킵 (0.11.7-stale-skip); IQMM식 StaleCompletedBar 5연속 반복이 사이클 예산을 먹는 문제 수정, 당일 한정·성공 시 해제; 전체 524 통과·실패 0·Ruff 전체 통과",
     "4단계 파이프라인 감사와 데몬 3000봉 예열 연결 (0.11.8-pipeline-audit); KIS 원본 행·기간, 정렬·중복·분봉 누락, 22개 형성·비용·정책 차단, 게시 수를 세션별 계측하고 무한 예열 대기열을 4개로 제한·900봉 근접순 처리; 전체 593 통과·실패 0·Ruff 전체 통과",
-    "커밋 ca65d0b를 origin/main에 푸시하고 Render 운영 앱 0.11.8-pipeline-audit 배지·health 200 ok·로컬/원격 SHA 일치를 확인; 장 마감 상태이므로 실세션 파이프라인 수치와 성과 판정은 다음 활성 세션으로 이월"
+    "커밋 ca65d0b를 origin/main에 푸시하고 Render 운영 앱 0.11.8-pipeline-audit 배지·health 200 ok·로컬/원격 SHA 일치를 확인; 당시 국내 탭은 마감이지만 미국 정규장은 활성 상태였음",
+    "국내주식 고정 기본탭 때문에 미국 정규장 중에도 장 마감처럼 보이는 UI 결함 수정 (0.11.9-active-market-clock); 자동(활성 시장) 기본 선택, 한국·뉴욕 현재시각과 국내·미국 전체 상태 동시 표시, 현재 실제 시각 KR=CLOSED·US=US_REGULAR·PREFERRED=US 확인; 전체 595 통과·실패 0·Ruff 통과"
   ],
   "files": {
     "config.py": "created; qualification/risk/cost/data/model and scanner deadline-margin settings centralized",
@@ -195,9 +196,9 @@
     "false_shared_overheat_missed_fixed": true,
     "non_15m_strategy_downtrend_gate_fixed": true,
     "public_strategy_rejection_diagnostics_added": true,
-    "latest_safe_operational_test_count": 593,
+    "latest_safe_operational_test_count": 595,
     "latest_deployed_version": "0.11.8-pipeline-audit",
-    "latest_local_verified_version": "0.11.8-pipeline-audit",
+    "latest_local_verified_version": "0.11.9-active-market-clock",
     "post_04fc8ab_targeted_tests": 49,
     "post_04fc8ab_test_note": "04fc8ab verified with 28 scanner_service + 21 durable/history/KIS targeted tests only; full 459 was not re-run after 04fc8ab",
     "live_shadow_22_strategy_diagnostics_implemented": true,
