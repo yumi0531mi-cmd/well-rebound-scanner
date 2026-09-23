@@ -10,7 +10,7 @@ import pandas as pd
 from wellscan.history import HistoryCache
 from wellscan.kis import KISDeadlineError, KISError
 from wellscan.models import ALL_ENTRY_STRATEGIES, Candidate, Market, Stage, TradingSession
-from wellscan.policy import estimated_costs
+from wellscan.policy import estimated_costs, session_day
 from wellscan.scanner_service import (
     ScannerService,
     ScannerServiceConfig,
@@ -181,6 +181,81 @@ def test_empty_candidate_api_recovers_only_recent_real_snapshot(tmp_path):
     assert counters["candidate_empty_discoveries"] == 1
     assert counters["candidate_fallbacks"] == 1
     assert counters["candidate_fallback_symbols"] == 1
+
+
+def test_fresh_discovery_persists_local_snapshot_without_durable(tmp_path):
+    candidate = Candidate("005930", "Samsung", 70000, 1, 100, 1000)
+    service = ScannerService(
+        config(tmp_path), client=FakeClient([candidate]), history=FakeHistory(),
+        validations=FakeValidation(), clock=lambda: NOW,
+    )
+    status = SessionStatus(Market.KR, TradingSession.KR_REGULAR, True, "active")
+    assert [item.symbol for item in service._discover(status, 10)] == ["005930"]
+    assert (tmp_path / "candidate_snapshots" / "KR_KR_REGULAR.json").exists()
+    counters = service.snapshot().counters
+    assert counters["candidate_local_snapshots_written"] == 1
+    assert counters["candidate_local_snapshot_candidates_written"] == 1
+    # Same bucket: no rewrite.
+    service._discover(status, 10)
+    assert service.snapshot().counters["candidate_local_snapshots_written"] == 1
+
+
+def test_empty_discovery_recovers_from_local_snapshot_without_durable(tmp_path):
+    candidate = Candidate("005930", "Samsung", 70000, 1, 100, 1000)
+    seed = ScannerService(
+        config(tmp_path), client=FakeClient([candidate]), history=FakeHistory(),
+        validations=FakeValidation(), clock=lambda: NOW,
+    )
+    status = SessionStatus(Market.KR, TradingSession.KR_REGULAR, True, "active")
+    seed._discover(status, 10)
+    service = ScannerService(
+        config(tmp_path), client=FakeClient([]), history=FakeHistory(),
+        validations=FakeValidation(), clock=lambda: NOW,
+    )
+    recovered = service._discover(status, 10)
+    assert [item.symbol for item in recovered] == ["005930"]
+    assert "snapshot-fallback" in recovered[0].sources
+    assert "local-snapshot" in recovered[0].sources
+    counters = service.snapshot().counters
+    assert counters["candidate_empty_discoveries"] == 1
+    assert counters["candidate_local_fallbacks"] == 1
+    assert counters["candidate_local_fallback_symbols"] == 1
+
+
+def test_local_snapshot_rejects_stale_and_foreign_session(tmp_path):
+    from wellscan.local_snapshot import LocalCandidateSnapshotStore
+    store = LocalCandidateSnapshotStore(tmp_path / "candidate_snapshots")
+    candidate = Candidate("005930", "Samsung", 70000, 1, 100, 1000)
+    old = NOW - timedelta(seconds=9 * 3600)
+    store.save("KR", "KR_REGULAR", [candidate], old, session_day(TradingSession.KR_REGULAR, old).isoformat())
+    service = ScannerService(
+        config(tmp_path), client=FakeClient([]), history=FakeHistory(),
+        validations=FakeValidation(), clock=lambda: NOW,
+    )
+    status = SessionStatus(Market.KR, TradingSession.KR_REGULAR, True, "active")
+    assert service._discover(status, 10) == []
+    # Fresh timestamp but another trading day is also rejected.
+    store.save("KR", "KR_REGULAR", [candidate], NOW, "2000-01-01")
+    assert service._discover(status, 10) == []
+
+
+def test_local_fallback_restore_does_not_extend_lifetime(tmp_path):
+    candidate = Candidate("005930", "Samsung", 70000, 1, 100, 1000)
+    seed = ScannerService(
+        config(tmp_path), client=FakeClient([candidate]), history=FakeHistory(),
+        validations=FakeValidation(), clock=lambda: NOW,
+    )
+    status = SessionStatus(Market.KR, TradingSession.KR_REGULAR, True, "active")
+    seed._discover(status, 10)
+    snapshot_file = tmp_path / "candidate_snapshots" / "KR_KR_REGULAR.json"
+    before = snapshot_file.read_text(encoding="utf-8")
+    later = NOW + timedelta(minutes=10)
+    service = ScannerService(
+        config(tmp_path), client=FakeClient([]), history=FakeHistory(),
+        validations=FakeValidation(), clock=lambda: later,
+    )
+    assert [item.symbol for item in service._discover(status, 10)] == ["005930"]
+    assert snapshot_file.read_text(encoding="utf-8") == before
 
 
 def test_discovery_rotation_advances_only_by_attempted_candidates(tmp_path):

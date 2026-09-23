@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-09-23T02:02:33+09:00",
+  "updated_at": "2026-09-23T09:29:57+09:00",
   "current_step": 3,
   "completed_steps": [
     "기존 저장소와 인계 보고서 확인",
@@ -125,7 +125,8 @@
     "22개 그림자 형성 뒤 계획 비용·현재 체결구간·현재가 순손익비·상품분류 통과를 분리 계측하고 형성 후보를 관찰화면 우선 노출",
     "화면의 현재가·완료봉·상시엔진·최근 주기 시각에 UTC와 한국 KST를 병기",
     "금지 데이터 관련 파일 제외 운영 회귀 전체 및 대상 36개 통과; Ruff·compileall·uv pip check 통과",
-    "CockroachDB RU Han-do sojin si durable probe silpae -> DB hoero chadan, local KIS cache jadoon jeonhwan (0.11.1-local-fallback); scanner_service 28 + durable/history/KIS 21 tonggwa; Ruff/compileall/uv pip check/git diff--check tonggwa"
+    "CockroachDB RU 한도 소진 시 durable probe 실패 → DB 회로 차단, 로컬 KIS 캐시 자동 전환 (0.11.1-local-fallback); scanner_service 28 + durable/history/KIS 21 통과; Ruff·compileall·uv pip check·git diff--check 통과",
+    "durable 유무와 무관한 로컬 후보 스냅샷 저장·복구 구현 (0.11.2-local-snapshot); fresh만 저장·복구본 재저장 금지·원래 발견시각 보존·동일 세션 8시간 이내만 복구; scanner_service 32 + durable/history/KIS 21 통과; Ruff·compileall·git diff--check 통과"
   ],
   "files": {
     "config.py": "created; qualification/risk/cost/data/model and scanner deadline-margin settings centralized",
@@ -176,7 +177,7 @@
     "inactive_16_official_performance": false,
     "live_access_snapshot_persistence_implemented": true,
     "live_access_qualification_status": "COLLECTING_FROM_0.10.5_DEPLOYMENT",
-    "latest_deployed_commit": "340fac6",
+    "latest_deployed_commit": "04fc8ab",
     "strategy_specific_timeframes_implemented": true,
     "same_day_reentry_after_rearm_implemented": true,
     "strategy_22_kis_admin_audit_implemented": true,
@@ -185,6 +186,9 @@
     "non_15m_strategy_downtrend_gate_fixed": true,
     "public_strategy_rejection_diagnostics_added": true,
     "latest_safe_operational_test_count": 459,
+    "latest_deployed_version": "0.11.1-local-fallback",
+    "post_04fc8ab_targeted_tests": 49,
+    "post_04fc8ab_test_note": "04fc8ab verified with 28 scanner_service + 21 durable/history/KIS targeted tests only; full 459 was not re-run after 04fc8ab",
     "live_shadow_22_strategy_diagnostics_implemented": true,
     "daemon_shadow_22_strategy_diagnostics_implemented": true,
     "first_live_shadow_sample": "US_PRE: 6 evaluated, inactive TREND_PULLBACK formed 1, active actionable 0; incomplete cycle",
@@ -224,6 +228,7 @@
     "official_evidence": "actual KIS one-minute bars with point-in-time candidate universe"
   },
   "next_actions": [
+    "implement durable-independent local candidate snapshot fallback: always save, restore same-session max 8h only, never extend lifetime by re-saving restores",
     "persist hypothetical three-bar fills and T1 outcomes for cost-qualified shadow formations without enabling unqualified strategies",
     "after the user manually authenticates the Render admin page, run the 22-strategy independent audit with actual KIS minute bars and point-in-time candidate snapshots",
     "report formation, cost pass, fill, and T1 rates without claiming unqualified win rates; keep 2026-08-17 through 19 and holdout-candidates excluded",

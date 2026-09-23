@@ -40,6 +40,7 @@ from .engine import MAX_COMPLETED_BAR_AGE_SECONDS, evaluate, revalidate_live
 from .history import HistoryCache
 from .indicators import normalize_bars
 from .kis import KISClient, KISDeadlineError, KISError
+from .local_snapshot import LocalCandidateSnapshotStore
 from .models import ALL_ENTRY_STRATEGIES, Candidate, Market, ScanResult, Stage, TradingSession
 from .policy import session_day
 from .sequence import SequenceStore
@@ -138,6 +139,11 @@ class ScannerCounters:
     candidate_snapshots_written: int = 0
     candidate_snapshot_candidates_written: int = 0
     candidate_snapshot_errors: int = 0
+    candidate_local_snapshots_written: int = 0
+    candidate_local_snapshot_candidates_written: int = 0
+    candidate_local_snapshot_errors: int = 0
+    candidate_local_fallbacks: int = 0
+    candidate_local_fallback_symbols: int = 0
     candidate_prefetches: int = 0
     candidate_prefetch_symbols: int = 0
     candidate_prefetch_errors: int = 0
@@ -267,6 +273,7 @@ class ScannerService:
         history: HistoryCache | Any | None = None,
         sequences: SequenceStore | Any | None = None,
         validations: ValidationStore | Any | None = None,
+        local_snapshots: LocalCandidateSnapshotStore | Any | None = None,
         clock: Callable[[], datetime] | None = None,
         monotonic: Callable[[], float] | None = None,
         session_resolver: Callable[[Market, datetime], SessionStatus] | None = None,
@@ -288,6 +295,14 @@ class ScannerService:
             self.sequences = sequences if sequences is not None else SequenceStore()
             self.validations = validations if validations is not None else ValidationStore(sequence_store=self.sequences)
         self._durable_store = getattr(self.history, "_durable_store", None)
+        if local_snapshots is not None:
+            self._local_snapshots = local_snapshots
+        else:
+            # Lives next to the status file: production .scanner_data in
+            # operation, an isolated tmp dir in tests.
+            self._local_snapshots = LocalCandidateSnapshotStore(
+                self.config.status_path.parent / "candidate_snapshots"
+            )
         self._clock = clock or (lambda: datetime.now(UTC))
         self._monotonic = monotonic or time.monotonic
         self._session_resolver = session_resolver or session_status
@@ -300,6 +315,7 @@ class ScannerService:
         self._status_file_lock = threading.Lock()
         self._results_lock = threading.Lock()
         self._candidate_snapshot_buckets: dict[str, int] = {}
+        self._local_snapshot_buckets: dict[str, int] = {}
         self._recent_candidates: dict[str, tuple[datetime, tuple[Candidate, ...]]] = {}
         self._latest_access_coverage: dict[str, dict[str, Any]] = {}
         self._thread: threading.Thread | None = None
@@ -701,6 +717,42 @@ class ScannerService:
                 self._error("tracking-expiry", exc)
         return all_attempted
 
+    def _snapshot_records_to_candidates(
+        self,
+        records: list[dict[str, Any]],
+        status: SessionStatus,
+        *,
+        extra_sources: frozenset[str] = frozenset(),
+    ) -> list[Candidate]:
+        """Parse durable/local snapshot records into live candidates."""
+        candidates = []
+        for record in records:
+            parts = str(record.get("namespace", "")).split(":")
+            if len(parts) != 3:
+                continue
+            try:
+                numeric = tuple(
+                    float(record.get(field, 0.0))
+                    for field in ("price", "change_pct", "volume", "turnover")
+                )
+            except (TypeError, ValueError):
+                continue
+            if not all(math.isfinite(value) for value in numeric) or numeric[0] <= 0:
+                continue
+            symbol = str(record.get("symbol", "")).upper()
+            if not symbol:
+                continue
+            raw_sources = record.get("sources", ())
+            if isinstance(raw_sources, str):
+                raw_sources = (raw_sources,)
+            sources = frozenset(str(value) for value in raw_sources) | {"snapshot-fallback"} | extra_sources
+            candidates.append(Candidate(
+                symbol, str(record.get("name", "")),
+                *numeric, sources=sources, market=status.market,
+                exchange=parts[1], session=status.session,
+            ))
+        return candidates
+
     def _fallback_candidates(self, status: SessionStatus, observed_at: datetime) -> list[Candidate]:
         key = f"{status.market.value}:{status.session.value}"
         cutoff = observed_at - timedelta(seconds=self.config.candidate_fallback_max_age_seconds)
@@ -715,44 +767,38 @@ class ScannerService:
         cached = self._recent_candidates.get(key)
         if cached is not None and cached[0] >= cutoff:
             return list(cached[1])
+        records: list[dict[str, Any]] = []
+        extra_sources: frozenset[str] = frozenset()
         loader = getattr(self._durable_store, "load_latest_candidate_snapshot", None)
-        if not callable(loader):
-            return []
-        try:
-            records = loader(status.market.value, status.session.value, cutoff, observed_at)
-            candidates = []
-            for record in records:
-                parts = str(record.get("namespace", "")).split(":")
-                if len(parts) != 3:
-                    continue
-                try:
-                    numeric = tuple(
-                        float(record.get(field, 0.0))
-                        for field in ("price", "change_pct", "volume", "turnover")
-                    )
-                except (TypeError, ValueError):
-                    continue
-                if not all(math.isfinite(value) for value in numeric) or numeric[0] <= 0:
-                    continue
-                symbol = str(record.get("symbol", "")).upper()
-                if not symbol:
-                    continue
-                raw_sources = record.get("sources", ())
-                if isinstance(raw_sources, str):
-                    raw_sources = (raw_sources,)
-                sources = frozenset(str(value) for value in raw_sources) | {"snapshot-fallback"}
-                candidates.append(Candidate(
-                    symbol, str(record.get("name", "")),
-                    *numeric, sources=sources, market=status.market,
-                    exchange=parts[1], session=status.session,
-                ))
-            if candidates:
-                self._recent_candidates[key] = (records[0]["observed_at"], tuple(candidates))
-            return candidates
-        except Exception as exc:
-            self._counters.candidate_fallback_errors += 1
-            self._error("candidate-fallback", exc, session=status.session.value)
-            return []
+        if callable(loader):
+            try:
+                records = list(loader(status.market.value, status.session.value, cutoff, observed_at) or [])
+            except Exception as exc:
+                self._counters.candidate_fallback_errors += 1
+                self._error("candidate-fallback", exc, session=status.session.value)
+        if not records:
+            # Durable is unavailable (local fallback mode) or has nothing
+            # recent: recover the latest fresh local snapshot instead.
+            try:
+                records = self._local_snapshots.load(
+                    status.market.value,
+                    status.session.value,
+                    cutoff,
+                    observed_at,
+                    trading_day.isoformat(),
+                )
+            except Exception as exc:
+                self._counters.candidate_local_snapshot_errors += 1
+                self._error("candidate-local-fallback", exc, session=status.session.value)
+                return []
+            if records:
+                extra_sources = frozenset({"local-snapshot"})
+                self._counters.candidate_local_fallbacks += 1
+                self._counters.candidate_local_fallback_symbols += len(records)
+        candidates = self._snapshot_records_to_candidates(records, status, extra_sources=extra_sources)
+        if candidates:
+            self._recent_candidates[key] = (records[0]["observed_at"], tuple(candidates))
+        return candidates
 
     def _discover(self, status: SessionStatus, limit: int) -> list[Candidate]:
         request_each = min(self.config.discovery_limit_each, max(20, limit))
@@ -793,6 +839,26 @@ class ScannerService:
             except Exception as exc:
                 self._counters.candidate_snapshot_errors += 1
                 self._error("candidate-snapshot", exc, session=status.session.value)
+        local_bucket = int(observed_at.timestamp() // CANDIDATE_SNAPSHOT_INTERVAL_SECONDS)
+        if fresh and self._local_snapshot_buckets.get(snapshot_key) != local_bucket:
+            # Always persist fresh discoveries locally, even when the durable
+            # writer is gone, so empty KIS discoveries can recover them.
+            # Restores are never re-saved (only `fresh` saves), so a restored
+            # snapshot cannot extend its own lifetime.
+            try:
+                self._local_snapshots.save(
+                    status.market.value,
+                    status.session.value,
+                    unique,
+                    observed_at,
+                    session_day(status.session, observed_at).isoformat(),
+                )
+                self._local_snapshot_buckets[snapshot_key] = local_bucket
+                self._counters.candidate_local_snapshots_written += 1
+                self._counters.candidate_local_snapshot_candidates_written += len(unique)
+            except Exception as exc:
+                self._counters.candidate_local_snapshot_errors += 1
+                self._error("candidate-local-snapshot", exc, session=status.session.value)
         key = f"{status.market.value}:{status.session.value}"
         offset = self._rotation.get(key, 0) % len(unique)
         rotated = unique[offset:] + unique[:offset]
