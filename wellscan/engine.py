@@ -407,9 +407,22 @@ def evaluate(
         bars = bars.loc[bars.index + pd.Timedelta(minutes=1) <= reference]
     else:
         reference = None
+    input_rows = len(bars)
+    input_was_ascending = bool(
+        isinstance(bars.index, pd.DatetimeIndex) and bars.index.is_monotonic_increasing
+    )
+    input_duplicate_rows = int(bars.index.duplicated(keep=False).sum()) if input_rows else 0
     # Validate every supplied completed row, including before a possible hit.
     # Invalid revised inputs must never be hidden by cache reuse.
     bars = normalize_bars(bars).tail(STRUCTURAL_WINDOW_BARS)
+    minute_diffs = bars.index.to_series().diff().dropna() if len(bars) > 1 else pd.Series(dtype="timedelta64[ns]")
+    intraday_gaps = minute_diffs[(minute_diffs > pd.Timedelta(minutes=1)) & (minute_diffs <= pd.Timedelta(hours=4))]
+    missing_minutes = int(
+        ((intraday_gaps / pd.Timedelta(minutes=1)) - 1).sum()
+    ) if not intraday_gaps.empty else 0
+    maximum_gap_minutes = int(
+        intraday_gaps.max() / pd.Timedelta(minutes=1)
+    ) if not intraday_gaps.empty else 0
     if not bars.empty:
         completed_stamp = pd.Timestamp(bars.index[-1]) + pd.Timedelta(minutes=1)
         timezone = "Asia/Seoul" if session == TradingSession.KR_REGULAR else "America/New_York" if session is not None else "UTC"
@@ -635,6 +648,13 @@ def evaluate(
         matched_strategies=tuple(item.strategy for item in opportunities),
         reasons=reasons,
         diagnostics={
+            "input_rows": input_rows,
+            "input_was_ascending": input_was_ascending,
+            "input_duplicate_rows": input_duplicate_rows,
+            "normalized_rows": len(bars),
+            "intraday_gap_intervals": len(intraday_gaps),
+            "missing_intraday_minutes": missing_minutes,
+            "maximum_intraday_gap_minutes": maximum_gap_minutes,
             "bars_1m": len(bars),
             "bars_15m": count15,
             "bars_5m": count5,

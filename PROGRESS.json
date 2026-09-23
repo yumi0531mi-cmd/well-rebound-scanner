@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-09-24T00:28:34+09:00",
+  "updated_at": "2026-09-24T02:04:25+09:00",
   "current_step": 3,
   "completed_steps": [
     "기존 저장소와 인계 보고서 확인",
@@ -134,7 +134,8 @@
     "Render 빌드 실패 복구: 3순위 계측이 object.__new__ 클라이언트에서 _lock 없이 터지던 버그를 방어적으로 수정; Render 동일 전체 521 통과·실패 0·Ruff 전체 통과",
     "즉시 복구용 PG 호환 (0.11.5-pg-compat); DDL의 Cockroach 전용 STRING형을 양쪽 모두 되는 TEXT로 교체, 무료 Supabase 교체 시 코드 변경 없이 URL만 교체; durable 계열 69 통과",
     "3단계 게이트 예열 평가 (0.11.6-warming-gates); 180~900봉은 격리된 메모리 시퀀스로 평가 후 CANDIDATE·예열중 사유로만 게시, 공식 기록·ENTRY 승격 차단, 900·비용·RR 불변; 전체 522 통과·실패 0·Ruff 전체 통과",
-    "같은 종목 연속 분봉 정체 시 3회 후 스킵 (0.11.7-stale-skip); IQMM식 StaleCompletedBar 5연속 반복이 사이클 예산을 먹는 문제 수정, 당일 한정·성공 시 해제; 전체 524 통과·실패 0·Ruff 전체 통과"
+    "같은 종목 연속 분봉 정체 시 3회 후 스킵 (0.11.7-stale-skip); IQMM식 StaleCompletedBar 5연속 반복이 사이클 예산을 먹는 문제 수정, 당일 한정·성공 시 해제; 전체 524 통과·실패 0·Ruff 전체 통과",
+    "4단계 파이프라인 감사와 데몬 3000봉 예열 연결 (0.11.8-pipeline-audit); KIS 원본 행·기간, 정렬·중복·분봉 누락, 22개 형성·비용·정책 차단, 게시 수를 세션별 계측하고 무한 예열 대기열을 4개로 제한·900봉 근접순 처리; 전체 593 통과·실패 0·Ruff 전체 통과"
   ],
   "files": {
     "config.py": "created; qualification/risk/cost/data/model and scanner deadline-margin settings centralized",
@@ -146,11 +147,11 @@
     "wellscan/universe_history.py": "created; future-free candidate membership and stale snapshot rejection",
     "wellscan/probability.py": "causal factors, immutable signal snapshots, resolved-before-signal live estimator implemented",
     "wellscan/validation.py": "signal-time features and unqualified probability/EV persisted",
-    "wellscan/engine.py": "strategy-specific timeframe gates; 22-strategy formation, cost, fill-band, product and activation shadow assessments",
-    "wellscan/scanner_service.py": "900/3000 cache contract, rotation, deadlines, freshness pruning, candidate recovery, and durable live access coverage",
+    "wellscan/engine.py": "strategy-specific timeframe gates; 22-strategy assessments plus input order, duplicate, and intraday minute-gap diagnostics",
+    "wellscan/scanner_service.py": "900/3000 cache contract, bounded daemon warmup, four-stage pipeline counters, rotation, deadlines, recovery, and live coverage",
     "wellscan/realtime.py": "bounded per-record trailing schema extensions accepted; malformed boundaries rejected",
-    "wellscan/kis.py": "thread-local scanner deadline bounds HTTP timeout and retries",
-    "wellscan/history.py": "durable writes limited to changed bars; full 3000-bar candidate batch preload; redundant local CSV writes removed when durable DB is active",
+    "wellscan/kis.py": "thread-local deadline plus safe minute-input row/date/page logs without credentials",
+    "wellscan/history.py": "durable changed-bar writes and bounded priority background warmup toward the 3000-bar contract",
     "wellscan/bar_store.py": "serialized CockroachDB connection reused; full 3000-bar windows restored in bounded 20-symbol queries; candidate and live access snapshots persisted",
     "tests/controlled_tuning.py": "active portfolio or selected one-strategy profiles; aggregate 80% goal and 70% acceptable floor; reserved dates blocked",
     "tests/research_setup_audit.py": "read-only 3000-bar rejection/near-miss diagnostic; reserved source intervals blocked"
@@ -193,15 +194,16 @@
     "false_shared_overheat_missed_fixed": true,
     "non_15m_strategy_downtrend_gate_fixed": true,
     "public_strategy_rejection_diagnostics_added": true,
-    "latest_safe_operational_test_count": 459,
+    "latest_safe_operational_test_count": 593,
     "latest_deployed_version": "0.11.7-stale-skip",
+    "latest_local_verified_version": "0.11.8-pipeline-audit",
     "post_04fc8ab_targeted_tests": 49,
     "post_04fc8ab_test_note": "04fc8ab verified with 28 scanner_service + 21 durable/history/KIS targeted tests only; full 459 was not re-run after 04fc8ab",
     "live_shadow_22_strategy_diagnostics_implemented": true,
     "daemon_shadow_22_strategy_diagnostics_implemented": true,
     "first_live_shadow_sample": "US_PRE: 6 evaluated, inactive TREND_PULLBACK formed 1, active actionable 0; incomplete cycle",
     "latest_live_shadow_sample": "US_REGULAR: 36 evaluated, inactive TREND_PULLBACK 6 + TREND_CONTINUATION 6 + VWAP_RECLAIM 3 formed, active formations 0, unknown products 14",
-    "zero_entry_root_cause": "22-strategy classifier works, but all 15 live formations were outside the six-strategy production allow-list; post-formation cost/fill status was previously not exposed"
+    "zero_entry_root_cause": "복합 원인: 라이브 후보는 존재하지만 분봉 중앙값 154로 180/900/3000 준비선 미달; 운영 데몬의 3000봉 background warmup 호출 누락; 기존 15개 실시간 형성은 모두 활성 6개 밖; 승인된 1분 스캘핑은 아직 OFF/shadow 구현 전"
   },
   "forward_live_60_session_audit_dates_if_deployed_2026_09_15": {
     "us_60th_session": "2026-12-08",

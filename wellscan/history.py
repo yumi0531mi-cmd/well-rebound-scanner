@@ -13,7 +13,13 @@ from typing import Any
 import pandas as pd
 from filelock import FileLock
 
-from config import HISTORY_INITIAL_READY_BARS, HISTORY_WARM_TARGET_BARS, STRUCTURAL_WINDOW_BARS
+from config import (
+    HISTORY_INITIAL_READY_BARS,
+    HISTORY_WARM_TARGET_BARS,
+    HISTORY_WARMUP_QUEUE_LIMIT,
+    STRUCTURAL_WINDOW_BARS,
+    WARMUP_BARS,
+)
 
 from .bar_store import CockroachBarStore, StoreStatus
 from .indicators import normalize_bars
@@ -365,23 +371,44 @@ class HistoryCache:
                             error=f"{type(exc).__name__}: {exc}",
                         )
 
-    def schedule_warmup(self, client: KISClient, candidates: tuple[Candidate, ...]) -> None:
-        """Continue the MA60 cache warm-up after each candidate has an initial card.
+    def schedule_warmup(self, client: KISClient, candidates: tuple[Candidate, ...]) -> int:
+        """Continue bounded 3000-bar warm-up without building an unbounded queue.
 
         One background worker preserves the shared KIS request limiter and keeps
-        prolonged history paging out of the price/structure request path.
+        prolonged history paging out of the price/structure request path.  A
+        cold candidate nearest the 900-bar admission line is finished first;
+        admitted candidates then continue toward the 3000-bar contract.
         """
         with self._warm_lock:
-            self._warm_futures = {key: future for key, future in self._warm_futures.items() if not future.done()}
+            completed = {key: future for key, future in self._warm_futures.items() if future.done()}
+            for key, future in completed.items():
+                try:
+                    future.result()
+                except Exception as exc:
+                    LOGGER.warning("history_warmup_failed symbol=%s error=%s", key, exc)
+            self._warm_futures = {
+                key: future for key, future in self._warm_futures.items() if not future.done()
+            }
+            slots = max(0, HISTORY_WARMUP_QUEUE_LIMIT - len(self._warm_futures))
+            if not slots:
+                return 0
+            ranked = []
             for candidate in candidates:
-                if candidate.key in self._warm_futures:
-                    continue
-                cached = self.load(candidate.symbol, self._namespace(candidate))
-                if len(cached) >= self.WARM_TARGET_BARS:
-                    continue
+                if candidate.key not in self._warm_futures:
+                    count = len(self.load(candidate.symbol, self._namespace(candidate)))
+                    if count < self.WARM_TARGET_BARS:
+                        ranked.append((count >= WARMUP_BARS, -count, candidate.key, candidate))
+            scheduled = 0
+            for _, _, _, candidate in sorted(ranked)[:slots]:
                 self._warm_futures[candidate.key] = self._warm_executor.submit(
                     self.backfill_candidate, client, candidate, self.WARM_TARGET_BARS
                 )
+                scheduled += 1
+            return scheduled
+
+    def warmup_pending(self) -> int:
+        with self._warm_lock:
+            return sum(not future.done() for future in self._warm_futures.values())
 
     def snapshot_metrics(self) -> tuple[BackfillMetrics, ...]:
         with self._state_lock:

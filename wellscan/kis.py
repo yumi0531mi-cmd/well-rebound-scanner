@@ -24,6 +24,8 @@ from .indicators import normalize_bars
 from .instruments import MasterCatalog
 from .models import Candidate, Market, TradingSession
 
+LOGGER = logging.getLogger(__name__)
+
 DOMESTIC_LIMIT_UP_FALLBACK_PCT = 29.5
 _DOMESTIC_LEVERAGED_NAME = re.compile(
     r"레버리지|인버스|LEVERAG(?:E|ED)|INVERSE|(?<![0-9])[2-9](?:\.\d+)?X|(?<![0-9])[2-9](?:\.\d+)?배",
@@ -569,8 +571,14 @@ class KISClient:
             except (KeyError, TypeError, ValueError) as exc:
                 raise KISError("해외 분봉 파싱 실패") from exc
         if not records:
+            LOGGER.info("kis_minute_input market=US symbol=%s exchange=%s raw_rows=%s parsed_rows=0", symbol, exchange, len(rows))
             return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
-        return normalize_bars(pd.DataFrame(records).set_index("timestamp"))
+        result = normalize_bars(pd.DataFrame(records).set_index("timestamp"))
+        LOGGER.info(
+            "kis_minute_input market=US symbol=%s exchange=%s raw_rows=%s parsed_rows=%s oldest=%s newest=%s",
+            symbol, exchange, len(rows), len(result), result.index.min(), result.index.max(),
+        )
+        return result
 
     def minute_day(self, symbol: str, business_date: str, *, full_day: bool = False) -> pd.DataFrame:
         """Latest page for live refresh; bounded backward paging for history."""
@@ -594,7 +602,17 @@ class KISClient:
             if next_end >= end:
                 raise KISError("국내 분봉 페이지 진행 중단: 동일 시간 반복")
             end = next_end
-        return normalize_bars(pd.concat(frames)) if frames else pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
+        if not frames:
+            LOGGER.info("kis_minute_input market=KR symbol=%s date=%s pages=0 parsed_rows=0", symbol, business_date)
+            return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
+        combined = pd.concat(frames)
+        duplicates = int(combined.index.duplicated(keep=False).sum())
+        result = normalize_bars(combined)
+        LOGGER.info(
+            "kis_minute_input market=KR symbol=%s date=%s pages=%s parsed_rows=%s duplicates=%s oldest=%s newest=%s",
+            symbol, business_date, len(frames), len(result), duplicates, result.index.min(), result.index.max(),
+        )
+        return result
 
     def _minute_page(self, symbol: str, business_date: str, end: str) -> pd.DataFrame:
         payload, _ = self.get(

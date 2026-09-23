@@ -14,7 +14,7 @@ import math
 import os
 import threading
 import time
-from collections import deque
+from collections import Counter, deque
 from collections.abc import Callable
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass, replace
@@ -164,6 +164,8 @@ class ScannerCounters:
     candidate_prefetches: int = 0
     candidate_prefetch_symbols: int = 0
     candidate_prefetch_errors: int = 0
+    history_warmups_scheduled: int = 0
+    history_warmup_errors: int = 0
     candidate_empty_discoveries: int = 0
     candidate_fallbacks: int = 0
     candidate_fallback_symbols: int = 0
@@ -1020,6 +1022,14 @@ class ScannerService:
         final_buys = 0
         entry_waits = 0
         stale_skipped = 0
+        history_empty = 0
+        history_below_ready = 0
+        published = 0
+        gap_symbols = 0
+        formed_counts: Counter[str] = Counter()
+        cost_pass_counts: Counter[str] = Counter()
+        policy_ready_counts: Counter[str] = Counter()
+        block_reason_counts: Counter[str] = Counter()
         for candidate in candidates:
             if self._monotonic() >= deadline:
                 self._counters.budget_exhaustions += 1
@@ -1057,6 +1067,10 @@ class ScannerService:
                 )
                 session_bars = filter_session_bars(normalize_bars(bars), status.session)
                 bars_counts.append(len(session_bars))
+                if session_bars.empty:
+                    history_empty += 1
+                elif len(session_bars) < HistoryCache.INITIAL_READY_BARS:
+                    history_below_ready += 1
                 warming = False
                 if len(session_bars) < history_target:
                     if (status.session == TradingSession.US_DAY
@@ -1114,11 +1128,24 @@ class ScannerService:
                 evaluated_gates += 1
                 try:
                     diagnostics = result.diagnostics if isinstance(result.diagnostics, dict) else {}
+                    gap_symbols += int(int(diagnostics.get("missing_intraday_minutes", 0) or 0) > 0)
+                    assessments = diagnostics.get("classification_assessments", {})
+                    if isinstance(assessments, dict):
+                        for strategy_name, assessment in assessments.items():
+                            if not isinstance(assessment, dict):
+                                continue
+                            formed_counts[str(strategy_name)] += 1
+                            if assessment.get("planned_cost_pass"):
+                                cost_pass_counts[str(strategy_name)] += 1
+                            if assessment.get("policy_ready"):
+                                policy_ready_counts[str(strategy_name)] += 1
+                            for reason in str(assessment.get("block_reason") or "").split(" | "):
+                                if reason:
+                                    block_reason_counts[reason] += 1
                     signaled_at = getattr(result, "evaluated_at", None) or current
                     opened, rejected = self._shadows.observe(
                         candidate,
-                        diagnostics.get("classification_assessments", {})
-                        if isinstance(diagnostics.get("classification_assessments"), dict) else {},
+                        assessments if isinstance(assessments, dict) else {},
                         policy,
                         signaled_at,
                         HistoryCache._namespace(candidate),
@@ -1151,6 +1178,7 @@ class ScannerService:
                         self._counters.final_signals_recorded += 1
                     if case is not None:
                         self._publish_result(published_candidate, result)
+                        published += 1
                 else:
                     self.validations.observe_nonfinal(
                         candidate.key,
@@ -1160,6 +1188,7 @@ class ScannerService:
                     )
                     self._counters.nonfinal_observations += 1
                     self._publish_result(published_candidate, result)
+                    published += 1
             except KISDeadlineError:
                 self._counters.budget_exhaustions += 1
                 break
@@ -1171,6 +1200,18 @@ class ScannerService:
                 self._error("candidate", exc, symbol=candidate.key, session=status.session.value)
             except Exception as exc:  # keep the daemon alive, but expose the unexpected type
                 self._error("candidate-unexpected", exc, symbol=candidate.key, session=status.session.value)
+        warmup_scheduled = 0
+        warmup_pending = 0
+        schedule_warmup = getattr(self.history, "schedule_warmup", None)
+        if callable(schedule_warmup):
+            try:
+                warmup_scheduled = int(schedule_warmup(self.client, tuple(candidates)) or 0)
+                self._counters.history_warmups_scheduled += warmup_scheduled
+                pending_reader = getattr(self.history, "warmup_pending", None)
+                warmup_pending = int(pending_reader()) if callable(pending_reader) else 0
+            except Exception as exc:
+                self._counters.history_warmup_errors += 1
+                self._error("history-warmup", exc, session=status.session.value)
         self._advance_rotation(status, attempted)
         ordered_counts = sorted(bars_counts)
         bars_median = ordered_counts[len(ordered_counts) // 2] if ordered_counts else 0
@@ -1188,6 +1229,26 @@ class ScannerService:
             final_buy=final_buys,
             entry_wait=entry_waits,
             stale_skipped=stale_skipped,
+            history_empty=history_empty,
+            history_below_180=history_below_ready,
+            gap_symbols=gap_symbols,
+            formed_strategies=dict(formed_counts),
+            cost_passed_strategies=dict(cost_pass_counts),
+            policy_ready_strategies=dict(policy_ready_counts),
+            block_reasons=dict(block_reason_counts),
+            published=published,
+            warmup_scheduled=warmup_scheduled,
+            warmup_pending=warmup_pending,
+        )
+        LOGGER.info(
+            "pipeline_cycle session=%s discovered=%s selected=%s attempted=%s history_empty=%s "
+            "below_180=%s bars_median=%s bars_max=%s evaluated=%s formed=%s cost_passed=%s "
+            "policy_ready=%s published=%s final_buy=%s entry_wait=%s gaps=%s warmup_pending=%s",
+            status.session.value, discovered, len(candidates), attempted, history_empty,
+            history_below_ready, bars_median, ordered_counts[-1] if ordered_counts else 0,
+            evaluated_gates, sum(formed_counts.values()), sum(cost_pass_counts.values()),
+            sum(policy_ready_counts.values()), published, final_buys, entry_waits,
+            gap_symbols, warmup_pending,
         )
         self._publish_session_completion(status.session)
         self._persist_access_snapshot(

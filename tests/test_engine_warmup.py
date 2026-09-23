@@ -54,6 +54,19 @@ def test_insufficient_transition_data_does_not_write_an_exclusion(tmp_path) -> N
     assert result.diagnostics["entry_data_ready"] is True
 
 
+def test_input_order_duplicates_and_minute_gaps_are_exposed(tmp_path) -> None:
+    frame = bars(30).drop(pd.Timestamp("2026-08-20 09:10"))
+    frame = pd.concat([frame, frame.iloc[[5]]]).sort_index(ascending=False)
+
+    result = evaluate("QUALITY", frame, 101.0, SequenceStore(tmp_path), datetime.now(UTC))
+
+    assert result.diagnostics["input_was_ascending"] is False
+    assert result.diagnostics["input_duplicate_rows"] == 2
+    assert result.diagnostics["normalized_rows"] == 29
+    assert result.diagnostics["intraday_gap_intervals"] == 1
+    assert result.diagnostics["missing_intraday_minutes"] == 1
+
+
 def test_watch_levels_are_available_before_final_buy(tmp_path, monkeypatch) -> None:
     frame = bars(100)
     recent3 = pd.DataFrame(

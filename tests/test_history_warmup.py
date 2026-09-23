@@ -81,3 +81,31 @@ def test_warmup_skips_a_cache_that_already_meets_target(tmp_path) -> None:
 
     assert candidate.key not in cache._warm_futures
     assert client.calls == 0
+
+
+def test_warmup_queue_is_bounded_and_prioritizes_near_admission(tmp_path) -> None:
+    from concurrent.futures import Future
+
+    class QueuedExecutor:
+        def __init__(self):
+            self.symbols = []
+
+        def submit(self, function, client, candidate, target):
+            del function, client, target
+            self.symbols.append(candidate.symbol)
+            return Future()
+
+    cache = HistoryCache(tmp_path)
+    cache._warm_executor.shutdown(wait=True)
+    executor = QueuedExecutor()
+    cache._warm_executor = executor  # type: ignore[assignment]
+    counts = {"000001": 800, "000002": 200, "000003": 950, "000004": 1000, "000005": 0, "000006": 3000}
+    candidates = tuple(Candidate(symbol, symbol, 100, 1, 1, 1) for symbol in counts)
+    for candidate in candidates:
+        if counts[candidate.symbol]:
+            cache.merge(candidate.symbol, minute_frame("2026-01-01", counts[candidate.symbol]))
+
+    scheduled = cache.schedule_warmup(object(), candidates)  # type: ignore[arg-type]
+
+    assert scheduled == cache.warmup_pending() == 4
+    assert executor.symbols == ["000001", "000002", "000005", "000004"]

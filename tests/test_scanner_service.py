@@ -348,6 +348,10 @@ def test_scan_cycle_opens_shadow_plans(tmp_path):
     candidate = Candidate("005930", "S", 70000, 1, 100, 1000)
     assessments = {
         "D02": {
+            "active": True,
+            "planned_cost_pass": True,
+            "policy_ready": True,
+            "block_reason": "",
             "shadow_ready": True,
             "plan_entry": 100.0,
             "plan_target1": 104.0,
@@ -381,6 +385,11 @@ def test_scan_cycle_opens_shadow_plans(tmp_path):
     )
     assert service.run_cycle()
     assert service.snapshot().counters["shadow_plans_opened"] == 1
+    breakdown = service.snapshot().discovery_breakdown["KR:KR_REGULAR"]
+    assert breakdown["formed_strategies"] == {"D02": 1}
+    assert breakdown["cost_passed_strategies"] == {"D02": 1}
+    assert breakdown["policy_ready_strategies"] == {"D02": 1}
+    assert breakdown["published"] == 1
     assert list((tmp_path / "shadow").rglob("*.json")) != []
 
 
