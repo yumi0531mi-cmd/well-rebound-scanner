@@ -60,3 +60,16 @@ destructive, treat it as destructive and ask.
 - Operational reports must show or reason from KST and New York local time;
   keep UTC for machine timestamps. Account for DST and exchange holidays via
   `wellscan.sessions.session_status`, never by fixed-hour mental arithmetic.
+
+## 5. Shared deployment discipline
+
+- The one-push-per-KST-calendar-day limit applies to every AI and every local
+  thread working on this repository. Bundle verified commits into that push.
+- Do not push or redeploy during a live baseline test. Render restarts erase
+  the free-instance local minute cache while the durable store is unavailable.
+- Before reporting remote state, run `git ls-remote origin refs/heads/main`;
+  local `HEAD` or `origin/main` without a fresh fetch is not remote evidence.
+- A version in source is a candidate version. Mark it deployed in
+  `PROGRESS.json` only after the remote SHA, Render health 200, and the exact
+  UI version badge have all been verified. Never infer deployment from a
+  commit or version bump alone.
