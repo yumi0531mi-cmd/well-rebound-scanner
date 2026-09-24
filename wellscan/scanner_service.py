@@ -1273,6 +1273,12 @@ class ScannerService:
         try:
             active = self._active(self._aware_now())
             self._active_sessions = tuple(item.session.value for item in active)
+            if not active:
+                # No market to scan: stay idle so KIS quota, durable RUs and
+                # hosting egress stay flat. Status write in finally keeps the
+                # UI honest about the idle state.
+                self._counters.cycles += 1
+                return True
             tracking_deadline = min(
                 cycle_deadline,
                 started + self.config.cycle_budget_seconds * self.config.tracking_budget_fraction,

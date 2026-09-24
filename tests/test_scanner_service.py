@@ -551,6 +551,21 @@ def test_us_day_below_target_is_provisional_not_official(tmp_path):
     assert breakdown["final_buy"] == 0
 
 
+def test_idle_cycle_skips_tracking_and_sessions_when_nothing_active(tmp_path):
+    client = FakeClient([Candidate("005930", "S", 70000, 1, 100, 1000)])
+    history = FakeHistory()
+    service = ScannerService(
+        config(tmp_path), client=client, history=history,
+        validations=FakeValidation(), clock=lambda: NOW,
+        session_resolver=lambda market, now: SessionStatus(market, TradingSession.CLOSED, False, "closed"),
+    )
+    assert service.run_cycle()
+    assert client.discovery == []
+    assert history.calls == []
+    assert service.snapshot().counters["cycles"] == 1
+    assert service.snapshot().active_sessions == ()
+
+
 def test_discovery_rotation_advances_only_by_attempted_candidates(tmp_path):
     candidates = [Candidate(f"{index:06d}", str(index), 100, 1, 1, 1) for index in range(5)]
     service = ScannerService(

@@ -1304,19 +1304,35 @@ with st.expander("처리 시간 실측 · 미충족 이유"):
     st.json(TIMINGS.summary())
     st.caption("조건 검사 목표 p95 500ms · API 수집/화면 표시 지연과 별개 · 실측 표본이 없으면 성능 판정 불가")
     st.write({stage.value: number for stage, number in counts.items()})
+    _show_diag = st.checkbox("진단 상세(JSON·표) 보기", value=False, key="diag_detail")
     _daemon_breakdown_source = daemon_service_status()
     _discovery_breakdown = getattr(_daemon_breakdown_source, "discovery_breakdown", None) or {}
+    for _funnel_key, _stages in _discovery_breakdown.items():
+        if isinstance(_stages, dict):
+            st.caption(
+                f" funnel {_funnel_key}: "
+                f"발견{_stages.get('union_raw', 0)}→선택{_stages.get('selected', 0)}→"
+                f"시도{_stages.get('attempted', 0)}→평가{_stages.get('evaluated', 0)}→"
+                f"진입{_stages.get('final_buy', 0)}"
+            )
     if _discovery_breakdown:
         st.caption("발견 단계 계측 · 원응답→세션→중복제거→선택→분봉→상품→평가→진입")
-        st.json(_discovery_breakdown)
+        if _show_diag:
+            st.json(_discovery_breakdown)
     _shadow_summary = None
     try:
         _shadow_summary = daemon_shadow_summary()
     except Exception:
         _shadow_summary = None
     if _shadow_summary:
-        st.caption("그림자 가상체결 장부 · 비용통과 형성의 3봉 가상 정산(공식 성과 아님)")
-        st.json(_shadow_summary)
+        _sc = _shadow_summary.get("counters", {}) if isinstance(_shadow_summary, dict) else {}
+        st.caption(
+            f"그림자 장부 요약(공식 성과 아님) · 정산 {_sc.get('settled', 0)} · "
+            f"T1 {_sc.get('t1', 0)} · 미체결 {_sc.get('unfilled', 0)} · "
+            f"진행중 {_shadow_summary.get('open_plans', 0) if isinstance(_shadow_summary, dict) else 0}"
+        )
+        if _show_diag:
+            st.json(_shadow_summary)
     rejected_reasons: dict[str, int] = {}
     strategy_rejected_reasons: dict[str, int] = {}
     strategy_formed_counts: dict[str, int] = {}
@@ -1373,9 +1389,15 @@ with st.expander("처리 시간 실측 · 미충족 이유"):
         "상품·비용·체결 전부 통과": dict(sorted(strategy_shadow_ready_counts.items(), key=lambda item: item[1], reverse=True)),
     })
     if shadow_rows:
-        st.dataframe(shadow_rows, hide_index=True, use_container_width=True)
+        st.caption(f"그림자 표 {len(shadow_rows)}행 (상세는 체크박스)")
+        if _show_diag:
+            st.dataframe(shadow_rows, hide_index=True, use_container_width=True)
     st.caption("22개 기법별 실제 미충족 조건 · 같은 후보에서 여러 조건이 함께 집계될 수 있습니다")
-    st.write(dict(sorted(strategy_rejected_reasons.items(), key=lambda item: item[1], reverse=True)))
+    _top_blocked = sorted(strategy_rejected_reasons.items(), key=lambda item: item[1], reverse=True)[:5]
+    if _top_blocked:
+        st.caption("차단 상위: " + " · ".join(f"{key} {value}" for key, value in _top_blocked))
+    if _show_diag:
+        st.write(dict(sorted(strategy_rejected_reasons.items(), key=lambda item: item[1], reverse=True)))
 st.caption(
     f"후보풀 {len(total_pool)} · 모드 통과 {len(filtered)} · 내부 분석 {len(results)} · 표시 {len(visible)} · "
     f"현재 진입 조건 충족 {counts[Stage.FINAL_BUY]} · 진입대기 {counts[Stage.ENTRY_WAIT]} · 데이터수집 {counts[Stage.DATA_WAIT]}"
