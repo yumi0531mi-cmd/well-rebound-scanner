@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-09-24T17:55:15+09:00",
+  "updated_at": "2026-09-24T22:35:00+09:00",
   "current_step": 3,
   "completed_steps": [
     "기존 저장소와 인계 보고서 확인",
@@ -139,7 +139,8 @@
     "커밋 ca65d0b를 origin/main에 푸시하고 Render 운영 앱 0.11.8-pipeline-audit 배지·health 200 ok·로컬/원격 SHA 일치를 확인; 당시 국내 탭은 마감이지만 미국 정규장은 활성 상태였음",
     "국내주식 고정 기본탭 때문에 미국 정규장 중에도 장 마감처럼 보이는 UI 결함 수정 (0.11.9-active-market-clock); 자동(활성 시장) 기본 선택, 한국·뉴욕 현재시각과 국내·미국 전체 상태 동시 표시, 현재 실제 시각 KR=CLOSED·US=US_REGULAR·PREFERRED=US 확인; 금지 연구 테스트 3개 파일 제외 운영 회귀 528개 통과·실패 0·Ruff 통과",
     "테스트 수 정정: pytest 기본 전체 수집 595에는 운영 규칙상 실행 제외 대상인 test_controlled_tuning.py 8개·test_controlled_tuning_audit.py 24개·test_tuning_feasibility.py 35개, 합계 67개가 포함됨; 공식 안전 운영 회귀 수는 528개로 기록",
-    "미국 데이장 실제 KIS 운영 계측 확인: 후보 합집합 140·선택 80·시도/평가/게시 34, 원본 분봉 중앙값 139·최대 154로 전부 180봉 미달, 누락분봉 종목 31·stale skip 46·상품미확인 12, 22개 형성/비용통과/policy_ready/ENTRY 모두 0; 데이터 예열 병목으로 판정"
+    "미국 데이장 실제 KIS 운영 계측 확인: 후보 합집합 140·선택 80·시도/평가/게시 34, 원본 분봉 중앙값 139·최대 154로 전부 180봉 미달, 누락분봉 종목 31·stale skip 46·상품미확인 12, 22개 형성/비용통과/policy_ready/ENTRY 모두 0; 데이터 예열 병목으로 판정",
+    "2026-09-24 22:34 KST 미국 정규장 운영 확인 시 Render 루트와 /_stcore/health 모두 Service Suspended 응답; 라이브 funnel 계측 불가, 원인 확인과 서비스 복구 전 배포·승률 판정 금지"
   ],
   "files": {
     "config.py": "created; qualification/risk/cost/data/model and scanner deadline-margin settings centralized",
@@ -208,7 +209,8 @@
     "first_live_shadow_sample": "US_PRE: 6 evaluated, inactive TREND_PULLBACK formed 1, active actionable 0; incomplete cycle",
     "latest_live_shadow_sample": "US_REGULAR: 36 evaluated, inactive TREND_PULLBACK 6 + TREND_CONTINUATION 6 + VWAP_RECLAIM 3 formed, active formations 0, unknown products 14",
     "zero_entry_root_cause": "복합 원인: 미국 데이장 라이브 후보는 140개(선택 80개)지만 평가 34개 원본 분봉 중앙값 139·최대 154로 모두 180봉 미달했고 누락분봉 종목 31·stale skip 46·상품미확인 12가 발생; 22개 형성·비용통과·policy_ready·ENTRY가 모두 0. 이전 미국 정규장 표본에서는 형성 후 비용/RR 차단도 확인됐으며 승인된 1분 스캘핑은 아직 OFF/shadow 구현 전",
-    "latest_live_us_day_pipeline_sample": "2026-09-24 12:33 KST: union 140, selected 80, attempted/evaluated/published 34, bars median 139 max 154 target 180, history_below_180 34, gap_symbols 31, stale_skipped 46, product_unknown 12, formed/cost/policy/ENTRY 0"
+    "latest_live_us_day_pipeline_sample": "2026-09-24 12:33 KST: union 140, selected 80, attempted/evaluated/published 34, bars median 139 max 154 target 180, history_below_180 34, gap_symbols 31, stale_skipped 46, product_unknown 12, formed/cost/policy/ENTRY 0",
+    "render_service_status": "SUSPENDED at 2026-09-24 22:34 KST; root and /_stcore/health returned Service Suspended"
   },
   "forward_live_60_session_audit_dates_if_deployed_2026_09_15": {
     "us_60th_session": "2026-12-08",
@@ -245,6 +247,7 @@
     "official_evidence": "actual KIS one-minute bars with point-in-time candidate universe"
   },
   "next_actions": [
+    "restore the Render service after identifying why it is suspended; then verify health, exact version badge, and resume a fresh active-session baseline without claiming the missed interval",
     "push session work batch after US baseline completes (scalp + session sequence + provisional floor; all green locally)",
     "fix and verify US_DAY minute backfill/warmup so candidates reach 180 then 900 and retain 3000-bar structural tracking; investigate 31 gap symbols and 46 stale skips without relaxing gates",
     "record live US probe: 2 cycles 35 attempted, 31-33 warming provisional, 34 evaluated/published, 0 false officials, VWAP formed-but-blocked 1; provisional gates proven at scale",
