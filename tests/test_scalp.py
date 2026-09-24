@@ -156,4 +156,6 @@ def test_ledger_opens_and_settles_scalp(tmp_path):
     summary = ledger.summary()
     assert summary["t1_rate"] == 1.0
     assert summary["by_strategy"]["1분 눌림 진입"]["T2"] == 1
+    assert summary["by_session"]["KR_REGULAR"]["T2"] == 1
+    assert summary["by_session"]["KR_REGULAR"]["t1_rate"] == 1.0
     assert isinstance(summary["avg_net_pct"], float)

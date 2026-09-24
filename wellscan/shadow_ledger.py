@@ -382,9 +382,11 @@ class ShadowLedger:
         with self._lock:
             counters = dict(self.counters)
         by_strategy: dict[str, dict[str, int]] = {}
+        by_session: dict[str, dict[str, Any]] = {}
         open_plans = 0
         pending_transmit = 0
         net_values: list[float] = []
+        session_nets: dict[str, list[float]] = {}
         for _, record in self._iter_records():
             if record.get("status") == "OPEN":
                 open_plans += 1
@@ -392,11 +394,18 @@ class ShadowLedger:
             outcome = record.get("outcome") or {}
             bucket = str(outcome.get("bucket", "UNKNOWN"))
             strategy = str(record.get("strategy", "UNKNOWN"))
+            session = str(record.get("session", "UNKNOWN"))
             entry = by_strategy.setdefault(strategy, {})
             entry[bucket] = entry.get(bucket, 0) + 1
+            session_entry = by_session.setdefault(session, {"buckets": {}, "settled": 0, "hits": 0})
+            session_entry["buckets"][bucket] = session_entry["buckets"].get(bucket, 0) + 1
+            session_entry["settled"] += 1
+            if bucket in {"T1", "T2"}:
+                session_entry["hits"] += 1
             net_pct = outcome.get("net_pct")
             if isinstance(net_pct, (int, float)) and math.isfinite(net_pct):
                 net_values.append(float(net_pct))
+                session_nets.setdefault(session, []).append(float(net_pct))
             if not record.get("transmitted"):
                 pending_transmit += 1
         settled = sum(
@@ -404,11 +413,16 @@ class ShadowLedger:
             if key in {"t1", "t2", "stops", "expired", "unfilled", "errors"}
         )
         hits = counters.get("t1", 0) + counters.get("t2", 0)
+        for session, data in by_session.items():
+            data["t1_rate"] = (data["hits"] / data["settled"]) if data["settled"] else None
+            nets = session_nets.get(session, [])
+            data["avg_net_pct"] = (sum(nets) / len(nets)) if nets else None
         return {
             "counters": counters,
             "open_plans": open_plans,
             "pending_transmit": pending_transmit,
             "by_strategy": by_strategy,
+            "by_session": by_session,
             "settled": settled,
             "t1_rate": (hits / settled) if settled else None,
             "avg_net_pct": (sum(net_values) / len(net_values)) if net_values else None,
