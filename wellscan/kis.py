@@ -68,6 +68,9 @@ class KISClient:
             CockroachBarStore.from_environment() if use_environment else None
         )
         self._endpoint_counts: dict[str, dict[str, int]] = {}
+        self._call_stats: dict[str, list[int]] = {
+            "ranking": [0, 0], "minutes": [0, 0], "quote": [0, 0], "other": [0, 0],
+        }
         self._request_budget = threading.local()
 
     @contextmanager
@@ -315,6 +318,10 @@ class KISClient:
                 break
             self._retry_sleep((0.35 * (2**attempt)) + random.uniform(0.0, 0.15))
         assert response is not None
+        try:
+            self._record_call(path, len(getattr(response, "content", b"") or b""))
+        except Exception:
+            pass
         if not response.ok:
             raise KISError(f"{tr_id} HTTP {response.status_code}")
         payload = response.json()
@@ -400,6 +407,46 @@ class KISClient:
             continuation = "N"
         self._record_endpoint_counts(f"KR:{source}", rows_seen, len(candidates))
         return candidates
+
+    @staticmethod
+    def _call_bucket(path: str) -> str:
+        low = str(path).lower()
+        if "ranking" in low or "volume-rank" in low or "trade-vol" in low or "trade-pbmn" in low:
+            return "ranking"
+        if "itemchartprice" in low or "inquire-time" in low:
+            return "minutes"
+        if "inquire-price" in low or low.rstrip("/").endswith("/price"):
+            return "quote"
+        return "other"
+
+    def _record_call(self, path: str, byte_count: int) -> None:
+        """Count one HTTP attempt with its wire size. Never breaks discovery."""
+        lock = self.__dict__.get("_lock")
+        if lock is None:
+            return
+        try:
+            byte_count = int(byte_count)
+        except (TypeError, ValueError):
+            return
+        with lock:
+            entry = self.__dict__.setdefault("_call_stats", {}).setdefault(
+                self._call_bucket(path), [0, 0])
+            entry[0] += 1
+            entry[1] += max(0, byte_count)
+
+    def take_call_stats(self) -> dict[str, dict[str, int]]:
+        """Return per-bucket call/byte counts since the last take, then reset."""
+        lock = self.__dict__.get("_lock")
+        if lock is None:
+            return {}
+        with lock:
+            stats = self.__dict__.get("_call_stats", {})
+            snapshot = {bucket: {"calls": int(value[0]), "bytes": int(value[1])}
+                        for bucket, value in stats.items()}
+            for value in stats.values():
+                value[0] = 0
+                value[1] = 0
+            return snapshot
 
     def _record_endpoint_counts(self, key: str, rows: int, valid: int) -> None:
         """Remember per-endpoint raw/valid counts for discovery diagnostics.

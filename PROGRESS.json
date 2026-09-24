@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-09-25T01:42:06+09:00",
+  "updated_at": "2026-09-25T01:59:50+09:00",
   "current_step": 3,
   "completed_steps": [
     "기존 저장소와 인계 보고서 확인",
@@ -141,7 +141,8 @@
     "테스트 수 정정: pytest 기본 전체 수집 595에는 운영 규칙상 실행 제외 대상인 test_controlled_tuning.py 8개·test_controlled_tuning_audit.py 24개·test_tuning_feasibility.py 35개, 합계 67개가 포함됨; 공식 안전 운영 회귀 수는 528개로 기록",
     "미국 데이장 실제 KIS 운영 계측 확인: 후보 합집합 140·선택 80·시도/평가/게시 34, 원본 분봉 중앙값 139·최대 154로 전부 180봉 미달, 누락분봉 종목 31·stale skip 46·상품미확인 12, 22개 형성/비용통과/policy_ready/ENTRY 모두 0; 데이터 예열 병목으로 판정",
     "2026-09-24 22:34 KST 미국 정규장 운영 확인 시 Render 루트와 /_stcore/health 모두 Service Suspended 응답; 라이브 funnel 계측 불가, 원인 확인과 서비스 복구 전 배포·승률 판정 금지",
-    "2026-09-25 egress diet locally: diag JSON gated behind checkbox (top-5 blocks always on), daemon idles with zero KIS/DB calls off-session; full 541 green, ruff clean; push held for Oct 1 resume"
+    "2026-09-25 egress diet locally: diag JSON gated behind checkbox (top-5 blocks always on), daemon idles with zero KIS/DB calls off-session; full 541 green, ruff clean; push held for Oct 1 resume",
+    "2026-09-25 KIS metering locally: per-bucket call/byte take in KISClient.get, per-session aggregation (calls/bytes/pages-as-calls/rows/hit-rate) in funnel + counters, refresh default 5s (1s option kept); full 543 green, ruff clean; push held for Oct 1 resume"
   ],
   "files": {
     "config.py": "created; qualification/risk/cost/data/model and scanner deadline-margin settings centralized",

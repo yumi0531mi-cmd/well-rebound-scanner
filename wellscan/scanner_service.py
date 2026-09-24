@@ -147,6 +147,11 @@ class ScannerCounters:
     candidate_local_fallbacks: int = 0
     candidate_local_fallback_symbols: int = 0
     candidate_stale_skips: int = 0
+    kis_session_calls: int = 0
+    kis_session_bytes: int = 0
+    kis_backfill_rows: int = 0
+    kis_cache_hits: int = 0
+    kis_cache_total: int = 0
     warming_provisional: int = 0
     warming_signals: int = 0
     shadow_plans_opened: int = 0
@@ -961,6 +966,28 @@ class ScannerService:
             self._counters.shadow_retransmit_errors += 1
             self._error("shadow-retransmit", exc)
 
+    def _take_kis_delta(self) -> dict[str, Any]:
+        """Take per-bucket KIS call/byte counts since the last take."""
+        taker = getattr(self.client, "take_call_stats", None)
+        if not callable(taker):
+            return {"calls": 0, "bytes": 0, "buckets": {}}
+        try:
+            stats = taker() or {}
+        except Exception:
+            return {"calls": 0, "bytes": 0, "buckets": {}}
+        calls = 0
+        byte_count = 0
+        buckets: dict[str, dict[str, int]] = {}
+        for bucket, values in stats.items():
+            if not isinstance(values, dict):
+                continue
+            bucket_calls = int(values.get("calls", 0) or 0)
+            bucket_bytes = int(values.get("bytes", 0) or 0)
+            calls += bucket_calls
+            byte_count += bucket_bytes
+            buckets[str(bucket)] = {"calls": bucket_calls, "bytes": bucket_bytes}
+        return {"calls": calls, "bytes": byte_count, "buckets": buckets}
+
     def _advance_rotation(self, status: SessionStatus, attempted: int) -> None:
         key = f"{status.market.value}:{status.session.value}"
         population = self._rotation_population.get(key, 0)
@@ -976,6 +1003,7 @@ class ScannerService:
                 scan_complete=False, failure="cycle-budget-before-discovery",
             )
             return
+        self._take_kis_delta()  # baseline; session deltas attributed at cycle end
         try:
             candidates = self._discover(status, limit)
         except KISDeadlineError:
@@ -1012,6 +1040,7 @@ class ScannerService:
                 )
                 return
         attempted = 0
+        attempted_keys: set[str] = set()
         bars_ready = 0
         warming_provisional = 0
         warming_signals = 0
@@ -1061,6 +1090,7 @@ class ScannerService:
                     self._counters.budget_exhaustions += 1
                     break
                 attempted += 1
+                attempted_keys.add(candidate.key)
                 bars = self.history.backfill_candidate(
                     self.client,
                     candidate,
@@ -1215,6 +1245,35 @@ class ScannerService:
         self._advance_rotation(status, attempted)
         ordered_counts = sorted(bars_counts)
         bars_median = ordered_counts[len(ordered_counts) // 2] if ordered_counts else 0
+        kis_delta = self._take_kis_delta()
+        kis_rows = 0
+        kis_hits = 0
+        kis_total = 0
+        metrics_reader = getattr(self.history, "snapshot_metrics", None)
+        if callable(metrics_reader):
+            try:
+                for metric in metrics_reader():
+                    symbol = str(getattr(metric, "symbol", ""))
+                    if symbol not in attempted_keys:
+                        continue
+                    parts = symbol.split(":")
+                    if len(parts) < 3 or parts[0] != status.market.value or parts[2] != status.session.value:
+                        continue
+                    kis_total += 1
+                    if getattr(metric, "cache_hit", False):
+                        kis_hits += 1
+                    kis_rows += max(
+                        0,
+                        int(getattr(metric, "cached_after", 0) or 0)
+                        - int(getattr(metric, "cached_before", 0) or 0),
+                    )
+            except Exception:
+                pass
+        self._counters.kis_session_calls += int(kis_delta.get("calls", 0))
+        self._counters.kis_session_bytes += int(kis_delta.get("bytes", 0))
+        self._counters.kis_backfill_rows += kis_rows
+        self._counters.kis_cache_hits += kis_hits
+        self._counters.kis_cache_total += kis_total
         self._record_discovery_stage(
             rotation_key,
             attempted=attempted,
@@ -1229,6 +1288,12 @@ class ScannerService:
             final_buy=final_buys,
             entry_wait=entry_waits,
             stale_skipped=stale_skipped,
+            kis_calls=int(kis_delta.get("calls", 0)),
+            kis_bytes=int(kis_delta.get("bytes", 0)),
+            kis_buckets=dict(kis_delta.get("buckets", {})),
+            kis_backfill_rows=kis_rows,
+            kis_cache_hits=kis_hits,
+            kis_cache_total=kis_total,
             history_empty=history_empty,
             history_below_180=history_below_ready,
             gap_symbols=gap_symbols,

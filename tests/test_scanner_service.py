@@ -566,6 +566,66 @@ def test_idle_cycle_skips_tracking_and_sessions_when_nothing_active(tmp_path):
     assert service.snapshot().active_sessions == ()
 
 
+def test_scan_cycle_records_kis_call_metering(tmp_path):
+    from wellscan.history import BackfillMetrics
+
+    class MeteredHistory(FakeHistory):
+        def snapshot_metrics(self):
+            return (
+                BackfillMetrics(
+                    symbol="KR:KRX:KR_REGULAR:005930", cache_hit=True,
+                    cached_before=100, cached_after=150, api_calls=2,
+                    load_seconds=0.01, api_seconds=0.1, total_seconds=0.2,
+                ),
+            )
+
+    class MeteredClient(FakeClient):
+        def take_call_stats(self):
+            return {"minutes": {"calls": 3, "bytes": 1500}, "quote": {"calls": 1, "bytes": 200}}
+
+    def namespaced_evaluator(symbol, frame, price, store, **kwargs):
+        return SimpleNamespace(
+            final_buy=False, stage=Stage.DATA_WAIT, evaluated_at=kwargs["now"],
+            diagnostics={}, reasons=(),
+        )
+
+    service = ScannerService(
+        config(tmp_path), client=MeteredClient([Candidate("005930", "S", 70000, 1, 100, 1000)]),
+        history=MeteredHistory(), validations=FakeValidation(), clock=lambda: NOW,
+        session_resolver=resolver(), evaluator=namespaced_evaluator,
+        live_revalidator=lambda result, price, now: result,
+    )
+    service._scan_session(
+        SessionStatus(Market.KR, TradingSession.KR_REGULAR, True, "active"),
+        service._monotonic() + 60, 60,
+    )
+    breakdown = service.snapshot().discovery_breakdown["KR:KR_REGULAR"]
+    assert breakdown["kis_calls"] == 4
+    assert breakdown["kis_bytes"] == 1700
+    assert breakdown["kis_buckets"]["minutes"] == {"calls": 3, "bytes": 1500}
+    assert breakdown["kis_backfill_rows"] == 50
+    assert breakdown["kis_cache_hits"] == 1
+    assert breakdown["kis_cache_total"] == 1
+    counters = service.snapshot().counters
+    assert counters["kis_session_calls"] == 4
+    assert counters["kis_backfill_rows"] == 50
+
+
+def test_call_stats_survive_partially_built_clients():
+    from wellscan.kis import KISClient
+
+    client = object.__new__(KISClient)
+    assert client.take_call_stats() == {}
+    client._record_call("/uapi/domestic-stock/v1/quotations/volume-rank", 100)
+    assert client.take_call_stats() == {}
+    real = KISClient.__new__(KISClient)
+    import threading
+    real._lock = threading.Lock()
+    real._record_call("/uapi/overseas-price/v1/quotations/price", 250)
+    assert real.take_call_stats() == {"quote": {"calls": 1, "bytes": 250}}
+    assert real.take_call_stats() == {"quote": {"calls": 0, "bytes": 0}}
+
+
 def test_discovery_rotation_advances_only_by_attempted_candidates(tmp_path):
     candidates = [Candidate(f"{index:06d}", str(index), 100, 1, 1, 1) for index in range(5)]
     service = ScannerService(

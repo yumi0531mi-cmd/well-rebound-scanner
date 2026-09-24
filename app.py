@@ -732,7 +732,7 @@ with st.sidebar:
     st.info(f"현재 세션: {status.label}" + (" · 감시 중" if status.active else " · 신규 신호 중지"))
     mode = st.radio("후보 모드", ["전체", "일반주", "급등주"], horizontal=True)
     display_count = st.slider("표시 후보", 5, 10, 5)
-    refresh_seconds = int(st.radio("현재가 화면 갱신", [1, 3, 5], horizontal=True, format_func=lambda value: f"{value}초"))
+    refresh_seconds = int(st.radio("현재가 화면 갱신", [1, 3, 5], index=2, horizontal=True, format_func=lambda value: f"{value}초"))
     if market == Market.KR:
         minimum_price = st.number_input("최소 가격(원)", 100.0, 300000.0, 1000.0, 100.0)
         maximum_price = st.number_input("최대 가격(원)", 1000.0, 1000000.0, 300000.0, 1000.0)
