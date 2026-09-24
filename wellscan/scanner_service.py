@@ -17,7 +17,7 @@ import time
 from collections import Counter, deque
 from collections.abc import Callable
 from contextlib import nullcontext
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, is_dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -28,6 +28,7 @@ from config import (
     CANDIDATE_FALLBACK_MAX_AGE_SECONDS,
     CANDIDATE_SNAPSHOT_INTERVAL_SECONDS,
     MIN_UNIQUE_ENTRIES_PER_SESSION,
+    PROVISIONAL_MIN_BARS,
     SCANNER_CYCLE_SECONDS,
     SCANNER_REQUEST_DEADLINE_MARGIN_SECONDS,
     STRUCTURAL_WINDOW_BARS,
@@ -1073,16 +1074,13 @@ class ScannerService:
                     history_below_ready += 1
                 warming = False
                 if len(session_bars) < history_target:
-                    if (status.session == TradingSession.US_DAY
-                            or len(session_bars) < HistoryCache.INITIAL_READY_BARS):
+                    if len(session_bars) < PROVISIONAL_MIN_BARS:
                         self._counters.data_wait_observations += 1
-                        if status.session != TradingSession.US_DAY:
-                            continue
-                    else:
-                        # Warming band (180~900): evaluate provisionally so
-                        # formations stay visible, but nothing here may
-                        # become official. Qualification still needs 900.
-                        warming = True
+                        continue
+                    # Provisional band (30~899): evaluate for visibility and
+                    # shadow measurement, never for official ENTRY. One floor
+                    # for every session; US_DAY no longer bypasses readiness.
+                    warming = True
                 else:
                     bars_ready += 1
                 close = self._latest_completed_close(bars, status.session, current)
@@ -1114,6 +1112,8 @@ class ScannerService:
                     classification_portfolio=ALL_ENTRY_STRATEGIES,
                 )
                 if warming:
+                    if not (is_dataclass(result) and not isinstance(result, type)):
+                        raise RuntimeError("provisional evaluation requires a ScanResult result")
                     warming_provisional += 1
                     self._counters.warming_provisional += 1
                     if result.final_buy:

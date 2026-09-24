@@ -594,7 +594,7 @@ class ValidationStore:
                 state = advance(plan, state, Bar.from_row(at, row, plan.session))
                 if previous.entry_at is None and state.entry_at is not None and self._sequence_store is not None:
                     self._sequence_store.mark_filled(case.symbol, plan.plan_id, state.entry_price, state.hard_stop,
-                                                     datetime.fromisoformat(state.entry_at))
+                                                     datetime.fromisoformat(state.entry_at), session=plan.session)
                 if state.phase == Phase.CLOSED and self._sequence_store is not None:
                     kind = ("HARD_STOP" if "HARD_STOP" in state.result else "SOFT_STOP" if "SOFT_STOP" in state.result
                             else "SESSION_CLOSE" if "SESSION_CLOSE" in state.result else "TARGET")

@@ -465,6 +465,92 @@ def test_stale_error_increments_streak(tmp_path):
     assert service._stale_streak == {f"KR:KRX:KR_REGULAR:005930|{day}": 1}
 
 
+def test_provisional_band_opens_between_30_and_target(tmp_path):
+    frame = pd.DataFrame(
+        {"open": 100.0, "high": 101.0, "low": 99.0, "close": 100.5, "volume": 1000.0},
+        index=pd.date_range(end="2026-09-07 10:00", periods=100, freq="min"),
+    )
+
+    def evaluator(symbol, frame, price, store, **kwargs):
+        return ScanResult(
+            symbol, kwargs["now"], Stage.FINAL_BUY, Strategy.RANGE_REVERSAL,
+            RiskState.NORMAL, 100, None, None, None, None,
+            TradeLevels(entry=100, target1=104, target2=106, hard_stop=99, soft_stop=99.5),
+            {"FINAL_BUY": True}, diagnostics={"classification_assessments": {}},
+        )
+
+    validation = FakeValidation()
+    service = ScannerService(
+        config(tmp_path, initial_history_bars=250),
+        client=FakeClient([Candidate("005930", "S", 70000, 1, 100, 1000)]),
+        history=FakeHistory(frame), sequences=object(), validations=validation,
+        clock=lambda: NOW, session_resolver=resolver(), evaluator=evaluator,
+        live_revalidator=lambda result, price, now: result,
+    )
+    assert service.run_cycle()
+    assert validation.recorded == []
+    published = service.results_snapshot().sessions[0].results[0][1]
+    assert published.stage == Stage.CANDIDATE
+    breakdown = service.snapshot().discovery_breakdown["KR:KR_REGULAR"]
+    assert breakdown["warming_provisional"] == 1
+    assert breakdown["final_buy"] == 0
+
+
+def test_below_provisional_floor_stays_data_wait(tmp_path):
+    frame = pd.DataFrame(
+        {"open": 100.0, "high": 101.0, "low": 99.0, "close": 100.5, "volume": 1000.0},
+        index=pd.date_range(end="2026-09-07 10:00", periods=10, freq="min"),
+    )
+    called = []
+    validation = FakeValidation()
+    service = ScannerService(
+        config(tmp_path, initial_history_bars=250),
+        client=FakeClient([Candidate("005930", "S", 70000, 1, 100, 1000)]),
+        history=FakeHistory(frame), sequences=object(), validations=validation,
+        clock=lambda: NOW, session_resolver=resolver(),
+        evaluator=lambda *args, **kwargs: called.append(True),
+        live_revalidator=lambda result, price, now: result,
+    )
+    assert service.run_cycle()
+    assert called == []
+    assert validation.recorded == []
+    assert service.snapshot().counters["data_wait_observations"] == 1
+
+
+def test_us_day_below_target_is_provisional_not_official(tmp_path):
+    import time as _time
+
+    frame = pd.DataFrame(
+        {"open": 200.0, "high": 201.0, "low": 199.0, "close": 200.5, "volume": 1000.0},
+        index=pd.date_range(end="2026-09-04 03:59", periods=100, freq="min", tz="America/New_York"),
+    )
+    friday = pd.Timestamp("2026-09-04 03:30", tz="America/New_York").to_pydatetime()
+
+    def evaluator(symbol, frame, price, store, **kwargs):
+        return ScanResult(
+            symbol, kwargs["now"], Stage.FINAL_BUY, Strategy.RANGE_REVERSAL,
+            RiskState.NORMAL, 100, None, None, None, None,
+            TradeLevels(entry=200, target1=208, target2=212, hard_stop=198, soft_stop=199),
+            {"FINAL_BUY": True}, diagnostics={"classification_assessments": {}},
+        )
+
+    validation = FakeValidation()
+    service = ScannerService(
+        config(tmp_path, initial_history_bars=250),
+        client=FakeClient([Candidate("AAPL", "A", 200, 1, 100, 1000, market=Market.US, exchange="NAS", session=TradingSession.US_DAY)]),
+        history=FakeHistory(frame), sequences=object(), validations=validation,
+        clock=lambda: friday,
+        session_resolver=lambda market, now: SessionStatus(Market.US, TradingSession.US_DAY, True, "test"),
+        evaluator=evaluator, live_revalidator=lambda result, price, now: result,
+    )
+    status = SessionStatus(Market.US, TradingSession.US_DAY, True, "test")
+    service._scan_session(status, _time.monotonic() + 60, 60)
+    assert validation.recorded == []
+    breakdown = service.snapshot().discovery_breakdown["US:US_DAY"]
+    assert breakdown["warming_provisional"] == 1
+    assert breakdown["final_buy"] == 0
+
+
 def test_discovery_rotation_advances_only_by_attempted_candidates(tmp_path):
     candidates = [Candidate(f"{index:06d}", str(index), 100, 1, 1, 1) for index in range(5)]
     service = ScannerService(
@@ -790,7 +876,7 @@ def test_us_day_live_revalidation_uses_day_exchange_code(tmp_path):
     assert client.price_calls == [("BAQ", "AAPL")]
 
 
-def test_us_day_publishes_partial_one_day_history_without_waiting_for_1000(tmp_path):
+def test_us_day_partial_history_is_provisional(tmp_path):
     now = datetime(2026, 9, 8, 2, 1, 30, tzinfo=UTC)  # 22:01:30 New York
     index = pd.date_range("2026-09-07 20:02", periods=120, freq="min")
     frame = pd.DataFrame(
@@ -808,7 +894,12 @@ def test_us_day_publishes_partial_one_day_history_without_waiting_for_1000(tmp_p
     def evaluator(symbol, supplied, price, store, **kwargs):
         del supplied, price, store
         evaluated.append((symbol, kwargs))
-        return SimpleNamespace(final_buy=False, stage=Stage.DATA_WAIT, evaluated_at=kwargs["now"])
+        return ScanResult(
+            symbol, kwargs["now"], Stage.DATA_WAIT, Strategy.RANGE_REVERSAL,
+            RiskState.NORMAL, 100, None, None, None, None,
+            TradeLevels(entry=100, target1=104, target2=106, hard_stop=99, soft_stop=99.5),
+            {"DATA_WAIT": True}, diagnostics={"classification_assessments": {}},
+        )
 
     service = ScannerService(
         config(tmp_path, initial_history_bars=HistoryCache.WARM_TARGET_BARS),
@@ -827,8 +918,10 @@ def test_us_day_publishes_partial_one_day_history_without_waiting_for_1000(tmp_p
     assert history.calls == [(candidate.key, HistoryCache.INITIAL_READY_BARS)]
     assert evaluated and evaluated[0][0] == candidate.key
     assert validation.nonfinal
-    assert service.snapshot().counters["data_wait_observations"] == 1
-    assert service.results_snapshot().sessions[0].results[0][1].stage == Stage.DATA_WAIT
+    assert not validation.recorded
+    assert service.snapshot().counters["data_wait_observations"] == 0
+    assert service.results_snapshot().sessions[0].results[0][1].stage == Stage.CANDIDATE
+    assert service.snapshot().counters["warming_provisional"] == 1
 
 
 def test_nonfinal_result_is_observed_without_recording_signal(tmp_path):

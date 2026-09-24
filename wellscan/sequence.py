@@ -66,6 +66,14 @@ class SequenceStore:
             else CockroachBarStore.from_environment() if use_environment else None
         )
 
+    @staticmethod
+    def _key(symbol: str, session: TradingSession | None = None) -> str:
+        """Storage key namespaced by session; without a session it is the legacy symbol key."""
+        base = str(symbol).upper()
+        if session is None:
+            return base
+        return f"{base}__{session.value}"
+
     def _path(self, symbol: str) -> Path:
         clean = "".join(character for character in symbol.upper() if character.isalnum() or character in "._-")
         return self.root / f"{clean}.json"
@@ -73,44 +81,45 @@ class SequenceStore:
     def _pending_path(self, symbol: str) -> Path:
         return self.root / ".durable-pending" / self._path(symbol).name
 
-    def _retry_pending(self, symbol: str) -> None:
+    def _retry_pending(self, key: str) -> None:
         if self._durable_store is None:
             return
-        pending = self._pending_path(symbol)
+        pending = self._pending_path(key)
         if not pending.exists():
             return
         with FileLock(str(pending) + ".lock", timeout=3):
             if not pending.exists():
                 return
             payload = json.loads(pending.read_text(encoding="utf-8"))
-            saved = self._durable_store.save_sequence_state(symbol, payload)
+            saved = self._durable_store.save_sequence_state(key, payload)
             if saved is not True:
                 raise RuntimeError("영구 신호 상태 저장소가 성공을 확인하지 않았습니다")
             pending.unlink()
 
-    def load(self, symbol: str) -> SequenceState:
+    def load(self, symbol: str, session: TradingSession | None = None) -> SequenceState:
+        key = self._key(symbol, session)
         if self._memory_only:
-            return replace(self._states.get(symbol.upper(), SequenceState(symbol=symbol.upper())))
-        path = self._path(symbol)
+            return replace(self._states.get(key, SequenceState(symbol=symbol.upper())))
+        path = self._path(key)
         payload = None
         try:
-            self._retry_pending(symbol)
+            self._retry_pending(key)
             if path.exists():
                 payload = json.loads(path.read_text(encoding="utf-8"))
             elif self._durable_store is not None:
-                payload = self._durable_store.load_sequence_state(symbol)
+                payload = self._durable_store.load_sequence_state(key)
             if not isinstance(payload, dict):
                 return SequenceState(symbol=symbol.upper())
             payload["stage"] = Stage(payload.get("stage", Stage.CANDIDATE))
             state = SequenceState(**payload)
             if not path.exists():
-                self._save_local(state)
+                self._save_local(state, key)
             return state
         except (OSError, ValueError, TypeError) as exc:
             raise RuntimeError(f"신호 상태 읽기 실패: {symbol}") from exc
 
-    def _save_local(self, state: SequenceState) -> dict[str, object]:
-        path = self._path(state.symbol)
+    def _save_local(self, state: SequenceState, key: str) -> dict[str, object]:
+        path = self._path(key)
         with FileLock(str(path) + ".lock", timeout=3):
             temporary = path.with_suffix(".tmp")
             payload = asdict(state)
@@ -119,17 +128,18 @@ class SequenceStore:
             temporary.replace(path)
         return payload
 
-    def save(self, state: SequenceState) -> None:
+    def save(self, state: SequenceState, session: TradingSession | None = None) -> None:
+        key = self._key(state.symbol, session)
         if self._memory_only:
-            self._states[state.symbol.upper()] = replace(state)
+            self._states[key] = replace(state)
             return
-        payload = self._save_local(state)
+        payload = self._save_local(state, key)
         if self._durable_store is not None:
-            pending = self._pending_path(state.symbol)
+            pending = self._pending_path(key)
             pending.parent.mkdir(parents=True, exist_ok=True)
             with FileLock(str(pending) + ".lock", timeout=3):
                 try:
-                    saved = self._durable_store.save_sequence_state(state.symbol, payload)
+                    saved = self._durable_store.save_sequence_state(key, payload)
                     if saved is not True:
                         raise RuntimeError("영구 신호 상태 저장소가 성공을 확인하지 않았습니다")
                 except Exception:
@@ -147,9 +157,10 @@ class SequenceStore:
             return None
 
     def advance(self, symbol: str, **kwargs) -> SequenceState:
+        key = self._key(symbol, kwargs.get("session"))
         if self._memory_only:
             return self._advance(symbol, **kwargs)
-        with FileLock(str(self._path(symbol)) + ".transaction.lock", timeout=15):
+        with FileLock(str(self._path(key)) + ".transaction.lock", timeout=15):
             return self._advance(symbol, **kwargs)
 
     def _advance(
@@ -175,7 +186,7 @@ class SequenceStore:
         session: TradingSession | None = None,
     ) -> SequenceState:
         current_time = now or datetime.now(UTC)
-        state = self.load(symbol)
+        state = self.load(symbol, session)
         for active, attribute in (
             (convergence, "convergence_at"),
             (stochastic_rebound, "stochastic_at"),
@@ -249,17 +260,18 @@ class SequenceStore:
             ):
                 setattr(state, attribute, "")
         state.updated_at = current_time.isoformat()
-        self.save(state)
+        self.save(state, session)
         return state
 
     def register_breakdown(self, symbol: str, marker: str, **kwargs) -> SequenceState:
+        session = kwargs.get("session")
         if self._memory_only:
             return self._register_breakdown(symbol, marker, **kwargs)
-        with FileLock(str(self._path(symbol)) + ".transaction.lock", timeout=15):
+        with FileLock(str(self._path(self._key(symbol, session))) + ".transaction.lock", timeout=15):
             return self._register_breakdown(symbol, marker, **kwargs)
 
     def mark_filled(self, symbol: str, position_id: str, entry: float, hard_stop: float,
-                    filled_at: datetime) -> SequenceState:
+                    filled_at: datetime, session: TradingSession | None = None) -> SequenceState:
         """Only the common paper-execution owner may publish an actual simulated fill.
 
         Candidate setup updates never overwrite these immutable position fields.
@@ -268,14 +280,14 @@ class SequenceStore:
             raise ValueError("모의 체결 ID와 시간대가 있는 체결 시각 필요")
         stop = capped_stop(entry, hard_stop)
         if self._memory_only:
-            return self._mark_filled(symbol, position_id, entry, stop, filled_at)
-        with FileLock(str(self._path(symbol)) + ".transaction.lock", timeout=15):
-            return self._mark_filled(symbol, position_id, entry, stop, filled_at)
+            return self._mark_filled(symbol, position_id, entry, stop, filled_at, session)
+        with FileLock(str(self._path(self._key(symbol, session))) + ".transaction.lock", timeout=15):
+            return self._mark_filled(symbol, position_id, entry, stop, filled_at, session)
 
-    def _mark_filled(self, symbol, position_id, entry, hard_stop, filled_at):
-        state = self.load(symbol)
+    def _mark_filled(self, symbol, position_id, entry, hard_stop, filled_at, session=None):
+        state = self.load(symbol, session)
         if state.last_exit_position_id == position_id:
-            self.save(state)  # Retry a prior local-success/durable-failure write.
+            self.save(state, session)  # Retry a prior local-success/durable-failure write.
             return state  # Case-file retry after a completed sequence write, not another entry.
         previous_exit = self._parse(state.last_exit_at)
         if previous_exit is not None and filled_at <= previous_exit:
@@ -284,13 +296,13 @@ class SequenceStore:
             if (state.position_id, state.position_entry_price, state.position_hard_stop, state.position_filled_at) != (
                     position_id, entry, hard_stop, filled_at.isoformat()):
                 raise RuntimeError("같은 종목의 미종료 모의 보유 계획 충돌")
-            self.save(state)  # Idempotent retry must also repair durable storage.
+            self.save(state, session)  # Idempotent retry must also repair durable storage.
             return state
         state.position_id = position_id
         state.position_entry_price = entry
         state.position_hard_stop = hard_stop
         state.position_filled_at = filled_at.isoformat()
-        self.save(state)
+        self.save(state, session)
         return state
 
     def settle(self, symbol: str, marker: str, kind: str, now: datetime,
@@ -302,15 +314,15 @@ class SequenceStore:
             raise ValueError("청산 사건 시각/식별자 필요")
         if self._memory_only:
             return self._settle(symbol, marker, kind, now, session, position_id)
-        with FileLock(str(self._path(symbol)) + ".transaction.lock", timeout=15):
+        with FileLock(str(self._path(self._key(symbol, session))) + ".transaction.lock", timeout=15):
             return self._settle(symbol, marker, kind, now, session, position_id)
 
     def _settle(self, symbol: str, marker: str, kind: str, now: datetime, session: TradingSession | None,
                 position_id: str | None = None) -> SequenceState:
-        state = self.load(symbol)
+        state = self.load(symbol, session)
         previous = self._parse(state.last_exit_at)
         if state.last_exit_marker == marker or (previous is not None and now <= previous):
-            self.save(state)  # Retry a prior local-success/durable-failure write.
+            self.save(state, session)  # Retry a prior local-success/durable-failure write.
             return state
         if not state.position_id:
             return state  # A signal, rejected/unfilled attempt, or legacy record is not a filled trade.
@@ -335,7 +347,7 @@ class SequenceStore:
         state.last_exit_marker = marker
         state.last_exit_at = now.isoformat()
         state.updated_at = now.isoformat()
-        self.save(state)
+        self.save(state, session)
         return state
 
     def _register_breakdown(
@@ -349,7 +361,7 @@ class SequenceStore:
     ) -> SequenceState:
         """Count one breakdown per completed bar and enforce cycle protection."""
         current_time = now or datetime.now(UTC)
-        state = self.load(symbol)
+        state = self.load(symbol, session)
         today = risk_day(current_time, session)
         if state.breakdown_date != today:
             state.breakdown_date = today
@@ -364,5 +376,5 @@ class SequenceStore:
             state.hard_kill_date = today
         state.stage = Stage.EXCLUDED
         state.updated_at = current_time.isoformat()
-        self.save(state)
+        self.save(state, session)
         return state

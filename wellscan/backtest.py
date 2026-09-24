@@ -578,7 +578,7 @@ def run(client: KISClient, days: int = 3, top_n: int = 10, market: Market = Mark
                     stop = float(execution_state.hard_stop)
                     fill_time = datetime.fromisoformat(execution_state.entry_at)
                     position_id = plan.plan_id
-                    store.mark_filled(candidate.key, position_id, entry_price, stop, fill_time)
+                    store.mark_filled(candidate.key, position_id, entry_price, stop, fill_time, session=session)
                     entry_day = bar_days[entry_idx]
                     if entries_by_day[entry_day]:
                         execution_counts["same_symbol_session_reentries"] += 1

@@ -522,7 +522,7 @@ def evaluate(
         and signal_price > primary.entry + latest3.atr * 1.2
     )
     sequence_store = store or SequenceStore()
-    cycle = sequence_store.load(symbol)
+    cycle = sequence_store.load(symbol, session)
     active_plan = cycle.stage in {Stage.ENTRY_WAIT, Stage.FINAL_BUY} and cycle.entry_price is not None and cycle.entry_hard_stop is not None
     structural_stop = (primary.structural_stop if primary and primary.structural_stop is not None
                        else primary.hard_stop if primary else None)
@@ -722,5 +722,5 @@ def evaluate(
                 state.entry_price = None
                 state.entry_hard_stop = None
                 state.entry_wait_at = ""
-            sequence_store.save(state)
+            sequence_store.save(state, session)
     return result

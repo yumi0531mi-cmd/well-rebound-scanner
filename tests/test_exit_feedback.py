@@ -41,9 +41,9 @@ def test_live_tracker_uses_same_exit_feedback(tmp_path):
     bars = frame([(100, 101, 99.5, 100, 1000), (100, 101, 98.8, 99, 1000)])
     result = tracker.update_completed_bars(case, bars, NOW + timedelta(minutes=2))
     assert result.live_outcome == "STOP"
-    assert sequences.load(case.symbol).hard_kill_date == "2026-08-25"
+    assert sequences.load(case.symbol, TradingSession.KR_REGULAR).hard_kill_date == "2026-08-25"
     tracker.update_completed_bars(result, bars, NOW + timedelta(minutes=3))
-    assert sequences.load(case.symbol).breakdown_count == 1
+    assert sequences.load(case.symbol, TradingSession.KR_REGULAR).breakdown_count == 1
 
 
 def test_us_day_stop_survives_new_york_midnight(tmp_path):
@@ -51,13 +51,27 @@ def test_us_day_stop_survives_new_york_midnight(tmp_path):
     # 22:00 NY and 01:00 NY belong to the same following trading day.
     stopped = datetime(2026, 8, 25, 2, tzinfo=UTC)
     later = datetime(2026, 8, 25, 5, tzinfo=UTC)
-    store.mark_filled("DAY:X", "position-1", 100, 99, stopped - timedelta(minutes=1))
+    store.mark_filled("DAY:X", "position-1", 100, 99, stopped - timedelta(minutes=1),
+                      session=TradingSession.US_DAY)
     store.settle("DAY:X", "stop", "HARD_STOP", stopped, session=TradingSession.US_DAY)
     state = store.advance("DAY:X", trend_ready=True, setup_ready=True, breakout=True,
                           missed=False, excluded=False, candidate_entry=100, candidate_hard_stop=99,
                           now=later, session=TradingSession.US_DAY)
     assert state.hard_kill_date == "2026-08-25"
     assert state.stage == Stage.EXCLUDED
+
+
+def test_sequence_state_is_isolated_by_session(tmp_path):
+    store = SequenceStore(tmp_path, use_environment=False, memory_only=True)
+    now = datetime(2026, 8, 25, 1, tzinfo=UTC)
+    pre = store.advance("X", trend_ready=True, setup_ready=True, breakout=False,
+                        missed=False, excluded=False, candidate_entry=100, candidate_hard_stop=99,
+                        now=now, session=TradingSession.US_PRE)
+    assert pre.stage == Stage.ENTRY_WAIT
+    regular = store.load("X", TradingSession.US_REGULAR)
+    assert regular.stage == Stage.CANDIDATE
+    assert regular.entry_price is None
+    assert store.load("X").stage == Stage.CANDIDATE
 
 
 def test_risk_day_is_identical_for_utc_and_market_local_time():

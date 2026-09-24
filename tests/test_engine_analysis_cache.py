@@ -313,8 +313,8 @@ def test_cache_hit_reads_current_store_state_instead_of_an_earlier_profile_state
     plain, cached = memory_store(tmp_path, "state-plain"), memory_store(tmp_path, "state-cached")
     state = SequenceState("STATE", stage=Stage.EXCLUDED, hard_kill_date=now.date().isoformat(),
                           breakdown_date=now.date().isoformat(), breakdown_count=3)
-    plain.save(state)
-    cached.save(state)
+    plain.save(state, TradingSession.KR_REGULAR)
+    cached.save(state, TradingSession.KR_REGULAR)
     blocked, _ = assert_engine_equal(source, tmp_path, cache, name="STATE", now=now, plain_store=plain, cached_store=cached)
     assert blocked.stage == Stage.EXCLUDED
     assert blocked.diagnostics["cycle_breakdowns_today"] == 3

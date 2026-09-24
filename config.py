@@ -40,6 +40,9 @@ STRUCTURAL_WINDOW_BARS = 3000
 HISTORY_INITIAL_READY_BARS = 180
 HISTORY_WARM_TARGET_BARS = 3000
 HISTORY_WARMUP_QUEUE_LIMIT = 4
+# Provisional evaluation floor for every session: at least the 1-minute
+# scalping minimum. Below this, not even provisional analysis opens.
+PROVISIONAL_MIN_BARS = 30
 BACKTEST_MAX_STORED_BARS = 32000
 DURABLE_PREFETCH_SYMBOLS_PER_QUERY = 20
 SCANNER_CYCLE_SECONDS = 60.0

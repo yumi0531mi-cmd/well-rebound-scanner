@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-09-24T15:44:47+09:00",
+  "updated_at": "2026-09-24T17:55:15+09:00",
   "current_step": 3,
   "completed_steps": [
     "기존 저장소와 인계 보고서 확인",
@@ -245,10 +245,12 @@
     "official_evidence": "actual KIS one-minute bars with point-in-time candidate universe"
   },
   "next_actions": [
+    "push session work batch after US baseline completes (scalp + session sequence + provisional floor; all green locally)",
     "fix and verify US_DAY minute backfill/warmup so candidates reach 180 then 900 and retain 3000-bar structural tracking; investigate 31 gap symbols and 46 stale skips without relaxing gates",
     "record live US probe: 2 cycles 35 attempted, 31-33 warming provisional, 34 evaluated/published, 0 false officials, VWAP formed-but-blocked 1; provisional gates proven at scale",
     "verify >=5 entry symbols and T1 reach on real KIS data after scanner completion; record evidence and report",
     "1-minute scalping IMPLEMENTED locally (2 profiles, separate SCALP portfolio + frame table, EV-measured, 8 tests green, full 536 green); push after US baseline completes",
+    "session work IMPLEMENTED locally: sequence states namespaced per session (ENTRY bleed fixed, proven by isolation test), provisional floor 180->30 all sessions, US_DAY official line unified; full 540 green; push after baseline",
     "persist hypothetical three-bar fills and T1 outcomes for cost-qualified shadow formations without enabling unqualified strategies",
     "after the user manually authenticates the Render admin page, run the 22-strategy independent audit with actual KIS minute bars and point-in-time candidate snapshots",
     "report formation, cost pass, fill, and T1 rates without claiming unqualified win rates; keep 2026-08-17 through 19 and holdout-candidates excluded",
