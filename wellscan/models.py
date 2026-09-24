@@ -46,6 +46,8 @@ class Strategy(StrEnum):
     PRIOR_HIGH_BREAKOUT_RETEST = "전일 고가 돌파 후 재지지"
     TREND_SWING = "상승 스윙"
     RANGE_SWING = "박스 스윙"
+    SCALP_PULLBACK_ENTRY = "1분 눌림 진입"
+    SCALP_VWAP_RECLAIM = "1분 VWAP 회복"
     NONE = "NONE"
 
     @classmethod
@@ -98,6 +100,13 @@ EXPERIMENTAL_STRATEGIES = (
     Strategy.PRICE_STRENGTH_PULLBACK_RESUME,
     Strategy.LIQUIDITY_SWEEP_RECLAIM,
     Strategy.PRIOR_HIGH_BREAKOUT_RETEST,
+)
+# 1-minute scalping profiles for the 0.7-0.9% rotation style. Shadow-only by
+# construction: never a member of ALL_ENTRY_STRATEGIES, never selectable for
+# official ENTRY, measured by EV in the shadow ledger instead of net RR.
+SCALP_STRATEGIES = (
+    Strategy.SCALP_PULLBACK_ENTRY,
+    Strategy.SCALP_VWAP_RECLAIM,
 )
 ALL_ENTRY_STRATEGIES = CORE_STRATEGIES + EXPANSION_STRATEGIES + EXPERIMENTAL_STRATEGIES
 if len(ALL_ENTRY_STRATEGIES) != 22 or len(set(ALL_ENTRY_STRATEGIES)) != 22:

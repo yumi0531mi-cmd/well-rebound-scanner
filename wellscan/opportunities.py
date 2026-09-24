@@ -12,11 +12,12 @@ from config import (
     OPENING_RANGE_LOW_REVERSAL_MAX_MINUTES,
     OPENING_RANGE_READY_MINUTES,
     OPENING_RANGE_RETEST_MAX_MINUTES,
+    SCALP_FRAME_REQUIREMENTS,
     STRATEGY_FRAME_REQUIREMENTS,
 )
 
 from .indicators import enriched, pivot_points
-from .models import ACTIVE_STRATEGIES, Strategy, TradeLevels, TradingSession
+from .models import ACTIVE_STRATEGIES, SCALP_STRATEGIES, Strategy, TradeLevels, TradingSession
 from .policy import session_day
 from .sessions import KST, NEW_YORK, kr_session_window, us_session_window
 
@@ -965,10 +966,96 @@ def inside_bar_breakout(
     )
 
 
+def scalp_pullback_entry(
+    data1: pd.DataFrame,
+    live_price: float,
+    audit: dict[str, list[str]] | None = None,
+) -> Opportunity | None:
+    """1-minute impulse then shallow pullback reclaim with volume surge.
+
+    Offline profile for the 0.7-0.9% rotation style. Shadow-only: it is
+    never a member of any official portfolio and is measured by EV in the
+    shadow ledger, never by net RR.
+    """
+    strategy = Strategy.SCALP_PULLBACK_ENTRY
+    if len(data1) < 12:
+        if audit is not None:
+            audit[strategy.value] = ["1분봉 구조 부족"]
+        return None
+    window = data1.iloc[-12:]
+    prior = window.iloc[:-1]
+    current = window.iloc[-1]
+    atr = float(current.atr)
+    impulse_high = float(prior.high.max())
+    impulse_low = float(prior.low.min())
+    if not np.isfinite(atr) or atr <= 0 or impulse_low <= 0:
+        return None
+    impulse_move = (impulse_high - impulse_low) / impulse_low
+    pullback_depth = (impulse_high - float(current.close)) / impulse_high
+    volume_ratio = float(current.volume_ratio)
+    atr_pct = atr / float(current.close)
+    support = float(window.iloc[-6:-1].low.min())
+    live_gap = abs(float(live_price) - float(current.close)) / float(current.close) if live_price > 0 else 1.0
+    conditions = {
+        "10분 1% 이상 충격": impulse_move >= 0.01,
+        "0.2~0.8% 눌림": 0.002 <= pullback_depth <= 0.008,
+        "직전봉 대비 반등": float(current.close) > float(window.iloc[-2].close),
+        "눌림 저점 유지": float(current.low) >= support - atr * 0.1,
+        "거래량 1.5배 이상": current.volume > 0 and volume_ratio >= 1.5,
+        "ATR 0.2~3%": 0.002 <= atr_pct <= 0.03,
+        "라이브가 이탈 없음": live_gap <= 0.01,
+        "유동성 확인": current.volume > 0 and volume_ratio >= 1.5 and 0.002 <= atr_pct <= 0.03,
+    }
+    return _pattern_levels(
+        strategy, conditions, float(current.close), support, None, atr, impulse_high,
+        "1분 충격 후 얕은 눌림·거래량 동반 재상승", audit,
+    )
+
+
+def scalp_vwap_reclaim(
+    data1: pd.DataFrame,
+    live_price: float,
+    audit: dict[str, list[str]] | None = None,
+) -> Opportunity | None:
+    """Dip below 1-minute VWAP and reclaim it with volume within 6 bars."""
+    strategy = Strategy.SCALP_VWAP_RECLAIM
+    if len(data1) < 12:
+        if audit is not None:
+            audit[strategy.value] = ["1분봉 구조 부족"]
+        return None
+    window = data1.iloc[-6:]
+    current = window.iloc[-1]
+    atr = float(current.atr)
+    if not np.isfinite(atr) or atr <= 0:
+        return None
+    dipped = bool((window.close.iloc[:-1] < window.vwap.iloc[:-1]).any())
+    reclaim_gap = (float(current.close) - float(current.vwap)) / float(current.vwap)
+    micro_high = float(window.high.max())
+    support = float(window.low.min())
+    volume_ratio = float(current.volume_ratio)
+    atr_pct = atr / float(current.close)
+    live_gap = abs(float(live_price) - float(current.close)) / float(current.close) if live_price > 0 else 1.0
+    conditions = {
+        "6봉 내 VWAP 이탈 이력": dipped,
+        "VWAP 재돌파": float(window.close.iloc[-2]) <= float(window.vwap.iloc[-2]) and current.close > current.vwap,
+        "이탈폭 0.3% 이내": 0 <= reclaim_gap <= 0.003,
+        "거래량 1.5배 이상": current.volume > 0 and volume_ratio >= 1.5,
+        "ATR 0.2~3%": 0.002 <= atr_pct <= 0.03,
+        "라이브가 이탈 없음": live_gap <= 0.01,
+        "유동성 확인": current.volume > 0 and volume_ratio >= 1.5 and 0.002 <= atr_pct <= 0.03,
+    }
+    return _pattern_levels(
+        strategy, conditions, float(current.close), support, None, atr, micro_high,
+        "1분 VWAP 이탈 후 거래량 동반 재돌파", audit,
+    )
+
+
 def classify(frame15: pd.DataFrame, frame5: pd.DataFrame, frame3: pd.DataFrame, live_price: float, session: TradingSession | None,
              *, prepared: tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame] | None = None,
              audit: dict[str, list[str]] | None = None,
-             active_strategies: tuple[Strategy, ...] = ACTIVE_STRATEGIES) -> tuple[Opportunity, ...]:
+             active_strategies: tuple[Strategy, ...] = ACTIVE_STRATEGIES,
+             frame1: pd.DataFrame | None = None,
+             include_scalp: bool = False) -> tuple[Opportunity, ...]:
     opportunities: list[Opportunity] = []
     enabled = frozenset(active_strategies)
     frames = {15: frame15, 5: frame5, 3: frame3}
@@ -1025,6 +1112,21 @@ def classify(frame15: pd.DataFrame, frame5: pd.DataFrame, frame3: pd.DataFrame, 
          lambda: price_strength_pullback_resume(data15, data5, data3, audit)),
     )
     collect(full_specs)
+    if include_scalp and frame1 is not None and not frame1.empty:
+        data1 = enriched(frame1, session)
+        for strategy in SCALP_STRATEGIES:
+            need = SCALP_FRAME_REQUIREMENTS[strategy.value][1]
+            if len(data1) < need:
+                if audit is not None:
+                    audit[strategy.value] = [f"1분봉 구조 부족 {len(data1)}/{need}"]
+                continue
+            item = (
+                scalp_pullback_entry(data1, live_price, audit)
+                if strategy == Strategy.SCALP_PULLBACK_ENTRY
+                else scalp_vwap_reclaim(data1, live_price, audit)
+            )
+            if item is not None:
+                opportunities.append(item)
     core_strategies = (
         Strategy.TREND_CONTINUATION, Strategy.TREND_PULLBACK, Strategy.RANGE_REVERSAL,
         Strategy.BREAKOUT, Strategy.MOMENTUM_PULLBACK, Strategy.VWAP_RECLAIM,

@@ -27,9 +27,18 @@ from pathlib import Path
 from typing import Any
 
 from .execution import Bar, Phase, Plan, State, advance
-from .policy import capped_stop
+from .models import SCALP_STRATEGIES
+from .policy import Costs, capped_stop
 
 PRUNE_TRANSMITTED_AFTER_DAYS = 7
+
+# Scalp profiles are measured by gross outcome + EV, never by net RR: a 0.8%
+# gross target cannot clear RR 1.0 under 0.43% round-trip costs by construction.
+# Zero execution costs keep the shared fill/state machine intact; the true
+# cost reserve is applied when EV is reported, and every scalp outcome is
+# tagged with its gross basis. Win/loss classification (price levels only)
+# is identical either way.
+SCALP_GROSS_COSTS = Costs(0.0, 0.0, 0.0, 0.0, "SCALP-GROSS; net costs applied at report time")
 
 
 def _number(value: Any) -> float | None:
@@ -134,9 +143,13 @@ class ShadowLedger:
         opened = 0
         rejected = 0
         minute = signal_at.strftime("%Y%m%d%H%M")
+        scalp_values = {item.value for item in SCALP_STRATEGIES}
         for strategy, details in assessments.items():
-            if not isinstance(details, dict) or not details.get("shadow_ready"):
+            if not isinstance(details, dict):
                 continue
+            if not (details.get("shadow_ready") or details.get("scalp_qualified")):
+                continue
+            plan_costs = SCALP_GROSS_COSTS if str(strategy) in scalp_values else costs
             try:
                 entry = _number(details.get("plan_entry"))
                 target1 = _number(details.get("plan_target1"))
@@ -152,7 +165,7 @@ class ShadowLedger:
                     raise ValueError("missing structural stop")
                 if atr is None or atr <= 0:
                     raise ValueError("missing atr")
-                if costs is None:
+                if plan_costs is None:
                     raise ValueError("missing costs")
                 soft = _number(details.get("plan_soft_stop"))
                 if soft is None or not 0 < soft < entry:
@@ -176,7 +189,7 @@ class ShadowLedger:
                     hard_stop=capped_stop(entry, structural),
                     structural_stop=structural,
                     atr=atr,
-                    costs=costs,
+                    costs=plan_costs,
                     minimum_rr=float(minimum_rr),
                 )
                 record = {
@@ -264,8 +277,15 @@ class ShadowLedger:
             record["state"] = state.payload()
             if state.terminal:
                 bucket = _outcome_bucket(state)
+                net_pct = None
+                try:
+                    if state.entry_price and state.proceeds:
+                        net_pct = round(float(plan.costs.net_return(state.entry_price, state.proceeds)), 3)
+                except (ValueError, TypeError, AttributeError):
+                    net_pct = None
                 outcome = {
                     "bucket": bucket,
+                    "net_pct": net_pct,
                     "phase": state.phase.value,
                     "result": state.result,
                     "entry_at": state.entry_at,
@@ -364,6 +384,7 @@ class ShadowLedger:
         by_strategy: dict[str, dict[str, int]] = {}
         open_plans = 0
         pending_transmit = 0
+        net_values: list[float] = []
         for _, record in self._iter_records():
             if record.get("status") == "OPEN":
                 open_plans += 1
@@ -373,6 +394,9 @@ class ShadowLedger:
             strategy = str(record.get("strategy", "UNKNOWN"))
             entry = by_strategy.setdefault(strategy, {})
             entry[bucket] = entry.get(bucket, 0) + 1
+            net_pct = outcome.get("net_pct")
+            if isinstance(net_pct, (int, float)) and math.isfinite(net_pct):
+                net_values.append(float(net_pct))
             if not record.get("transmitted"):
                 pending_transmit += 1
         settled = sum(
@@ -387,4 +411,5 @@ class ShadowLedger:
             "by_strategy": by_strategy,
             "settled": settled,
             "t1_rate": (hits / settled) if settled else None,
+            "avg_net_pct": (sum(net_values) / len(net_values)) if net_values else None,
         }

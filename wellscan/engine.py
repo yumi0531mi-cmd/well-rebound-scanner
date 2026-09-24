@@ -17,6 +17,7 @@ from .analysis_cache import AnalysisCache, analysis_key
 from .indicators import IndicatorCache, completed_resample, enriched, normalize_bars, pivot_points
 from .models import (
     ACTIVE_STRATEGIES,
+    SCALP_STRATEGIES,
     RiskState,
     ScanResult,
     Stage,
@@ -168,6 +169,14 @@ def _classification_assessment(
             assessment["current_cost_pass"] = current_pass
         assessment["shadow_ready"] = bool(
             product_valid and planned_pass and fill_band and assessment["current_cost_pass"]
+        )
+        # Scalp profiles are measured by liquidity qualification and EV, never
+        # by net RR (a 0.8% target cannot clear RR 1.0 under 0.43% costs).
+        # They stay out of every official portfolio by construction.
+        assessment["scalp_qualified"] = bool(
+            item.strategy in SCALP_STRATEGIES
+            and product_valid
+            and bool(item.conditions.get("유동성 확인", False))
         )
         assessment["policy_ready"] = bool(active and assessment["shadow_ready"])
         blocks = []
@@ -361,6 +370,7 @@ def _analyze_structure(bars, live_price, session, reference, indicator_cache, ac
         frame15, frame5, frame3, live_price, session,
         prepared=(data15, data5, data3), audit=opportunity_audit,
         active_strategies=active_strategies,
+        frame1=bars, include_scalp=True,
     ) if opening_data_ready else ()
     opportunity_rejections = tuple(
         (strategy, tuple(reasons)) for strategy, reasons in opportunity_audit.items()

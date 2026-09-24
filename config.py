@@ -117,6 +117,12 @@ STRATEGY_FRAME_REQUIREMENTS = {
     "유동성 스윕 후 회복": {3: 10},
     "전일 고가 돌파 후 재지지": {3: 5},
 }
+# 1-minute scalping profiles use their own completed-bar requirements.
+# Kept separate so the 22-strategy contract above never changes.
+SCALP_FRAME_REQUIREMENTS = {
+    "1분 눌림 진입": {1: 30},
+    "1분 VWAP 회복": {1: 30},
+}
 if len(STRATEGY_FRAME_REQUIREMENTS) != 22:
     raise RuntimeError("기법별 시간축 요구사항은 22개 전체를 포함해야 합니다")
 OPENING_RANGE_READY_MINUTES = 21
