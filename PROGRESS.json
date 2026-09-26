@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-09-27T12:25:00+09:00",
+  "updated_at": "2026-09-27T15:55:00+09:00",
   "current_step": 3,
   "completed_steps": [
     "기존 저장소와 인계 보고서 확인",
@@ -150,7 +150,9 @@
     "2026-09-26 full suite minus 3 forbidden tuning files: 548 passed, 0 failed (render 7-ignore subset was 528); ruff clean, diff clean",
     "2026-09-26 010170 60-day bars cached locally (24682 rows, 2026-06-23 to 2026-09-23); 22-strategy independent replay launched offline from cache; multi-symbol batch still missing 4 symbols (prior worker process dead, no error artifact, cause unconfirmed)",
     "2026-09-27 parallel replay: old sequential worker made 2/22 then host-reaped tracelessly; relaunched as 5 locked single-group workers (4 strategies each, own jsonl, resume-skip, heartbeat), verified alive by CPU growth; old worker stopped to avoid duplicate work",
-    "2026-09-27 ETA basis: ~44 CPU-min per strategy measured (5282s for 2 strategies); 22 logical cores free, 5 workers -> ~3-4h wall for remaining 20 on 010170 KR 60-day cached bars"
+    "2026-09-27 ETA basis: ~44 CPU-min per strategy measured (5282s for 2 strategies); 22 logical cores free, 5 workers -> ~3-4h wall for remaining 20 on 010170 KR 60-day cached bars",
+    "2026-09-27 16:00-table rule accepted: fixed-symbol replay is diagnostic-only, never for activation or win-rate claims; kept separate from validation stream",
+    "2026-09-27 relaunched multi-symbol batch with resume-skip (bt60_multi.py skips completed symbols); per-strategy x session funnel uses live funnel + ledger by_session; 0 fills recorded as no-verdict, never 0%"
   ],
   "files": {
     "config.py": "created; qualification/risk/cost/data/model and scanner deadline-margin settings centralized",
