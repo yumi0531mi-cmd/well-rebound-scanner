@@ -319,7 +319,9 @@ class HistoryCache:
         with self._state_lock:
             self._metrics[candidate.key] = BackfillMetrics(
                 symbol=candidate.key,
-                cache_hit=cached_before > 0,
+                # A partial/stale cache still caused a KIS refresh above;
+                # do not call that a hit merely because rows existed.
+                cache_hit=api_calls == 0,
                 cached_before=cached_before,
                 cached_after=len(result),
                 api_calls=api_calls,
@@ -401,10 +403,19 @@ class HistoryCache:
             scheduled = 0
             for _, _, _, candidate in sorted(ranked)[:slots]:
                 self._warm_futures[candidate.key] = self._warm_executor.submit(
-                    self.backfill_candidate, client, candidate, self.WARM_TARGET_BARS
+                    self._warm_candidate, client, candidate, self.WARM_TARGET_BARS
                 )
                 scheduled += 1
             return scheduled
+
+    def _warm_candidate(
+        self, client: KISClient, candidate: Candidate, target_bars: int
+    ) -> pd.DataFrame:
+        scope = getattr(client, "metering_scope", None)
+        if callable(scope):
+            with scope(candidate.market.value, candidate.session.value):
+                return self.backfill_candidate(client, candidate, target_bars)
+        return self.backfill_candidate(client, candidate, target_bars)
 
     def warmup_pending(self) -> int:
         with self._warm_lock:

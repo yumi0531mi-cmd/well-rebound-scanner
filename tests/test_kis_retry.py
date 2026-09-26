@@ -15,6 +15,7 @@ class Response:
         self.status_code = status_code
         self._payload = payload
         self.headers: dict[str, str] = {}
+        self.content = b"x" * status_code
 
     @property
     def ok(self) -> bool:
@@ -55,6 +56,7 @@ def test_rate_limit_is_retried_with_a_bounded_attempt_count(tmp_path, monkeypatc
 
     assert payload["rt_cd"] == "0"
     assert session.calls == 2
+    assert client.take_call_stats() == {"other": {"calls": 2, "bytes": 629}}
 
 
 def test_auth_error_is_not_retried(tmp_path, monkeypatch) -> None:
@@ -156,3 +158,16 @@ def test_get_preserves_typed_failure_after_transport_retries(monkeypatch, tmp_pa
     with pytest.raises(KISError, match=r"HHDFS76950200 KIS 전송 실패\(ConnectionError\)"):
         client.get("/history", "HHDFS76950200", {})
     assert client.session.calls == 3
+    assert client.take_call_stats() == {"other": {"calls": 3, "bytes": 0}}
+
+
+def test_call_stats_are_isolated_by_market_session_scope(tmp_path):
+    client = KISClient(tmp_path)
+    with client.metering_scope("US", "US_PRE"):
+        client._record_call("/price", 11)
+    with client.metering_scope("US", "US_REGULAR"):
+        client._record_call("/price", 23)
+    with client.metering_scope("US", "US_PRE"):
+        assert client.take_call_stats() == {"quote": {"calls": 1, "bytes": 11}}
+    with client.metering_scope("US", "US_REGULAR"):
+        assert client.take_call_stats() == {"quote": {"calls": 1, "bytes": 23}}

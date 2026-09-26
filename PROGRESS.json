@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-09-26T14:45:00+09:00",
+  "updated_at": "2026-09-26T14:59:02+09:00",
   "current_step": 3,
   "completed_steps": [
     "기존 저장소와 인계 보고서 확인",
@@ -143,7 +143,9 @@
     "2026-09-24 22:34 KST 미국 정규장 운영 확인 시 Render 루트와 /_stcore/health 모두 Service Suspended 응답; 라이브 funnel 계측 불가, 원인 확인과 서비스 복구 전 배포·승률 판정 금지",
     "2026-09-25 egress diet locally: diag JSON gated behind checkbox (top-5 blocks always on), daemon idles with zero KIS/DB calls off-session; full 541 green, ruff clean; push held for Oct 1 resume",
     "2026-09-25 KIS metering locally: per-bucket call/byte take in KISClient.get, per-session aggregation (calls/bytes/pages-as-calls/rows/hit-rate) in funnel + counters, refresh default 5s (1s option kept); full 543 green, ruff clean; push held for Oct 1 resume",
-    "2026-09-26 call cadence locally: ranking discovery TTL 180s, backfill skipped without new completed bar, warmup deferred over KIS soft budget (official evaluation untouched); fixed double-counted attempted; full 547 green, ruff clean; push held for Oct 1 resume"
+    "2026-09-26 call cadence locally: ranking discovery TTL 180s, backfill skipped without new completed bar, warmup deferred over KIS soft budget (official evaluation untouched); fixed double-counted attempted; full 547 green, ruff clean; push held for Oct 1 resume",
+    "2026-09-26 audit/fix: KIS metering now records every retry/transport attempt, segregates counters by market+session (including background warmup), distinguishes response-body bytes from wire bandwidth, defines history cache hits as actual backfill avoidance, and counts only current-cycle local row growth; removed duplicate stale-state init; complete safe regression 548 passed (3 prohibited test files excluded), Ruff/compileall/diff-check passed; no push",
+    "Backtest batch reportedly stopped after 2 symbols, but no execution log, KIS error code, or result artifact is in the repository; rate-limit cause remains unverified. 3000-bar refresh does not redownload all 3000, but the API fetches an overlapping newest page/day segment rather than strictly requesting timestamps after the last cached bar."
   ],
   "files": {
     "config.py": "created; qualification/risk/cost/data/model and scanner deadline-margin settings centralized",
@@ -203,6 +205,12 @@
     "non_15m_strategy_downtrend_gate_fixed": true,
     "public_strategy_rejection_diagnostics_added": true,
     "latest_safe_operational_test_count": 528,
+    "latest_local_safe_test_count": 548,
+    "latest_local_safe_test_exclusions": [
+      "tests/test_controlled_tuning.py",
+      "tests/test_controlled_tuning_audit.py",
+      "tests/test_tuning_feasibility.py"
+    ],
     "latest_deployed_version": "0.11.8-pipeline-audit",
     "latest_local_verified_version": "0.11.9-active-market-clock",
     "post_04fc8ab_targeted_tests": 49,

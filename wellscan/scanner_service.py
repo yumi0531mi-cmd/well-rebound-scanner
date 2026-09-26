@@ -367,7 +367,6 @@ class ScannerService:
         self._stale_streak: dict[str, int] = {}
         self._discovery_cache: dict[str, tuple[datetime, tuple[Candidate, ...]]] = {}
         self._eval_cutoff: dict[str, str] = {}
-        self._stale_streak: dict[str, int] = {}
         self._tracking_offset = 0
         self._session_results: dict[TradingSession, dict[str, tuple[Candidate, ScanResult]]] = {}
         self._session_result_day: dict[TradingSession, str] = {}
@@ -1021,6 +1020,14 @@ class ScannerService:
             self._rotation[key] = (self._rotation.get(key, 0) + attempted) % population
 
     def _scan_session(self, status: SessionStatus, deadline: float, seconds_budgeted: float) -> None:
+        scope = getattr(self.client, "metering_scope", None)
+        if callable(scope):
+            with scope(status.market.value, status.session.value):
+                self._scan_session_scoped(status, deadline, seconds_budgeted)
+            return
+        self._scan_session_scoped(status, deadline, seconds_budgeted)
+
+    def _scan_session_scoped(self, status: SessionStatus, deadline: float, seconds_budgeted: float) -> None:
         limit = budgeted_candidate_limit(status.market, seconds_budgeted, self.config.max_candidates_per_session)
         if limit == 0:
             self._counters.budget_exhaustions += 1
@@ -1029,7 +1036,6 @@ class ScannerService:
                 scan_complete=False, failure="cycle-budget-before-discovery",
             )
             return
-        self._take_kis_delta()  # baseline; session deltas attributed at cycle end
         try:
             candidates = self._discover(status, limit)
         except KISDeadlineError:
@@ -1072,6 +1078,7 @@ class ScannerService:
         warming_provisional = 0
         warming_signals = 0
         bars_counts: list[int] = []
+        kis_rows = 0
         bars_target = 0
         warming_sequences = None
         product_unknown = 0
@@ -1133,11 +1140,18 @@ class ScannerService:
                         self._counters.candidate_backfill_skips += 1
                 if bars is None:
                     attempted += 1
+                    try:
+                        rows_before = len(self.history.load(
+                            candidate.symbol, HistoryCache._namespace(candidate)
+                        ))
+                    except Exception:
+                        rows_before = 0
                     bars = self.history.backfill_candidate(
                         self.client,
                         candidate,
                         target_bars=history_target,
                     )
+                    kis_rows += max(0, len(bars) - rows_before)
                 self._eval_cutoff[candidate.key] = cutoff_key
                 if len(self._eval_cutoff) > 20000:
                     self._eval_cutoff.clear()
@@ -1308,29 +1322,10 @@ class ScannerService:
             entry["calls"] = int(entry.get("calls", 0)) + int(values.get("calls", 0))
             entry["bytes"] = int(entry.get("bytes", 0)) + int(values.get("bytes", 0))
         kis_delta["buckets"] = merged_buckets
-        kis_rows = 0
-        kis_hits = 0
-        kis_total = 0
-        metrics_reader = getattr(self.history, "snapshot_metrics", None)
-        if callable(metrics_reader):
-            try:
-                for metric in metrics_reader():
-                    symbol = str(getattr(metric, "symbol", ""))
-                    if symbol not in attempted_keys:
-                        continue
-                    parts = symbol.split(":")
-                    if len(parts) < 3 or parts[0] != status.market.value or parts[2] != status.session.value:
-                        continue
-                    kis_total += 1
-                    if getattr(metric, "cache_hit", False):
-                        kis_hits += 1
-                    kis_rows += max(
-                        0,
-                        int(getattr(metric, "cached_after", 0) or 0)
-                        - int(getattr(metric, "cached_before", 0) or 0),
-                    )
-            except Exception:
-                pass
+        # A cache hit means this evaluation actually reused local bars and
+        # avoided a KIS backfill; merely having some cached rows is not a hit.
+        kis_hits = skipped
+        kis_total = len(attempted_keys)
         self._counters.kis_session_calls += int(kis_delta.get("calls", 0))
         self._counters.kis_session_bytes += int(kis_delta.get("bytes", 0))
         self._counters.kis_backfill_rows += kis_rows

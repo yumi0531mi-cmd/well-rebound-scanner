@@ -1317,6 +1317,7 @@ with st.expander("처리 시간 실측 · 미충족 이유"):
             )
     if _discovery_breakdown:
         st.caption("발견 단계 계측 · 원응답→세션→중복제거→선택→분봉→상품→평가→진입")
+        st.caption("KIS 바이트는 응답 본문 추정치(전체 네트워크 전송량 아님)이며, 캐시 적중은 로컬 분봉 재사용으로 백필 호출을 생략한 경우입니다.")
         if _show_diag:
             st.json(_discovery_breakdown)
     _shadow_summary = None

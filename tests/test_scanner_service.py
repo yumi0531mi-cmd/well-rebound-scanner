@@ -603,12 +603,12 @@ def test_scan_cycle_records_kis_call_metering(tmp_path):
     assert breakdown["kis_calls"] == 4
     assert breakdown["kis_bytes"] == 1700
     assert breakdown["kis_buckets"]["minutes"] == {"calls": 3, "bytes": 1500}
-    assert breakdown["kis_backfill_rows"] == 50
-    assert breakdown["kis_cache_hits"] == 1
+    assert breakdown["kis_backfill_rows"] == 0
+    assert breakdown["kis_cache_hits"] == 0
     assert breakdown["kis_cache_total"] == 1
     counters = service.snapshot().counters
     assert counters["kis_session_calls"] == 4
-    assert counters["kis_backfill_rows"] == 50
+    assert counters["kis_backfill_rows"] == 0
 
 
 def test_call_stats_survive_partially_built_clients():
@@ -670,6 +670,9 @@ def test_backfill_skipped_without_new_completed_bar(tmp_path):
     assert service.run_cycle()
     assert len(history.calls) == 1
     assert service.snapshot().counters["candidate_backfill_skips"] == 1
+    breakdown = service.snapshot().discovery_breakdown["KR:KR_REGULAR"]
+    assert breakdown["kis_cache_hits"] == 1
+    assert breakdown["kis_cache_total"] == 1
 
 
 def test_warmup_deferred_when_cycle_over_kis_budget(tmp_path):

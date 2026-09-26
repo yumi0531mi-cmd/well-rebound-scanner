@@ -10,6 +10,7 @@ import threading
 import time
 import unicodedata
 from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -25,6 +26,7 @@ from .instruments import MasterCatalog
 from .models import Candidate, Market, TradingSession
 
 LOGGER = logging.getLogger(__name__)
+_METERING_SCOPE: ContextVar[str] = ContextVar("kis_metering_scope", default="unscoped")
 
 DOMESTIC_LIMIT_UP_FALLBACK_PCT = 29.5
 _DOMESTIC_LEVERAGED_NAME = re.compile(
@@ -68,9 +70,7 @@ class KISClient:
             CockroachBarStore.from_environment() if use_environment else None
         )
         self._endpoint_counts: dict[str, dict[str, int]] = {}
-        self._call_stats: dict[str, list[int]] = {
-            "ranking": [0, 0], "minutes": [0, 0], "quote": [0, 0], "other": [0, 0],
-        }
+        self._call_stats: dict[str, dict[str, list[int]]] = {}
         self._request_budget = threading.local()
 
     @contextmanager
@@ -86,6 +86,15 @@ class KISClient:
                 del self._request_budget.deadline
             else:
                 self._request_budget.deadline = previous
+
+    @contextmanager
+    def metering_scope(self, market: str, session: str):
+        """Attribute calls to one market/session without cross-thread draining."""
+        token = _METERING_SCOPE.set(f"{market}:{session}")
+        try:
+            yield
+        finally:
+            _METERING_SCOPE.reset(token)
 
     def _request_timeout(self) -> float:
         deadline = getattr(self._request_budget, "deadline", None)
@@ -302,6 +311,7 @@ class KISClient:
                         timeout=timeout,
                     )
             except (requests.ConnectionError, requests.Timeout) as exc:
+                self._record_call(path, 0)
                 logging.getLogger(__name__).warning(
                     "kis_transport_retry tr_id=%s attempt=%s error=%s",
                     tr_id,
@@ -314,14 +324,14 @@ class KISClient:
                 continue
             logging.getLogger(__name__).info("kis_request tr_id=%s attempt=%s elapsed_s=%.3f status=%s",
                                             tr_id, attempt + 1, time.perf_counter() - started, response.status_code)
+            try:
+                self._record_call(path, len(getattr(response, "content", b"") or b""))
+            except Exception:
+                pass
             if response.status_code not in {429, 500, 502, 503, 504} or attempt == 2:
                 break
             self._retry_sleep((0.35 * (2**attempt)) + random.uniform(0.0, 0.15))
         assert response is not None
-        try:
-            self._record_call(path, len(getattr(response, "content", b"") or b""))
-        except Exception:
-            pass
         if not response.ok:
             raise KISError(f"{tr_id} HTTP {response.status_code}")
         payload = response.json()
@@ -420,7 +430,7 @@ class KISClient:
         return "other"
 
     def _record_call(self, path: str, byte_count: int) -> None:
-        """Count one HTTP attempt with its wire size. Never breaks discovery."""
+        """Count one HTTP attempt and its response-body bytes (not wire bytes)."""
         lock = self.__dict__.get("_lock")
         if lock is None:
             return
@@ -429,8 +439,9 @@ class KISClient:
         except (TypeError, ValueError):
             return
         with lock:
-            entry = self.__dict__.setdefault("_call_stats", {}).setdefault(
-                self._call_bucket(path), [0, 0])
+            scope_stats = self.__dict__.setdefault("_call_stats", {}).setdefault(
+                _METERING_SCOPE.get(), {})
+            entry = scope_stats.setdefault(self._call_bucket(path), [0, 0])
             entry[0] += 1
             entry[1] += max(0, byte_count)
 
@@ -440,7 +451,7 @@ class KISClient:
         if lock is None:
             return {}
         with lock:
-            stats = self.__dict__.get("_call_stats", {})
+            stats = self.__dict__.get("_call_stats", {}).get(_METERING_SCOPE.get(), {})
             snapshot = {bucket: {"calls": int(value[0]), "bytes": int(value[1])}
                         for bucket, value in stats.items()}
             for value in stats.values():
