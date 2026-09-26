@@ -43,6 +43,12 @@ HISTORY_WARMUP_QUEUE_LIMIT = 4
 # Provisional evaluation floor for every session: at least the 1-minute
 # scalping minimum. Below this, not even provisional analysis opens.
 PROVISIONAL_MIN_BARS = 30
+# Fresh ranking discovery is reused this long; rotation still advances over
+# the cached pool while no KIS ranking call is spent.
+DISCOVERY_CACHE_SECONDS = 180
+# Background warmup scheduling yields for a cycle once KIS calls pass this.
+# Official evaluation is never throttled; tune after October metering.
+KIS_CYCLE_SOFT_BUDGET_CALLS = 400
 BACKTEST_MAX_STORED_BARS = 32000
 DURABLE_PREFETCH_SYMBOLS_PER_QUERY = 20
 SCANNER_CYCLE_SECONDS = 60.0

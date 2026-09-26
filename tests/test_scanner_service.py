@@ -626,6 +626,76 @@ def test_call_stats_survive_partially_built_clients():
     assert real.take_call_stats() == {"quote": {"calls": 0, "bytes": 0}}
 
 
+def test_discovery_cache_reuses_rankings_within_ttl(tmp_path):
+    client = FakeClient([
+        Candidate(f"{index:06d}", str(index), 100, 1, 1, 1) for index in range(5)
+    ])
+    service = ScannerService(
+        config(tmp_path), client=client, history=FakeHistory(),
+        validations=FakeValidation(), clock=lambda: NOW,
+    )
+    status = SessionStatus(Market.KR, TradingSession.KR_REGULAR, True, "active")
+    first = service._discover(status, 10)
+    second = service._discover(status, 10)
+    assert [item.symbol for item in first] == [item.symbol for item in second]
+    assert len(client.discovery) == 1
+    breakdown = service.snapshot().discovery_breakdown["KR:KR_REGULAR"]
+    assert breakdown["from_cache"] is True
+    assert service.snapshot().counters["candidate_discovery_cache_hits"] == 1
+
+
+def test_discovery_cache_expires_after_ttl(tmp_path):
+    client = FakeClient([Candidate("005930", "S", 70000, 1, 100, 1000)])
+    clock_now = [NOW]
+    service = ScannerService(
+        config(tmp_path), client=client, history=FakeHistory(),
+        validations=FakeValidation(), clock=lambda: clock_now[0],
+    )
+    status = SessionStatus(Market.KR, TradingSession.KR_REGULAR, True, "active")
+    service._discover(status, 10)
+    clock_now[0] = NOW + timedelta(seconds=200)
+    service._discover(status, 10)
+    assert len(client.discovery) == 2
+
+
+def test_backfill_skipped_without_new_completed_bar(tmp_path):
+    history = FakeHistory()
+    service = ScannerService(
+        config(tmp_path), client=FakeClient([Candidate("005930", "S", 70000, 1, 100, 1000)]),
+        history=history, validations=FakeValidation(), clock=lambda: NOW,
+        session_resolver=resolver(), evaluator=lambda *args, **kwargs: None,
+        live_revalidator=lambda result, price, now: result,
+    )
+    assert service.run_cycle()
+    assert service.run_cycle()
+    assert len(history.calls) == 1
+    assert service.snapshot().counters["candidate_backfill_skips"] == 1
+
+
+def test_warmup_deferred_when_cycle_over_kis_budget(tmp_path):
+    scheduled = []
+
+    class WarmupHistory(FakeHistory):
+        def schedule_warmup(self, client, candidates):
+            scheduled.append(tuple(item.symbol for item in candidates))
+            return len(candidates)
+
+    class BusyClient(FakeClient):
+        def take_call_stats(self):
+            return {"minutes": {"calls": 500, "bytes": 50000}}
+
+    service = ScannerService(
+        config(tmp_path),
+        client=BusyClient([Candidate("005930", "S", 70000, 1, 100, 1000)]),
+        history=WarmupHistory(), validations=FakeValidation(), clock=lambda: NOW,
+        session_resolver=resolver(), evaluator=lambda *args, **kwargs: None,
+        live_revalidator=lambda result, price, now: result,
+    )
+    assert service.run_cycle()
+    assert scheduled == []
+    assert service.snapshot().counters["history_warmup_deferred"] == 1
+
+
 def test_discovery_rotation_advances_only_by_attempted_candidates(tmp_path):
     candidates = [Candidate(f"{index:06d}", str(index), 100, 1, 1, 1) for index in range(5)]
     service = ScannerService(

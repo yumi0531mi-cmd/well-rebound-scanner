@@ -27,6 +27,8 @@ import pandas as pd
 from config import (
     CANDIDATE_FALLBACK_MAX_AGE_SECONDS,
     CANDIDATE_SNAPSHOT_INTERVAL_SECONDS,
+    DISCOVERY_CACHE_SECONDS,
+    KIS_CYCLE_SOFT_BUDGET_CALLS,
     MIN_UNIQUE_ENTRIES_PER_SESSION,
     PROVISIONAL_MIN_BARS,
     SCANNER_CYCLE_SECONDS,
@@ -147,6 +149,9 @@ class ScannerCounters:
     candidate_local_fallbacks: int = 0
     candidate_local_fallback_symbols: int = 0
     candidate_stale_skips: int = 0
+    candidate_discovery_cache_hits: int = 0
+    candidate_backfill_skips: int = 0
+    history_warmup_deferred: int = 0
     kis_session_calls: int = 0
     kis_session_bytes: int = 0
     kis_backfill_rows: int = 0
@@ -359,6 +364,9 @@ class ScannerService:
         self._recent_errors: deque[dict[str, str]] = deque(maxlen=RECENT_ERROR_LIMIT)
         self._rotation: dict[str, int] = {}
         self._rotation_population: dict[str, int] = {}
+        self._stale_streak: dict[str, int] = {}
+        self._discovery_cache: dict[str, tuple[datetime, tuple[Candidate, ...]]] = {}
+        self._eval_cutoff: dict[str, str] = {}
         self._stale_streak: dict[str, int] = {}
         self._tracking_offset = 0
         self._session_results: dict[TradingSession, dict[str, tuple[Candidate, ScanResult]]] = {}
@@ -846,26 +854,42 @@ class ScannerService:
 
     def _discover(self, status: SessionStatus, limit: int) -> list[Candidate]:
         request_each = min(self.config.discovery_limit_each, max(20, limit))
-        if status.market == Market.KR:
-            source = self.client.candidate_union(request_each)
-        else:
-            source = self.client.overseas_candidate_union(status.session, request_each)
-        candidates = [
-            item
-            for item in source
-            if item.market == status.market and item.session == status.session and item.session in ENABLED_SESSIONS[status.market]
-        ]
-        unique = list({item.key: item for item in candidates}.values())
         observed_at = self._aware_now()
-        fresh = bool(unique)
+        cache_key = f"{status.market.value}:{status.session.value}"
+        from_cache = False
         endpoint_counts: dict[str, dict[str, int]] = {}
-        endpoint_reader = getattr(self.client, "discovery_endpoint_counts", None)
-        if callable(endpoint_reader):
-            try:
-                endpoint_counts = dict(endpoint_reader())
-            except Exception:
-                endpoint_counts = {}
-        if not fresh:
+        cached = self._discovery_cache.get(cache_key)
+        if cached is not None and (observed_at - cached[0]).total_seconds() < DISCOVERY_CACHE_SECONDS:
+            # Ranking reuse window: rotation still advances over the cached
+            # pool, but no KIS ranking call is spent.
+            unique = list(cached[1])
+            from_cache = True
+            self._counters.candidate_discovery_cache_hits += 1
+            source_count = len(unique)
+            matched_count = len(unique)
+        else:
+            if status.market == Market.KR:
+                source = self.client.candidate_union(request_each)
+            else:
+                source = self.client.overseas_candidate_union(status.session, request_each)
+            candidates = [
+                item
+                for item in source
+                if item.market == status.market and item.session == status.session and item.session in ENABLED_SESSIONS[status.market]
+            ]
+            unique = list({item.key: item for item in candidates}.values())
+            source_count = len(source)
+            matched_count = len(candidates)
+            endpoint_reader = getattr(self.client, "discovery_endpoint_counts", None)
+            if callable(endpoint_reader):
+                try:
+                    endpoint_counts = dict(endpoint_reader())
+                except Exception:
+                    endpoint_counts = {}
+            if unique:
+                self._discovery_cache[cache_key] = (observed_at, tuple(unique))
+        fresh = bool(unique) and not from_cache
+        if not unique:
             self._counters.candidate_empty_discoveries += 1
             unique = self._fallback_candidates(status, observed_at)
             if unique:
@@ -877,12 +901,13 @@ class ScannerService:
             self._record_discovery_stage(
                 key,
                 endpoint=dict(endpoint_counts),
-                union_raw=len(source),
-                session_matched=len(candidates),
+                union_raw=source_count,
+                session_matched=matched_count,
                 deduplicated=0,
                 rotation_population=0,
                 selected=0,
-                from_fallback=not fresh,
+                from_fallback=not fresh and not from_cache,
+                from_cache=from_cache,
                 observed_at=observed_at.isoformat(),
             )
             return []
@@ -929,12 +954,13 @@ class ScannerService:
         self._record_discovery_stage(
             key,
             endpoint=dict(endpoint_counts),
-            union_raw=len(source),
-            session_matched=len(candidates),
+            union_raw=source_count,
+            session_matched=matched_count,
             deduplicated=len(unique),
             rotation_population=len(unique),
             selected=len(selected),
-            from_fallback=not fresh,
+            from_fallback=not fresh and not from_cache,
+            from_cache=from_cache,
             observed_at=observed_at.isoformat(),
         )
         return selected
@@ -1041,6 +1067,7 @@ class ScannerService:
                 return
         attempted = 0
         attempted_keys: set[str] = set()
+        skipped = 0
         bars_ready = 0
         warming_provisional = 0
         warming_signals = 0
@@ -1089,13 +1116,31 @@ class ScannerService:
                 if self._monotonic() + reserved * KIS_REQUEST_INTERVAL_SECONDS > deadline:
                     self._counters.budget_exhaustions += 1
                     break
-                attempted += 1
                 attempted_keys.add(candidate.key)
-                bars = self.history.backfill_candidate(
-                    self.client,
-                    candidate,
-                    target_bars=history_target,
-                )
+                cutoff_minute = current.replace(second=0, microsecond=0) - timedelta(minutes=1)
+                cutoff_key = cutoff_minute.isoformat()
+                bars = None
+                if self._eval_cutoff.get(candidate.key) == cutoff_key:
+                    # No new completed 1-minute bar since this candidate was
+                    # evaluated: reuse local bars, spend zero KIS calls.
+                    try:
+                        cached_frame = self.history.load(candidate.symbol, HistoryCache._namespace(candidate))
+                    except Exception:
+                        cached_frame = None
+                    if cached_frame is not None and not cached_frame.empty:
+                        bars = cached_frame
+                        skipped += 1
+                        self._counters.candidate_backfill_skips += 1
+                if bars is None:
+                    attempted += 1
+                    bars = self.history.backfill_candidate(
+                        self.client,
+                        candidate,
+                        target_bars=history_target,
+                    )
+                self._eval_cutoff[candidate.key] = cutoff_key
+                if len(self._eval_cutoff) > 20000:
+                    self._eval_cutoff.clear()
                 session_bars = filter_session_bars(normalize_bars(bars), status.session)
                 bars_counts.append(len(session_bars))
                 if session_bars.empty:
@@ -1233,19 +1278,36 @@ class ScannerService:
         warmup_scheduled = 0
         warmup_pending = 0
         schedule_warmup = getattr(self.history, "schedule_warmup", None)
+        pre_warmup_delta: dict[str, Any] = {"calls": 0, "bytes": 0, "buckets": {}}
         if callable(schedule_warmup):
-            try:
-                warmup_scheduled = int(schedule_warmup(self.client, tuple(candidates)) or 0)
-                self._counters.history_warmups_scheduled += warmup_scheduled
-                pending_reader = getattr(self.history, "warmup_pending", None)
-                warmup_pending = int(pending_reader()) if callable(pending_reader) else 0
-            except Exception as exc:
-                self._counters.history_warmup_errors += 1
-                self._error("history-warmup", exc, session=status.session.value)
+            pre_warmup_delta = self._take_kis_delta()
+            if int(pre_warmup_delta.get("calls", 0)) > KIS_CYCLE_SOFT_BUDGET_CALLS:
+                # Over budget: official evaluation already ran above and is
+                # untouched; only background warmup yields until next cycle.
+                self._counters.history_warmup_deferred += 1
+            else:
+                try:
+                    warmup_scheduled = int(schedule_warmup(self.client, tuple(candidates)) or 0)
+                    self._counters.history_warmups_scheduled += warmup_scheduled
+                    pending_reader = getattr(self.history, "warmup_pending", None)
+                    warmup_pending = int(pending_reader()) if callable(pending_reader) else 0
+                except Exception as exc:
+                    self._counters.history_warmup_errors += 1
+                    self._error("history-warmup", exc, session=status.session.value)
         self._advance_rotation(status, attempted)
         ordered_counts = sorted(bars_counts)
         bars_median = ordered_counts[len(ordered_counts) // 2] if ordered_counts else 0
         kis_delta = self._take_kis_delta()
+        kis_delta["calls"] = int(kis_delta.get("calls", 0)) + int(pre_warmup_delta.get("calls", 0))
+        kis_delta["bytes"] = int(kis_delta.get("bytes", 0)) + int(pre_warmup_delta.get("bytes", 0))
+        merged_buckets = dict(kis_delta.get("buckets", {}) or {})
+        for bucket, values in (pre_warmup_delta.get("buckets", {}) or {}).items():
+            if not isinstance(values, dict):
+                continue
+            entry = merged_buckets.setdefault(str(bucket), {"calls": 0, "bytes": 0})
+            entry["calls"] = int(entry.get("calls", 0)) + int(values.get("calls", 0))
+            entry["bytes"] = int(entry.get("bytes", 0)) + int(values.get("bytes", 0))
+        kis_delta["buckets"] = merged_buckets
         kis_rows = 0
         kis_hits = 0
         kis_total = 0
@@ -1294,6 +1356,7 @@ class ScannerService:
             kis_backfill_rows=kis_rows,
             kis_cache_hits=kis_hits,
             kis_cache_total=kis_total,
+            backfill_skipped=skipped,
             history_empty=history_empty,
             history_below_180=history_below_ready,
             gap_symbols=gap_symbols,
@@ -1321,8 +1384,8 @@ class ScannerService:
             discovered=discovered,
             selected=len(candidates),
             attempted=attempted,
-            scan_complete=attempted == len(candidates),
-            failure="" if attempted == len(candidates) else "candidate-cycle-incomplete",
+            scan_complete=(attempted + skipped) == len(candidates),
+            failure="" if (attempted + skipped) == len(candidates) else "candidate-cycle-incomplete",
         )
 
     def run_cycle(self) -> bool:
