@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-09-28T03:45:56+09:00",
+  "updated_at": "2026-09-28T03:47:26+09:00",
   "current_step": 3,
   "completed_steps": [
     "기존 저장소와 인계 보고서 확인",
@@ -166,7 +166,8 @@
     "2026-09-28 engine-path audit: HistoryCache stores US_DAY bars in a session-only namespace and filters the fetch result to that session; scanner passes that one frame to evaluate(), where _analyze_structure derives both 3/5/15m structure and 1m trigger from it. The separate 3000-bar background warm-up is not passed into the evaluator as structural context. Thus 3000 is a retention/warm target, not a guaranteed 3000-bar signal-analysis input; fix requires distinct historical-structure and current-session-trigger inputs with explicit readiness, not just lowering the 180-bar official gate",
     "2026-09-28 local fix: pass current-session trigger bars separately from rolling US_REGULAR structural context (US extended sessions); clip both sources to completed bars as-of evaluation time; make 15m structure use the structural frame while session-specific 1/3/5m triggers remain on session bars; require exactly 3000 structural bars plus the session's own readiness for official ENTRY; US_DAY provisional evaluation floor is 30 current-session bars, never an official-entry bypass",
     "2026-09-28 regression: incomplete 3000-bar context is forced provisional and a complete 3000-bar context preserves official ENTRY; 555 safe tests collected, full safe regression passed, Ruff and git diff --check passed; prohibited tuning tests excluded; compileall not counted (protected __pycache__ permission failure); live KIS history depth and Render deployment remain unverified",
-    "2026-09-28 US_DAY acceptance regression: exactly 30 completed session trigger bars plus 3000 completed structural-context bars can retain official ENTRY, while the paired 100-trigger-bar/no-structure case stays provisional; safe regression 556 passed, Ruff/diff-check clean"
+    "2026-09-28 US_DAY acceptance regression: exactly 30 completed session trigger bars plus 3000 completed structural-context bars can retain official ENTRY, while the paired 100-trigger-bar/no-structure case stays provisional; safe regression 556 passed, Ruff/diff-check clean; commits 5206841 and dedc674 are local only",
+    "2026-09-28 readiness check: local KIS_APP_KEY/KIS_APP_SECRET presence checks both false (values never read); no authenticated KIS call made; Render health GET blocked by local network policy and browser fetch unavailable, so live KIS 3000-bar source, current Render status, and live acceptance remain unverified"
   ],
   "files": {
     "config.py": "created; qualification/risk/cost/data/model and scanner deadline-margin settings centralized",
@@ -279,7 +280,7 @@
     "official_evidence": "actual KIS one-minute bars with point-in-time candidate universe"
   },
   "next_actions": [
-    "P0: locally split rolling structural context (up to 3000 actual KIS 1m bars) from the current session trigger and gated official ENTRY on complete context; next verify with an active KIS session that US_REGULAR context actually backfills to 3000 bars for US_DAY symbols and measure any provider/session limitation before claiming early-session availability",
+    "P0: locally split rolling structural context (up to 3000 actual KIS 1m bars) from the current session trigger and gated official ENTRY on complete context; after KIS credentials are configured in the approved runtime secret store (never pasted in chat), verify with an active KIS session that US_REGULAR context backfills to 3000 bars for US_DAY symbols and measure provider/session limitations",
     "restore the Render service after identifying why it is suspended; then verify health, exact version badge, and resume a fresh active-session baseline without claiming the missed interval",
     "push session work batch after US baseline completes (scalp + session sequence + provisional floor; all green locally)",
     "egress diet IMPLEMENTED locally (diag JSON gated behind checkbox, top-5 blocks always visible, daemon idles off-session; full 541 green); push together after Oct 1 resume",
