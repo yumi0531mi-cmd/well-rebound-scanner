@@ -42,7 +42,7 @@ from .bar_store import CockroachBarStore
 from .engine import MAX_COMPLETED_BAR_AGE_SECONDS, evaluate, revalidate_live
 from .history import HistoryCache
 from .indicators import normalize_bars
-from .kis import KISClient, KISDeadlineError, KISError
+from .kis import KISClient, KISDeadlineError, KISError, KISRateLimitCooldown
 from .local_snapshot import LocalCandidateSnapshotStore
 from .models import ALL_ENTRY_STRATEGIES, Candidate, Market, ScanResult, Stage, TradingSession
 from .policy import session_day
@@ -152,6 +152,9 @@ class ScannerCounters:
     candidate_stale_skips: int = 0
     candidate_discovery_cache_hits: int = 0
     candidate_backfill_skips: int = 0
+    kis_cooldown_discovery_fallbacks: int = 0
+    kis_cooldown_bar_cache_uses: int = 0
+    kis_cooldown_quote_deferrals: int = 0
     history_warmup_deferred: int = 0
     kis_session_calls: int = 0
     kis_session_bytes: int = 0
@@ -873,6 +876,7 @@ class ScannerService:
         observed_at = self._aware_now()
         cache_key = f"{status.market.value}:{status.session.value}"
         from_cache = False
+        rate_limited = False
         endpoint_counts: dict[str, dict[str, int]] = {}
         cached = self._discovery_cache.get(cache_key)
         if cached is not None and (observed_at - cached[0]).total_seconds() < DISCOVERY_CACHE_SECONDS:
@@ -884,26 +888,33 @@ class ScannerService:
             source_count = len(unique)
             matched_count = len(unique)
         else:
-            if status.market == Market.KR:
-                source = self.client.candidate_union(request_each)
-            else:
-                source = self.client.overseas_candidate_union(status.session, request_each)
-            candidates = [
-                item
-                for item in source
-                if item.market == status.market and item.session == status.session and item.session in ENABLED_SESSIONS[status.market]
-            ]
-            unique = list({item.key: item for item in candidates}.values())
-            source_count = len(source)
-            matched_count = len(candidates)
-            endpoint_reader = getattr(self.client, "discovery_endpoint_counts", None)
-            if callable(endpoint_reader):
-                try:
-                    endpoint_counts = dict(endpoint_reader())
-                except Exception:
-                    endpoint_counts = {}
-            if unique:
-                self._discovery_cache[cache_key] = (observed_at, tuple(unique))
+            try:
+                if status.market == Market.KR:
+                    source = self.client.candidate_union(request_each)
+                else:
+                    source = self.client.overseas_candidate_union(status.session, request_each)
+                candidates = [
+                    item
+                    for item in source
+                    if item.market == status.market and item.session == status.session and item.session in ENABLED_SESSIONS[status.market]
+                ]
+                unique = list({item.key: item for item in candidates}.values())
+                source_count = len(source)
+                matched_count = len(candidates)
+                endpoint_reader = getattr(self.client, "discovery_endpoint_counts", None)
+                if callable(endpoint_reader):
+                    try:
+                        endpoint_counts = dict(endpoint_reader())
+                    except Exception:
+                        endpoint_counts = {}
+                if unique:
+                    self._discovery_cache[cache_key] = (observed_at, tuple(unique))
+            except KISRateLimitCooldown:
+                # Preserve the live loop from the latest same-session
+                # candidate snapshot, but label it as a stale watch universe.
+                rate_limited = True
+                unique = []
+                source_count = matched_count = 0
         fresh = bool(unique) and not from_cache
         if not unique:
             self._counters.candidate_empty_discoveries += 1
@@ -911,6 +922,12 @@ class ScannerService:
             if unique:
                 self._counters.candidate_fallbacks += 1
                 self._counters.candidate_fallback_symbols += len(unique)
+        if rate_limited and unique:
+            unique = [
+                replace(item, sources=item.sources | {"kis-rate-limit-fallback"})
+                for item in unique
+            ]
+            self._counters.kis_cooldown_discovery_fallbacks += len(unique)
         if not unique:
             key = f"{status.market.value}:{status.session.value}"
             self._rotation_population[key] = 0
@@ -924,8 +941,11 @@ class ScannerService:
                 selected=0,
                 from_fallback=not fresh and not from_cache,
                 from_cache=from_cache,
+                rate_limited=rate_limited,
                 observed_at=observed_at.isoformat(),
             )
+            if rate_limited:
+                raise KISRateLimitCooldown("KIS 순위 제한 중 · 사용 가능한 같은 세션 후보 캐시 없음")
             return []
         self._prune_session_results(status.session, {item.key for item in unique})
         snapshot_writer = getattr(self._durable_store, "save_candidate_snapshot", None)
@@ -977,6 +997,7 @@ class ScannerService:
             selected=len(selected),
             from_fallback=not fresh and not from_cache,
             from_cache=from_cache,
+            rate_limited=rate_limited,
             observed_at=observed_at.isoformat(),
         )
         return selected
@@ -1062,6 +1083,14 @@ class ScannerService:
                 scan_complete=False, failure="discovery-deadline",
             )
             return
+        except KISRateLimitCooldown as exc:
+            self._counters.discovery_errors += 1
+            self._error("discovery-rate-limit", exc, session=status.session.value)
+            self._persist_access_snapshot(
+                status, discovered=0, selected=0, attempted=0,
+                scan_complete=False, failure="kis-rate-limit-no-fresh-candidate-cache",
+            )
+            return
         except Exception as exc:
             self._counters.discovery_errors += 1
             self._error("discovery", exc, session=status.session.value)
@@ -1072,6 +1101,7 @@ class ScannerService:
             return
         rotation_key = f"{status.market.value}:{status.session.value}"
         discovered = self._rotation_population.get(rotation_key, len(candidates))
+        rate_limited_cycle = any("kis-rate-limit-fallback" in item.sources for item in candidates)
         self._counters.candidates_seen += len(candidates)
         preloader = getattr(self.history, "preload_candidates", None)
         if callable(preloader):
@@ -1138,7 +1168,7 @@ class ScannerService:
             try:
                 history_target = self._initial_history_target(candidate)
                 bars_target = history_target
-                reserved = self._call_reserve(candidate, history_target)
+                reserved = 0 if rate_limited_cycle else self._call_reserve(candidate, history_target)
                 if self._monotonic() + reserved * KIS_REQUEST_INTERVAL_SECONDS > deadline:
                     self._counters.budget_exhaustions += 1
                     break
@@ -1165,12 +1195,28 @@ class ScannerService:
                         ))
                     except Exception:
                         rows_before = 0
-                    bars = self.history.backfill_candidate(
-                        self.client,
-                        candidate,
-                        target_bars=history_target,
-                    )
-                    kis_rows += max(0, len(bars) - rows_before)
+                    try:
+                        bars = self.history.backfill_candidate(
+                            self.client,
+                            candidate,
+                            target_bars=history_target,
+                        )
+                        kis_rows += max(0, len(bars) - rows_before)
+                    except KISRateLimitCooldown:
+                        # Do not stop the market loop for a broker cooldown.
+                        # Reuse only already persisted KIS bars; the engine's
+                        # completed-bar freshness and 3000-bar gates still apply.
+                        cached_frame = self.history.load(
+                            candidate.symbol, HistoryCache._namespace(candidate)
+                        )
+                        if cached_frame is None or cached_frame.empty:
+                            raise
+                        bars = cached_frame
+                        rate_limited_cycle = True
+                        candidate = replace(
+                            candidate, sources=candidate.sources | {"kis-rate-limit-fallback"}
+                        )
+                        self._counters.kis_cooldown_bar_cache_uses += 1
                 self._eval_cutoff[candidate.key] = cutoff_key
                 if len(self._eval_cutoff) > 20000:
                     self._eval_cutoff.clear()
@@ -1298,15 +1344,32 @@ class ScannerService:
                 except Exception as exc:
                     self._counters.shadow_observe_errors += 1
                     self._error("shadow-observe", exc, symbol=candidate.key, session=status.session.value)
+                published_candidate = candidate
+                if result.stage in {Stage.FINAL_BUY, Stage.ENTRY_WAIT}:
+                    try:
+                        live_price, checked_at = self._live_price(candidate)
+                    except KISRateLimitCooldown:
+                        # Keep the setup visible, but never call a stale price
+                        # an actionable entry. The next cycle rechecks it.
+                        self._counters.kis_cooldown_quote_deferrals += 1
+                        diagnostics = dict(result.diagnostics) if isinstance(result.diagnostics, dict) else {}
+                        diagnostics["entry_deferred"] = "kis-rate-limit"
+                        result = replace(
+                            result,
+                            stage=Stage.CANDIDATE,
+                            reasons=tuple(result.reasons) + ("KIS 호출 보호대기 · 현재가 재확인 전 진입 보류",),
+                            diagnostics=diagnostics,
+                        )
+                        published_candidate = replace(
+                            candidate, sources=candidate.sources | {"kis-rate-limit-fallback"}
+                        )
+                    else:
+                        result = self._live_revalidator(result, live_price, checked_at)
+                        published_candidate = replace(candidate, price=live_price)
                 if result.final_buy:
                     final_buys += 1
                 elif result.stage == Stage.ENTRY_WAIT:
                     entry_waits += 1
-                published_candidate = candidate
-                if result.stage in {Stage.FINAL_BUY, Stage.ENTRY_WAIT}:
-                    live_price, checked_at = self._live_price(candidate)
-                    result = self._live_revalidator(result, live_price, checked_at)
-                    published_candidate = replace(candidate, price=live_price)
                 if result.final_buy:
                     case = self.validations.record(
                         result,

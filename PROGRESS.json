@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-09-28T04:01:32+09:00",
+  "updated_at": "2026-09-28T04:16:54+09:00",
   "current_step": 3,
   "completed_steps": [
     "기존 저장소와 인계 보고서 확인",
@@ -168,7 +168,9 @@
     "2026-09-28 regression: incomplete 3000-bar context is forced provisional and a complete 3000-bar context preserves official ENTRY; 555 safe tests collected, full safe regression passed, Ruff and git diff --check passed; prohibited tuning tests excluded; compileall not counted (protected __pycache__ permission failure); live KIS history depth and Render deployment remain unverified",
     "2026-09-28 US_DAY acceptance regression: exactly 30 completed session trigger bars plus 3000 completed structural-context bars can retain official ENTRY, while the paired 100-trigger-bar/no-structure case stays provisional; safe regression 556 passed, Ruff/diff-check clean; commits 5206841 and dedc674 are local only",
     "2026-09-28 readiness check: local KIS_APP_KEY/KIS_APP_SECRET presence checks both false (values never read); no authenticated KIS call made; Render health GET blocked by local network policy and browser fetch unavailable, so live KIS 3000-bar source, current Render status, and live acceptance remain unverified",
-    "2026-09-28 quota defense: UI status polling set to 5s, live quote choices start at 5s, paper tracking runs each 60s with a fair 12-case rotating batch and quotes only filled cases; Render keep-awake cron narrowed from 24h weekdays to UTC 00-21 plus pre-open warmup; KIS HTTP429/EGW00201 now triggers a shared fail-fast cooldown; 558 safe tests pass, Ruff/diff clean; external plan limits still require dashboard measurement"
+    "2026-09-28 quota defense: UI status polling set to 5s, live quote choices start at 5s, paper tracking runs each 60s with a fair 12-case rotating batch and quotes only filled cases; Render keep-awake cron narrowed from 24h weekdays to UTC 00-21 plus pre-open warmup; KIS HTTP429/EGW00201 triggers shared REST cooldown; 558 safe tests pass; external plan limits still require dashboard measurement",
+    "2026-09-28 KIS cooldown continuity patch: same-session candidate snapshots and persisted KIS bars keep the scanner cycle evaluating during REST cooldown; actual completed-bar freshness and 3000-bar structure gates remain intact; if fresh current-price revalidation is blocked, signal is published as CANDIDATE and no ENTRY/fill is recorded; missing cache records an incomplete access minute; cooldown fallbacks are counted; 3 new regressions, 561 Render-safe tests passed, Ruff full-repo and diff-check passed; local only, not deployed",
+    "2026-09-28 04:17 KST remote check attempted: git ls-remote and Render health request were blocked by network policy; current origin/main SHA and Render service state remain unverified; no push or deployment performed"
   ],
   "files": {
     "config.py": "created; qualification/risk/cost/data/model and scanner deadline-margin settings centralized",
@@ -181,7 +183,7 @@
     "wellscan/probability.py": "causal factors, immutable signal snapshots, resolved-before-signal live estimator implemented",
     "wellscan/validation.py": "signal-time features and unqualified probability/EV persisted",
     "wellscan/engine.py": "strategy-specific timeframe gates; 22-strategy assessments plus input order, duplicate, and intraday minute-gap diagnostics",
-    "wellscan/scanner_service.py": "900/3000 cache contract, bounded daemon warmup, four-stage pipeline counters, rotation, deadlines, recovery, and live coverage",
+    "wellscan/scanner_service.py": "900/3000 cache contract, bounded daemon warmup, four-stage pipeline counters, rotation, deadlines, recovery, live coverage, and KIS REST cooldown fallback that never promotes unverified quotes to ENTRY",
     "wellscan/realtime.py": "bounded per-record trailing schema extensions accepted; malformed boundaries rejected",
     "wellscan/kis.py": "thread-local deadline plus safe minute-input row/date/page logs without credentials",
     "wellscan/history.py": "durable changed-bar writes and bounded priority background warmup toward the 3000-bar contract",
@@ -228,14 +230,29 @@
     "non_15m_strategy_downtrend_gate_fixed": true,
     "public_strategy_rejection_diagnostics_added": true,
     "latest_safe_operational_test_count": 528,
-    "latest_local_safe_test_count": 558,
+    "latest_local_safe_test_count": 561,
     "latest_local_safe_test_exclusions": [
+      "tests/test_external_history.py",
       "tests/test_controlled_tuning.py",
       "tests/test_controlled_tuning_audit.py",
+      "tests/test_expanded_tuning.py",
+      "tests/test_expand_us_tuning.py",
+      "tests/test_pullback_number_audit.py",
       "tests/test_tuning_feasibility.py"
     ],
+    "latest_local_candidate_change": "2026-09-28 KIS cooldown continuity in scanner_service.py; source APP_VERSION unchanged because not deployed",
+    "kis_rate_limit_continuity_contract": {
+      "scanner_loop_stops_on_rest_cooldown": false,
+      "candidate_source": "same-market/session recent snapshot only; explicitly marked fallback",
+      "bars_source": "already persisted actual KIS bars only",
+      "entry_requires_fresh_quote": true,
+      "unverified_quote_result": "CANDIDATE, not ENTRY/filled",
+      "stale_or_missing_cache": "no official entry; incomplete access snapshot recorded",
+      "provider_or_host_suspension_bypass": false
+    },
     "latest_deployed_version": "0.11.8-pipeline-audit",
     "latest_local_verified_version": "0.11.9-active-market-clock",
+    "render_status_recheck_2026_09_28": "UNVERIFIED_NETWORK_BLOCKED; last known SUSPENDED at 2026-09-24 22:34 KST",
     "post_04fc8ab_targeted_tests": 49,
     "post_04fc8ab_test_note": "04fc8ab verified with 28 scanner_service + 21 durable/history/KIS targeted tests only; full 459 was not re-run after 04fc8ab",
     "live_shadow_22_strategy_diagnostics_implemented": true,
@@ -281,6 +298,9 @@
     "official_evidence": "actual KIS one-minute bars with point-in-time candidate universe"
   },
   "next_actions": [
+    "P0 continuity: keep the daemon/UI cycle alive under KIS cooldown, but never claim fresh actionable ENTRY without fresh KIS quote and completed bars; measure cache fallback duration and missed access minutes after service recovery",
+    "P0 verify host-level continuity: Render suspension/free-hour/egress caps cannot be bypassed by code; after manual service recovery, measure actual quota use and establish a separate permitted failover plan before claiming uptime",
+    "P1 implement/validate KIS WebSocket-to-minute cache only after confirming official KR/US trade fields, exchange timestamps, volume semantics, gaps, and session boundaries; current WebSocket publishes last ticks and is not yet the scanner's minute-bar source",
     "P0 quota audit after runtime recovery: compare Render monthly hours/egress and KIS limit responses against the new local guards; retain the low-traffic defaults and adjust only from measured usage, recognizing provider-side plan caps cannot be overridden by code",
     "P0: locally split rolling structural context (up to 3000 actual KIS 1m bars) from the current session trigger and gated official ENTRY on complete context; after KIS credentials are configured in the approved runtime secret store (never pasted in chat), verify with an active KIS session that US_REGULAR context backfills to 3000 bars for US_DAY symbols and measure provider/session limitations",
     "restore the Render service after identifying why it is suspended; then verify health, exact version badge, and resume a fresh active-session baseline without claiming the missed interval",

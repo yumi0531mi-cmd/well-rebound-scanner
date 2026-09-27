@@ -10,8 +10,18 @@ import pytest
 
 from config import PROVISIONAL_MIN_BARS
 from wellscan.history import HistoryCache
-from wellscan.kis import KISClient, KISDeadlineError, KISError
-from wellscan.models import ALL_ENTRY_STRATEGIES, Candidate, Market, RiskState, ScanResult, Stage, Strategy, TradeLevels, TradingSession
+from wellscan.kis import KISClient, KISDeadlineError, KISError, KISRateLimitCooldown
+from wellscan.models import (
+    ALL_ENTRY_STRATEGIES,
+    Candidate,
+    Market,
+    RiskState,
+    ScanResult,
+    Stage,
+    Strategy,
+    TradeLevels,
+    TradingSession,
+)
 from wellscan.policy import estimated_costs, session_day
 from wellscan.scanner_service import (
     ScannerService,
@@ -222,6 +232,106 @@ def test_empty_discovery_recovers_from_local_snapshot_without_durable(tmp_path):
     assert counters["candidate_empty_discoveries"] == 1
     assert counters["candidate_local_fallbacks"] == 1
     assert counters["candidate_local_fallback_symbols"] == 1
+
+
+def test_rate_limited_discovery_continues_from_same_session_local_snapshot(tmp_path):
+    candidate = Candidate("005930", "Samsung", 70000, 1, 100, 1000)
+    status = SessionStatus(Market.KR, TradingSession.KR_REGULAR, True, "active")
+    seed = ScannerService(
+        config(tmp_path), client=FakeClient([candidate]), history=FakeHistory(),
+        validations=FakeValidation(), clock=lambda: NOW,
+    )
+    assert [item.symbol for item in seed._discover(status, 10)] == ["005930"]
+
+    class RateLimitedClient(FakeClient):
+        def candidate_union(self, limit):
+            del limit
+            raise KISRateLimitCooldown("test cooldown")
+
+    service = ScannerService(
+        config(tmp_path), client=RateLimitedClient([]), history=FakeHistory(),
+        validations=FakeValidation(), clock=lambda: NOW + timedelta(seconds=200),
+    )
+
+    recovered = service._discover(status, 10)
+
+    assert [item.symbol for item in recovered] == ["005930"]
+    assert "kis-rate-limit-fallback" in recovered[0].sources
+    assert service.snapshot().counters["kis_cooldown_discovery_fallbacks"] == 1
+    assert service.snapshot().discovery_breakdown["KR:KR_REGULAR"]["rate_limited"] is True
+
+
+def test_rate_limited_discovery_without_cache_records_incomplete_cycle(tmp_path):
+    class RateLimitedClient(FakeClient):
+        def candidate_union(self, limit):
+            del limit
+            raise KISRateLimitCooldown("test cooldown")
+
+    service = ScannerService(
+        config(tmp_path), client=RateLimitedClient([]), history=FakeHistory(),
+        validations=FakeValidation(), clock=lambda: NOW, session_resolver=resolver(),
+    )
+
+    assert service.run_cycle()
+    assert service.run_cycle()
+
+    status = service.snapshot()
+    coverage = status.access_coverage["KR:KR_REGULAR"]
+    assert status.counters["cycles"] == 2
+    assert coverage["scan_complete"] is False
+    assert coverage["failure"] == "kis-rate-limit-no-fresh-candidate-cache"
+    assert status.discovery_breakdown["KR:KR_REGULAR"]["rate_limited"] is True
+
+
+def test_rate_limited_backfill_uses_cache_but_defers_unverified_entry(tmp_path):
+    candidate = Candidate("005930", "Samsung", 70000, 1, 100, 1000)
+
+    class RateLimitedClient(FakeClient):
+        def current_price(self, symbol):
+            self.price_calls.append(("KR", symbol))
+            raise KISRateLimitCooldown("test cooldown")
+
+    class RateLimitedHistory(FakeHistory):
+        def backfill_candidate(self, client, candidate, target_bars):
+            self.calls.append((candidate.key, target_bars))
+            raise KISRateLimitCooldown("test cooldown")
+
+    result = ScanResult(
+        symbol=candidate.key,
+        evaluated_at=NOW,
+        stage=Stage.FINAL_BUY,
+        strategy=Strategy.TREND_PULLBACK,
+        risk_state=RiskState.NORMAL,
+        score=90,
+        persistence=None,
+        evidence_confidence=None,
+        pattern_fatigue=None,
+        net_swing_pct=None,
+        levels=TradeLevels(entry=100, target1=101, soft_stop=99),
+        conditions={"FINAL_BUY": True},
+    )
+    validation = FakeValidation()
+    history = RateLimitedHistory()
+    service = ScannerService(
+        config(tmp_path), client=RateLimitedClient([candidate]), history=history,
+        validations=validation, clock=lambda: NOW, session_resolver=resolver(),
+        evaluator=lambda *args, **kwargs: result,
+        live_revalidator=lambda current, price, checked_at: current,
+    )
+
+    assert service.run_cycle()
+
+    snapshot = service.results_snapshot()
+    published = [row for session in snapshot.sessions for row in session.results]
+    assert len(published) == 1
+    assert published[0][1].stage == Stage.CANDIDATE
+    assert "현재가 재확인 전 진입 보류" in published[0][1].reasons[-1]
+    assert published[0][0].sources >= {"kis-rate-limit-fallback"}
+    assert validation.recorded == []
+    counters = service.snapshot().counters
+    assert counters["kis_cooldown_bar_cache_uses"] == 1
+    assert counters["kis_cooldown_quote_deferrals"] == 1
+    assert counters["final_signals_recorded"] == 0
 
 
 def test_local_snapshot_rejects_stale_and_foreign_session(tmp_path):
