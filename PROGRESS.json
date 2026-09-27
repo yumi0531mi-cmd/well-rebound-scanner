@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-09-27T19:35:00+09:00",
+  "updated_at": "2026-09-27T20:40:00+09:00",
   "current_step": 3,
   "completed_steps": [
     "기존 저장소와 인계 보고서 확인",
@@ -155,7 +155,9 @@
     "2026-09-27 relaunched multi-symbol batch with resume-skip (bt60_multi.py skips completed symbols); per-strategy x session funnel uses live funnel + ledger by_session; 0 fills recorded as no-verdict, never 0%",
     "2026-09-27 22-strategy table on 010170 KR 60-day cached bars COMPLETE (diagnostic-only, fixed symbol): 5 strategies with fills / 9 total fills / 4 T1 (44.4%); 17 strategies no fills = no verdict; sample>=50 False, 80pct False; no activation, no win-rate claim. Fired: VWAP-reclaim 2/1, volume-breakout 1/1, oversold-rebound 3/1, pullback 2/1, volatility-expansion 1/0.",
     "2026-09-27 010170 60-day table FROZEN as diagnostic baseline; no reruns on same symbol; never used for activation or win-rate claims",
-    "2026-09-27 multi-symbol: 005930x9, 000660x3, 035420x3 (15 fills); worker died twice with no artifact, relaunched with resume-skip; 068270, 105560 pending; cause of death unconfirmed, not attributed to throttling"
+    "2026-09-27 multi-symbol: 005930x9, 000660x3, 035420x3 (15 fills); worker died twice with no artifact, relaunched with resume-skip; 068270, 105560 pending; cause of death unconfirmed, not attributed to throttling",
+    "2026-09-27 corrected: 068270 slowness was interruption, not a hang; offline replay completed in 56min (VALID, 1 fill, 0 T1); hang theory discarded, no code change made",
+    "2026-09-27 multi-symbol now 16 fills (005930x9, 000660x3, 035420x3, 068270x1); 105560 relaunched; still far below 50-fill verdict bar, no win-rate claim"
   ],
   "files": {
     "config.py": "created; qualification/risk/cost/data/model and scanner deadline-margin settings centralized",
