@@ -159,3 +159,10 @@ def test_ledger_opens_and_settles_scalp(tmp_path):
     assert summary["by_session"]["KR_REGULAR"]["buckets"]["T2"] == 1
     assert summary["by_session"]["KR_REGULAR"]["t1_rate"] == 1.0
     assert isinstance(summary["avg_net_pct"], float)
+    record = next(record for _, record in ledger._iter_records())
+    outcome = record["outcome"]
+    assert outcome["gross_pct"] > outcome["net_pct"]
+    assert outcome["cost_source"] == COSTS.source
+    assert outcome["cost_status"] == "NET_COSTS_APPLIED"
+    state = record["state"]
+    assert outcome["net_pct"] == round(COSTS.net_return(state["entry_price"], state["proceeds"]), 3)

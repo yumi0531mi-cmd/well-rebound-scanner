@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-09-27T21:05:00+09:00",
+  "updated_at": "2026-09-28T01:03:03+09:00",
   "current_step": 3,
   "completed_steps": [
     "기존 저장소와 인계 보고서 확인",
@@ -158,7 +158,9 @@
     "2026-09-27 multi-symbol: 005930x9, 000660x3, 035420x3 (15 fills); worker died twice with no artifact, relaunched with resume-skip; 068270, 105560 pending; cause of death unconfirmed, not attributed to throttling",
     "2026-09-27 corrected: 068270 slowness was interruption, not a hang; offline replay completed in 56min (VALID, 1 fill, 0 T1); hang theory discarded, no code change made",
     "2026-09-27 multi-symbol now 16 fills (005930x9, 000660x3, 035420x3, 068270x1); 105560 relaunched; still far below 50-fill verdict bar, no win-rate claim",
-    "2026-09-27 multi-symbol 5/5 complete (diagnostic, fixed symbols): 005930x9/T10, 000660x3/T10, 035420x3/T10, 068270x1/T10, 105560x0; combined with frozen 010170 table = 25 fills, 5 T1 (20%); still below 50-fill bar, no verdict, no claim"
+    "2026-09-27 multi-symbol 5/5 complete (diagnostic, fixed symbols): 005930x9/T10, 000660x3/T10, 035420x3/T10, 068270x1/T10, 105560x0; combined with frozen 010170 table = 25 fills, 5 T1 (20%); still below 50-fill bar, no verdict, no claim",
+    "2026-09-28 takeover audit: latest local HEAD 1f68177, tracking ref ca65d0b (23 local commits ahead; remote not freshly verified because GitHub network request failed); no Python workers found; safe regression rerun passed with reserved tuning tests excluded; Ruff and git diff --check passed; 30-899-bar evaluation remains provisional and cannot publish ENTRY; fixed-symbol 25/5 remains diagnostic only",
+    "2026-09-28 fixed scalp shadow-ledger cost reporting: gross zero-cost execution plans now persist separate actual policy costs and report gross plus net outcomes; reject scalp plans lacking reporting costs; legacy open scalp records without stored actual costs report net as unavailable instead of gross-as-net; targeted 8 tests and full 548-test safe suite, Ruff, git diff --check passed; no official gates or live portfolio changed"
   ],
   "files": {
     "config.py": "created; qualification/risk/cost/data/model and scanner deadline-margin settings centralized",

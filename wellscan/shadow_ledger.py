@@ -151,6 +151,8 @@ class ShadowLedger:
                 continue
             plan_costs = SCALP_GROSS_COSTS if str(strategy) in scalp_values else costs
             try:
+                if str(strategy) in scalp_values and costs is None:
+                    raise ValueError("missing reporting costs for scalp")
                 entry = _number(details.get("plan_entry"))
                 target1 = _number(details.get("plan_target1"))
                 target2 = _number(details.get("plan_target2"))
@@ -202,6 +204,15 @@ class ShadowLedger:
                     "signal_at": signal_at.isoformat(),
                     "day": day,
                     "plan": plan.payload(),
+                    # Scalp execution uses zero-cost prices, but its reported
+                    # net outcome must use the real market policy costs.
+                    "report_costs": ({
+                        "buy_fee": costs.buy_fee,
+                        "sell_fee": costs.sell_fee,
+                        "sell_tax": costs.sell_tax,
+                        "slippage": costs.slippage,
+                        "source": costs.source,
+                    } if costs is not None else None),
                     "state": State().payload(),
                     "status": "OPEN",
                     "outcome": None,
@@ -277,15 +288,34 @@ class ShadowLedger:
             record["state"] = state.payload()
             if state.terminal:
                 bucket = _outcome_bucket(state)
+                gross_pct = None
                 net_pct = None
+                cost_source = None
+                cost_status = "UNAVAILABLE"
                 try:
                     if state.entry_price and state.proceeds:
-                        net_pct = round(float(plan.costs.net_return(state.entry_price, state.proceeds)), 3)
+                        gross_pct = round((state.proceeds / state.entry_price - 1) * 100, 3)
+                        report_costs = record.get("report_costs")
+                        if isinstance(report_costs, dict):
+                            net_costs = Costs(**report_costs)
+                        elif plan.costs.source.startswith("SCALP-GROSS"):
+                            net_costs = None
+                        else:
+                            net_costs = plan.costs
+                        if net_costs is not None:
+                            net_pct = round(float(net_costs.net_return(state.entry_price, state.proceeds)), 3)
+                            cost_source = net_costs.source
+                            cost_status = "NET_COSTS_APPLIED"
+                        else:
+                            cost_status = "LEGACY_SCALP_COSTS_UNAVAILABLE"
                 except (ValueError, TypeError, AttributeError):
-                    net_pct = None
+                    gross_pct = net_pct = None
                 outcome = {
                     "bucket": bucket,
+                    "gross_pct": gross_pct,
                     "net_pct": net_pct,
+                    "cost_source": cost_source,
+                    "cost_status": cost_status,
                     "phase": state.phase.value,
                     "result": state.result,
                     "entry_at": state.entry_at,
