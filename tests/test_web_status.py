@@ -9,6 +9,7 @@ from wellscan.models import Candidate, Market, Stage, TradingSession
 from wellscan.web_status import (
     PipelineIssueCollector,
     PipelineStage,
+    TrackingCaseRotator,
     admin_session_fingerprint,
     admin_session_valid,
     admin_token_configured,
@@ -104,6 +105,21 @@ def test_session_transition_stops_quote_but_keeps_closed_bar_replay():
     current = tracking_refresh_scope(TradingSession.US_PRE, TradingSession.US_PRE, True)
     assert current.observe_live_quote is True
     assert current.replay_completed_bars is True
+
+
+def test_tracking_case_rotator_bounds_each_batch_without_starvation():
+    rotator = TrackingCaseRotator()
+    cases = list(range(30))
+    seen = []
+
+    for _ in range(3):
+        batch = rotator.select(cases, 12)
+        assert len(batch) == 12
+        assert len(set(batch)) == 12
+        seen.extend(batch)
+
+    assert set(seen) == set(cases)
+    assert rotator.select(cases, 0) == ()
 
 
 def test_tracked_candidate_missing_price_stays_unknown_not_zero():

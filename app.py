@@ -18,12 +18,16 @@ from config import (
     BACKTEST_MAX_TOP_N,
     BACKTEST_MIN_DAYS,
     BACKTEST_MIN_TOP_N,
+    LIVE_QUOTE_REFRESH_OPTIONS_SECONDS,
     MIN_TRADES_PER_MARKET,
     MIN_UNIQUE_ENTRIES_PER_SESSION,
     PROBABILITY_MIN_TRAINING_TRADES,
     STRATEGY_FRAME_REQUIREMENTS,
     TARGET1_HIT_RATE_FLOOR,
     TARGET1_HIT_RATE_GOAL,
+    UI_STATUS_POLL_SECONDS,
+    VALIDATION_CASES_PER_REFRESH,
+    VALIDATION_TRACKING_REFRESH_SECONDS,
 )
 from kis_data_fetcher import KISMinuteDataFetcher
 from wellscan import APP_VERSION, ENGINE_VERSION
@@ -58,6 +62,7 @@ from wellscan.web_status import (
     PipelineIssue,
     PipelineIssueCollector,
     PipelineStage,
+    TrackingCaseRotator,
     admin_session_fingerprint,
     admin_session_valid,
     admin_token_configured,
@@ -361,6 +366,11 @@ def quotes() -> QuoteBook:
 @st.cache_resource
 def tracking_coordinator() -> SnapshotCoordinator[int]:
     return SnapshotCoordinator(max_keys=2, ttl_seconds=600, max_pending=1)
+
+
+@st.cache_resource
+def tracking_case_rotator() -> TrackingCaseRotator:
+    return TrackingCaseRotator()
 
 
 @st.cache_resource
@@ -732,7 +742,13 @@ with st.sidebar:
     st.info(f"현재 세션: {status.label}" + (" · 감시 중" if status.active else " · 신규 신호 중지"))
     mode = st.radio("후보 모드", ["전체", "일반주", "급등주"], horizontal=True)
     display_count = st.slider("표시 후보", 5, 10, 5)
-    refresh_seconds = int(st.radio("현재가 화면 갱신", [1, 3, 5], index=2, horizontal=True, format_func=lambda value: f"{value}초"))
+    refresh_seconds = int(st.radio(
+        "현재가 화면 갱신",
+        list(LIVE_QUOTE_REFRESH_OPTIONS_SECONDS),
+        index=0,
+        horizontal=True,
+        format_func=lambda value: f"{value}초",
+    ))
     if market == Market.KR:
         minimum_price = st.number_input("최소 가격(원)", 100.0, 300000.0, 1000.0, 100.0)
         maximum_price = st.number_input("최대 가격(원)", 1000.0, 1000000.0, 300000.0, 1000.0)
@@ -1173,7 +1189,7 @@ if scan_state.snapshot is None:
     if scan_state.error:
         st.error(f"스캔 실패 · {safe_pipeline_message(scan_state.error)}")
 
-    @st.fragment(run_every=1)
+    @st.fragment(run_every=UI_STATUS_POLL_SECONDS)
     def wait_for_first_snapshot() -> None:
         if use_daemon_feed:
             latest_status = daemon_service_status()
@@ -1205,7 +1221,7 @@ if use_daemon_feed:
         + diagnostic_timestamp_text(daemon_feed_marker, "첫 결과 대기")
     )
 
-    @st.fragment(run_every=2)
+    @st.fragment(run_every=UI_STATUS_POLL_SECONDS)
     def poll_daemon_snapshot() -> None:
         latest_status = daemon_service_status()
         latest_marker = daemon_session_updated_at(status.session)
@@ -1232,7 +1248,7 @@ pipeline_issues = [
 if scan_state.running and not use_daemon_feed:
     st.caption("새 1분봉 구조를 백그라운드에서 계산 중 · 직전 결과와 현재가는 계속 표시됩니다.")
 
-    @st.fragment(run_every=1)
+    @st.fragment(run_every=UI_STATUS_POLL_SECONDS)
     def poll_snapshot_refresh() -> None:
         refreshed = scan_coordinator().request(scan_key, minute_bucket, snapshot_loader)
         if not refreshed.running or refreshed.snapshot is not snapshot:
@@ -1451,17 +1467,18 @@ live_cards()
 def _refresh_tracking() -> int:
     """Refresh paper-signal prices without adding a validation panel to the UI."""
     validations().retry_pending_durable()
-    tracked = validations().tracking_cases()[:100]
+    tracked = validations().tracking_cases()
+    batch = tracking_case_rotator().select(tracked, VALIDATION_CASES_PER_REFRESH)
     current = {candidate.key: candidate for candidate in analysis_candidates}
     failures: list[str] = []
-    for case in tracked:
+    for case in batch:
         candidate = _candidate_for_case(case.symbol, case.last_price, current)
         if candidate is None:
             failures.append(f"{case.symbol}: 추적 종목 또는 저장 현재가 없음")
             continue
         current_status = session_status(candidate.market)
         refresh_scope = tracking_refresh_scope(candidate.session, current_status.session, current_status.active)
-        if refresh_scope.observe_live_quote:
+        if refresh_scope.observe_live_quote and case.fill_price is not None:
             try:
                 price, _, checked_at, _ = _live_quote(candidate)
                 case = validations().update_live(case, price, checked_at.isoformat())
@@ -1493,12 +1510,16 @@ def _refresh_tracking() -> int:
         details = " | ".join(failures[:5])
         omitted = f" 외 {len(failures) - 5}건" if len(failures) > 5 else ""
         raise RuntimeError(f"신호 추적 일부 실패 {len(failures)}건{omitted} · {details}")
-    return len(tracked)
+    return len(batch)
 
 
-@st.fragment(run_every=5)
+@st.fragment(run_every=VALIDATION_TRACKING_REFRESH_SECONDS)
 def refresh_hidden_validation_tracking() -> None:
-    state = tracking_coordinator().request("tracking", int(datetime.now(UTC).timestamp() // 5), _refresh_tracking)
+    state = tracking_coordinator().request(
+        "tracking",
+        int(datetime.now(UTC).timestamp() // VALIDATION_TRACKING_REFRESH_SECONDS),
+        _refresh_tracking,
+    )
     if state.error:
         st.warning(f"신호 추적 오류: {safe_pipeline_message(state.error)}")
 

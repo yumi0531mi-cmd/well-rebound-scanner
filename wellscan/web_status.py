@@ -10,6 +10,7 @@ import hashlib
 import hmac
 import math
 import re
+import threading
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -58,6 +59,24 @@ class TrackingRefreshScope:
 
     observe_live_quote: bool
     replay_completed_bars: bool = True
+
+
+class TrackingCaseRotator:
+    """Bound background validation I/O while eventually visiting every case."""
+
+    def __init__(self) -> None:
+        self._offset = 0
+        self._lock = threading.Lock()
+
+    def select(self, cases, limit: int):
+        if limit <= 0 or not cases:
+            return ()
+        count = min(limit, len(cases))
+        with self._lock:
+            start = self._offset % len(cases)
+            selected = tuple(cases[(start + index) % len(cases)] for index in range(count))
+            self._offset = (start + count) % len(cases)
+        return selected
 
 
 def tracking_refresh_scope(

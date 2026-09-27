@@ -2,9 +2,9 @@ name: Keep scanner awake during active sessions
 
 on:
   schedule:
-    # Korean weekday 09:00 through Saturday 08:50 KST: covers KR regular and all US sessions.
-    - cron: "*/10 0-23 * * 1-5"
-    # Start the Render service before the Korean weekday window begins.
+    # KRX opens at 09:00 KST; this UTC window covers it and enabled KIS US DAY/PRE/REGULAR sessions through the next KST morning (with DST-safe extra margin).
+    - cron: "*/10 0-21 * * 1-5"
+    # Warm the Render service shortly before the Korean weekday opens.
     - cron: "30,40,50 23 * * 0-4"
   workflow_dispatch:
 

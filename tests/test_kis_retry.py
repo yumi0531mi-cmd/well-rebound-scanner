@@ -7,7 +7,12 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 import requests
 
-from wellscan.kis import KISClient, KISError
+from wellscan.kis import KISClient, KISError, KISRateLimitCooldown
+
+
+@pytest.fixture(autouse=True)
+def reset_rate_limit_cooldown(monkeypatch):
+    monkeypatch.setattr(KISClient, "_rate_limit_until", 0.0)
 
 
 class Response:
@@ -47,16 +52,34 @@ def configured_client(tmp_path, responses: list[Response]) -> tuple[KISClient, S
     return client, session
 
 
-def test_rate_limit_is_retried_with_a_bounded_attempt_count(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr("wellscan.kis.time.sleep", lambda _: None)
-    monkeypatch.setattr("wellscan.kis.random.uniform", lambda _a, _b: 0.0)
-    client, session = configured_client(tmp_path, [Response(429, {}), Response(200, {"rt_cd": "0", "output": {}})])
+def test_http_429_activates_shared_cooldown_without_retry(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(KISClient, "_rate_limit_until", 0.0)
+    response = Response(429, {})
+    response.headers["Retry-After"] = "120"
+    client, session = configured_client(tmp_path, [response, Response(200, {"rt_cd": "0"})])
 
-    payload, _ = client.get("/test", "TEST", {})
+    with pytest.raises(KISRateLimitCooldown, match="HTTP 429"):
+        client.get("/test", "TEST", {})
+    with pytest.raises(KISRateLimitCooldown, match="보호 대기"):
+        client.get("/test", "TEST", {})
 
-    assert payload["rt_cd"] == "0"
-    assert session.calls == 2
-    assert client.take_call_stats() == {"other": {"calls": 2, "bytes": 629}}
+    assert session.calls == 1
+    assert KISClient._rate_limit_until > time.monotonic() + 100
+    assert client.take_call_stats() == {"other": {"calls": 1, "bytes": 429}}
+
+
+def test_kis_rate_limit_message_activates_shared_cooldown(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(KISClient, "_rate_limit_until", 0.0)
+    client, session = configured_client(
+        tmp_path,
+        [Response(200, {"rt_cd": "1", "msg_cd": "EGW00201", "msg1": "too many requests"})],
+    )
+
+    with pytest.raises(KISRateLimitCooldown, match="EGW00201"):
+        client.get("/test", "TEST", {})
+
+    assert session.calls == 1
+    assert KISClient._rate_limit_until > time.monotonic()
 
 
 def test_auth_error_is_not_retried(tmp_path, monkeypatch) -> None:

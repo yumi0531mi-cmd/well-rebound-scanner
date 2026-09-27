@@ -20,6 +20,8 @@ import pandas as pd
 import requests
 from filelock import FileLock
 
+from config import KIS_RATE_LIMIT_COOLDOWN_SECONDS
+
 from .bar_store import CockroachBarStore
 from .indicators import normalize_bars
 from .instruments import MasterCatalog
@@ -43,11 +45,17 @@ class KISDeadlineError(KISError):
     """A scanner-owned request budget ended before more I/O could start."""
 
 
+class KISRateLimitCooldown(KISError):
+    """Shared fail-fast state after the broker reports a request-rate limit."""
+
+
 class KISClient:
     """Read-only KIS client for rankings, current price and minute history."""
 
     _request_lock = threading.Lock()
     _request_at = 0.0
+    _rate_limit_until = 0.0
+    _rate_limit_cooldown_seconds = float(KIS_RATE_LIMIT_COOLDOWN_SECONDS)
 
     def __init__(
         self,
@@ -160,21 +168,25 @@ class KISClient:
                         return token
             if not self.configured:
                 raise KISError("KIS_APP_KEY/KIS_APP_SECRET 환경변수가 필요합니다.")
+            self._raise_if_rate_limited()
             with self._lock:
                 response = self.session.post(
                     f"{self.base_url}/oauth2/tokenP",
                     json={"grant_type": "client_credentials", "appkey": self.app_key, "appsecret": self.app_secret},
                     timeout=self._request_timeout(),
                 )
-        if not response.ok:
-            try:
-                error_body = response.json()
-                detail = str(error_body.get("error_description") or error_body.get("msg1") or error_body.get("error") or "")
-            except (ValueError, AttributeError):
-                detail = ""
-            safe_detail = detail[:240].replace(self.app_key, "***").replace(self.app_secret, "***")
-            suffix = f" · {safe_detail}" if safe_detail else ""
-            raise KISError(f"KIS 토큰 발급 실패: HTTP {response.status_code}{suffix}")
+            if getattr(response, "status_code", None) == 429:
+                self._activate_rate_limit_cooldown(response.headers.get("Retry-After"))
+                raise KISRateLimitCooldown("KIS 인증 HTTP 429 · 전체 REST 요청을 보호 대기 상태로 전환")
+            if not response.ok:
+                try:
+                    error_body = response.json()
+                    detail = str(error_body.get("error_description") or error_body.get("msg1") or error_body.get("error") or "")
+                except (ValueError, AttributeError):
+                    detail = ""
+                safe_detail = detail[:240].replace(self.app_key, "***").replace(self.app_secret, "***")
+                suffix = f" · {safe_detail}" if safe_detail else ""
+                raise KISError(f"KIS 토큰 발급 실패: HTTP {response.status_code}{suffix}")
         body = response.json()
         token = str(body.get("access_token") or "")
         if not token:
@@ -246,12 +258,16 @@ class KISClient:
 
             if not self.configured:
                 raise KISError("KIS_APP_KEY/KIS_APP_SECRET 환경변수가 필요합니다.")
+            self._raise_if_rate_limited()
             with self._lock:
                 response = self.session.post(
                     f"{self.base_url}/oauth2/Approval",
                     json={"grant_type": "client_credentials", "appkey": self.app_key, "secretkey": self.app_secret},
                     timeout=15,
                 )
+            if getattr(response, "status_code", None) == 429:
+                self._activate_rate_limit_cooldown(response.headers.get("Retry-After"))
+                raise KISRateLimitCooldown("KIS WebSocket 인증 HTTP 429 · REST 보호 대기 상태로 전환")
             if not response.ok:
                 raise KISError(f"WebSocket 접속키 발급 실패: HTTP {response.status_code}")
             key = str(response.json().get("approval_key") or "")
@@ -279,8 +295,39 @@ class KISClient:
             self._approval_key, self._approval_expires = key, expiry
             return key
 
+    @classmethod
+    def _raise_if_rate_limited(cls) -> None:
+        with cls._request_lock:
+            remaining = cls._rate_limit_until - time.monotonic()
+        if remaining > 0:
+            raise KISRateLimitCooldown(
+                f"KIS 호출한도 보호 대기 중 · 약 {math.ceil(remaining)}초 후 재개"
+            )
+
+    @classmethod
+    def _activate_rate_limit_cooldown(cls, retry_after: object = None) -> float:
+        try:
+            seconds = float(retry_after)
+        except (TypeError, ValueError):
+            seconds = cls._rate_limit_cooldown_seconds
+        if not math.isfinite(seconds) or seconds <= 0:
+            seconds = cls._rate_limit_cooldown_seconds
+        seconds = min(max(seconds, 1.0), 600.0)
+        with cls._request_lock:
+            cls._rate_limit_until = max(cls._rate_limit_until, time.monotonic() + seconds)
+            remaining = max(0.0, cls._rate_limit_until - time.monotonic())
+        logging.getLogger(__name__).warning(
+            "kis_rate_limit_cooldown seconds=%s", math.ceil(remaining)
+        )
+        return remaining
+
     def _throttle(self) -> None:
         with KISClient._request_lock:
+            remaining = KISClient._rate_limit_until - time.monotonic()
+            if remaining > 0:
+                raise KISRateLimitCooldown(
+                    f"KIS 호출한도 보호 대기 중 · 약 {math.ceil(remaining)}초 후 재개"
+                )
             wait = KISClient._request_at + 0.25 - time.monotonic()
             if wait > 0:
                 time.sleep(wait)
@@ -290,6 +337,7 @@ class KISClient:
         response = None
         for attempt in range(3):
             self._request_timeout()
+            KISClient._raise_if_rate_limited()
             token = self.access_token()
             self._throttle()
             timeout = self._request_timeout()
@@ -328,7 +376,10 @@ class KISClient:
                 self._record_call(path, len(getattr(response, "content", b"") or b""))
             except Exception:
                 pass
-            if response.status_code not in {429, 500, 502, 503, 504} or attempt == 2:
+            if response.status_code == 429:
+                self._activate_rate_limit_cooldown(response.headers.get("Retry-After"))
+                raise KISRateLimitCooldown("KIS HTTP 429 · 전체 REST 요청을 보호 대기 상태로 전환")
+            if response.status_code not in {500, 502, 503, 504} or attempt == 2:
                 break
             self._retry_sleep((0.35 * (2**attempt)) + random.uniform(0.0, 0.15))
         assert response is not None
@@ -336,6 +387,9 @@ class KISClient:
             raise KISError(f"{tr_id} HTTP {response.status_code}")
         payload = response.json()
         if str(payload.get("rt_cd", "0")) != "0":
+            if str(payload.get("msg_cd") or "").strip() == "EGW00201":
+                self._activate_rate_limit_cooldown()
+                raise KISRateLimitCooldown("KIS EGW00201 초당 호출한도 응답 · 전체 REST 요청을 보호 대기 상태로 전환")
             raise KISError(str(payload.get("msg1") or f"{tr_id} 응답 오류"))
         return payload, str(response.headers.get("tr_cont") or response.headers.get("TR_CONT") or "")
 
