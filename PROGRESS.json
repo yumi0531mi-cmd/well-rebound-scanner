@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-09-28T03:40:25+09:00",
+  "updated_at": "2026-09-28T03:45:56+09:00",
   "current_step": 3,
   "completed_steps": [
     "기존 저장소와 인계 보고서 확인",
@@ -165,7 +165,8 @@
     "2026-09-28 KIS overseas minute diagnostics: include request page count beside raw response rows, parsed rows, oldest/newest timestamps; targeted overseas tests and full safe suite passed with reserved tuning tests excluded, plus Ruff and diff-check; this enables future live raw-page diagnosis but does not retroactively prove missing bars",
     "2026-09-28 engine-path audit: HistoryCache stores US_DAY bars in a session-only namespace and filters the fetch result to that session; scanner passes that one frame to evaluate(), where _analyze_structure derives both 3/5/15m structure and 1m trigger from it. The separate 3000-bar background warm-up is not passed into the evaluator as structural context. Thus 3000 is a retention/warm target, not a guaranteed 3000-bar signal-analysis input; fix requires distinct historical-structure and current-session-trigger inputs with explicit readiness, not just lowering the 180-bar official gate",
     "2026-09-28 local fix: pass current-session trigger bars separately from rolling US_REGULAR structural context (US extended sessions); clip both sources to completed bars as-of evaluation time; make 15m structure use the structural frame while session-specific 1/3/5m triggers remain on session bars; require exactly 3000 structural bars plus the session's own readiness for official ENTRY; US_DAY provisional evaluation floor is 30 current-session bars, never an official-entry bypass",
-    "2026-09-28 regression: incomplete 3000-bar context is forced provisional and a complete 3000-bar context preserves official ENTRY; 555 safe tests collected, full safe regression passed, Ruff and git diff --check passed; prohibited tuning tests excluded; compileall not counted (protected __pycache__ permission failure); live KIS history depth and Render deployment remain unverified"
+    "2026-09-28 regression: incomplete 3000-bar context is forced provisional and a complete 3000-bar context preserves official ENTRY; 555 safe tests collected, full safe regression passed, Ruff and git diff --check passed; prohibited tuning tests excluded; compileall not counted (protected __pycache__ permission failure); live KIS history depth and Render deployment remain unverified",
+    "2026-09-28 US_DAY acceptance regression: exactly 30 completed session trigger bars plus 3000 completed structural-context bars can retain official ENTRY, while the paired 100-trigger-bar/no-structure case stays provisional; safe regression 556 passed, Ruff/diff-check clean"
   ],
   "files": {
     "config.py": "created; qualification/risk/cost/data/model and scanner deadline-margin settings centralized",
@@ -225,7 +226,7 @@
     "non_15m_strategy_downtrend_gate_fixed": true,
     "public_strategy_rejection_diagnostics_added": true,
     "latest_safe_operational_test_count": 528,
-    "latest_local_safe_test_count": 555,
+    "latest_local_safe_test_count": 556,
     "latest_local_safe_test_exclusions": [
       "tests/test_controlled_tuning.py",
       "tests/test_controlled_tuning_audit.py",

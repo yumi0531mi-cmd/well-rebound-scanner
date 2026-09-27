@@ -639,6 +639,65 @@ def test_us_day_incomplete_structural_context_is_provisional_not_official(tmp_pa
     assert breakdown["final_buy"] == 0
 
 
+def test_us_day_can_publish_with_30_session_bars_and_complete_structure(tmp_path):
+    import time as _time
+
+    frame = pd.DataFrame(
+        {"open": 200.0, "high": 201.0, "low": 199.0, "close": 200.5, "volume": 1000.0},
+        index=pd.date_range(end="2026-09-04 03:29", periods=30, freq="min", tz="America/New_York"),
+    )
+    context = pd.DataFrame(
+        {"open": 200.0, "high": 201.0, "low": 199.0, "close": 200.5, "volume": 1000.0},
+        index=pd.date_range(end="2026-09-04 03:29", periods=3000, freq="min", tz="America/New_York"),
+    )
+    now = pd.Timestamp("2026-09-04 03:30", tz="America/New_York").to_pydatetime()
+
+    class DayClient(FakeClient):
+        def overseas_current_price(self, symbol, exchange):
+            self.price_calls.append((exchange, symbol))
+            return 200.5, 0.0, now.astimezone(UTC)
+
+    class DayHistory(FakeHistory):
+        def load_structural_bars(self, candidate):
+            del candidate
+            return context.copy()
+
+    def evaluator(symbol, frame, price, store, **kwargs):
+        return ScanResult(
+            symbol, kwargs["now"], Stage.FINAL_BUY, Strategy.RANGE_REVERSAL,
+            RiskState.NORMAL, 100, None, None, None, None,
+            TradeLevels(entry=200, target1=208, target2=212, hard_stop=198, soft_stop=199),
+            {"FINAL_BUY": True}, diagnostics={"classification_assessments": {}},
+        )
+
+    validation = FakeValidation()
+    service = ScannerService(
+        config(tmp_path, initial_history_bars=250, tracking_history_bars=3000),
+        client=DayClient([Candidate(
+            "AAPL", "A", 200, 1, 100, 1000, market=Market.US,
+            exchange="NAS", session=TradingSession.US_DAY,
+        )]),
+        history=DayHistory(frame), sequences=object(), validations=validation,
+        clock=lambda: now,
+        session_resolver=lambda market, instant: SessionStatus(
+            Market.US, TradingSession.US_DAY, True, "test"
+        ),
+        evaluator=evaluator, live_revalidator=lambda result, price, checked_at: result,
+    )
+
+    service._scan_session(
+        SessionStatus(Market.US, TradingSession.US_DAY, True, "test"),
+        _time.monotonic() + 60,
+        60,
+    )
+    published = service.results_snapshot().sessions[0].results[0][1]
+    breakdown = service.snapshot().discovery_breakdown["US:US_DAY"]
+    assert len(validation.recorded) == 1
+    assert published.stage == Stage.FINAL_BUY
+    assert breakdown["structural_ready"] == 1
+    assert breakdown["structural_below_3000"] == 0
+
+
 def test_idle_cycle_skips_tracking_and_sessions_when_nothing_active(tmp_path):
     client = FakeClient([Candidate("005930", "S", 70000, 1, 100, 1000)])
     history = FakeHistory()
