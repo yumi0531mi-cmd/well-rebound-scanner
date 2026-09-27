@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-09-27T15:55:00+09:00",
+  "updated_at": "2026-09-27T17:10:00+09:00",
   "current_step": 3,
   "completed_steps": [
     "기존 저장소와 인계 보고서 확인",
@@ -152,7 +152,8 @@
     "2026-09-27 parallel replay: old sequential worker made 2/22 then host-reaped tracelessly; relaunched as 5 locked single-group workers (4 strategies each, own jsonl, resume-skip, heartbeat), verified alive by CPU growth; old worker stopped to avoid duplicate work",
     "2026-09-27 ETA basis: ~44 CPU-min per strategy measured (5282s for 2 strategies); 22 logical cores free, 5 workers -> ~3-4h wall for remaining 20 on 010170 KR 60-day cached bars",
     "2026-09-27 16:00-table rule accepted: fixed-symbol replay is diagnostic-only, never for activation or win-rate claims; kept separate from validation stream",
-    "2026-09-27 relaunched multi-symbol batch with resume-skip (bt60_multi.py skips completed symbols); per-strategy x session funnel uses live funnel + ledger by_session; 0 fills recorded as no-verdict, never 0%"
+    "2026-09-27 relaunched multi-symbol batch with resume-skip (bt60_multi.py skips completed symbols); per-strategy x session funnel uses live funnel + ledger by_session; 0 fills recorded as no-verdict, never 0%",
+    "2026-09-27 22-strategy table on 010170 KR 60-day cached bars COMPLETE (diagnostic-only, fixed symbol): 5 strategies with fills / 9 total fills / 4 T1 (44.4%); 17 strategies no fills = no verdict; sample>=50 False, 80pct False; no activation, no win-rate claim. Fired: VWAP-reclaim 2/1, volume-breakout 1/1, oversold-rebound 3/1, pullback 2/1, volatility-expansion 1/0."
   ],
   "files": {
     "config.py": "created; qualification/risk/cost/data/model and scanner deadline-margin settings centralized",
