@@ -72,12 +72,11 @@ COLD_CALL_RESERVE_PER_CANDIDATE = {Market.KR: 26, Market.US: 11}
 RECENT_ERROR_LIMIT = 20
 SEEN_CASE_LIMIT = 2_000
 SESSION_RESULT_LIMIT = 80
-# KIS documents that BAQ/BAY/BAA daytime minute history is limited to one
-# trading day.  A 1000-bar precondition can therefore never complete for
-# US_DAY.  The common engine already owns staged readiness (180/300/900 bars),
-# so the daemon only needs the same initial window as the browser path and
-# must publish DATA_WAIT while the current day accumulates.
-US_DAY_INITIAL_HISTORY_BARS = HistoryCache.INITIAL_READY_BARS
+# US_DAY intraday history is a current-session trigger source, not the long
+# structural source. Open provisional evaluation after the existing 30-bar
+# floor; per-strategy timeframe checks plus a separate, complete 3000-bar
+# structural context still gate official ENTRY.
+US_DAY_INITIAL_HISTORY_BARS = PROVISIONAL_MIN_BARS
 
 
 class StaleCompletedBarError(RuntimeError):
@@ -118,6 +117,8 @@ class ScannerServiceConfig:
         ):
             if value <= 0:
                 raise ValueError("scanner service limits must be positive")
+        if self.tracking_history_bars != STRUCTURAL_WINDOW_BARS:
+            raise ValueError(f"live structural history is fixed at {STRUCTURAL_WINDOW_BARS} bars")
         if self.maximum_completed_bar_age_seconds <= 0:
             raise ValueError("maximum completed bar age must be positive")
         if self.candidate_fallback_max_age_seconds <= 0:
@@ -600,6 +601,22 @@ class ScannerService:
                 active.append(status)
         return active
 
+    @staticmethod
+    def _completed_window_as_of(
+        frame: pd.DataFrame, candidate: Candidate, now: datetime, limit: int
+    ) -> pd.DataFrame:
+        """Return only bars closed by now, in the exchange-local clock."""
+        data = normalize_bars(frame)
+        if data.empty:
+            return data
+        timezone = "Asia/Seoul" if candidate.market == Market.KR else "America/New_York"
+        reference = pd.Timestamp(now).tz_convert(timezone)
+        if data.index.tz is None:
+            reference = reference.tz_localize(None)
+        else:
+            reference = reference.tz_convert(data.index.tz)
+        return data.loc[data.index + pd.Timedelta(minutes=1) <= reference].tail(limit)
+
     def _latest_completed_close(self, bars: pd.DataFrame, session: TradingSession, now: datetime) -> float:
         data = filter_session_bars(normalize_bars(bars), session)
         if data.empty:
@@ -1075,6 +1092,8 @@ class ScannerService:
         attempted_keys: set[str] = set()
         skipped = 0
         bars_ready = 0
+        structural_ready_count = 0
+        structural_below_3000 = 0
         warming_provisional = 0
         warming_signals = 0
         bars_counts: list[int] = []
@@ -1155,23 +1174,48 @@ class ScannerService:
                 self._eval_cutoff[candidate.key] = cutoff_key
                 if len(self._eval_cutoff) > 20000:
                     self._eval_cutoff.clear()
-                session_bars = filter_session_bars(normalize_bars(bars), status.session)
+                session_bars = self._completed_window_as_of(
+                    filter_session_bars(normalize_bars(bars), status.session),
+                    candidate,
+                    current,
+                    self.config.tracking_history_bars,
+                )
                 bars_counts.append(len(session_bars))
                 if session_bars.empty:
                     history_empty += 1
                 elif len(session_bars) < HistoryCache.INITIAL_READY_BARS:
                     history_below_ready += 1
-                warming = False
+                session_ready = len(session_bars) >= history_target
                 if len(session_bars) < history_target:
                     if len(session_bars) < PROVISIONAL_MIN_BARS:
                         self._counters.data_wait_observations += 1
                         continue
-                    # Provisional band (30~899): evaluate for visibility and
-                    # shadow measurement, never for official ENTRY. One floor
-                    # for every session; US_DAY no longer bypasses readiness.
-                    warming = True
                 else:
                     bars_ready += 1
+                structural_reader = getattr(self.history, "load_structural_bars", None)
+                if callable(structural_reader):
+                    supplied_context = structural_reader(candidate)
+                    if supplied_context is None:
+                        supplied_context = pd.DataFrame(
+                            columns=["open", "high", "low", "close", "volume"]
+                        )
+                    structural_bars = self._completed_window_as_of(
+                        supplied_context, candidate, current, self.config.tracking_history_bars
+                    )
+                    structural_count = len(structural_bars)
+                    structural_ready = structural_count >= self.config.tracking_history_bars
+                else:
+                    structural_bars = None
+                    structural_count = len(normalize_bars(bars))
+                    structural_ready = True
+                if structural_ready:
+                    structural_ready_count += 1
+                else:
+                    structural_below_3000 += 1
+                # Session triggers and long structural context are independent
+                # readiness contracts. Partial context is visible for shadow
+                # diagnostics, but isolated from official ENTRY state.
+                warming = not session_ready or not structural_ready
                 close = self._latest_completed_close(bars, status.session, current)
                 self._stale_streak.pop(stale_key, None)
                 policy = self.client.trading_policy(candidate)
@@ -1189,16 +1233,21 @@ class ScannerService:
                     eval_store = warming_sequences
                 else:
                     eval_store = self.sequences
-                result = self._evaluator(
-                    candidate.key,
-                    bars,
-                    close,
-                    eval_store,
+                evaluation_kwargs = dict(
                     now=current,
                     session=status.session,
                     require_fresh=True,
                     policy=policy,
                     classification_portfolio=ALL_ENTRY_STRATEGIES,
+                )
+                if callable(structural_reader):
+                    evaluation_kwargs["structural_bars"] = structural_bars
+                result = self._evaluator(
+                    candidate.key,
+                    bars,
+                    close,
+                    eval_store,
+                    **evaluation_kwargs,
                 )
                 if warming:
                     if not (is_dataclass(result) and not isinstance(result, type)):
@@ -1211,7 +1260,12 @@ class ScannerService:
                     result = replace(
                         result,
                         stage=Stage.CANDIDATE,
-                        reasons=tuple(getattr(result, "reasons", None) or ()) + ("예열중: 분봉 900 미만·비공식",),
+                        reasons=tuple(getattr(result, "reasons", None) or ()) + tuple(
+                            reason for reason, ready in (
+                                (f"예열중: 세션 분봉 {len(session_bars)}/{history_target}·비공식", session_ready),
+                                (f"예열중: 구조 분봉 {structural_count}/{self.config.tracking_history_bars}·비공식", structural_ready),
+                            ) if not ready
+                        ),
                     )
                 self._counters.candidates_evaluated += 1
                 evaluated_gates += 1
@@ -1335,6 +1389,8 @@ class ScannerService:
             rotation_key,
             attempted=attempted,
             bars_ready=bars_ready,
+            structural_ready=structural_ready_count,
+            structural_below_3000=structural_below_3000,
             warming_provisional=warming_provisional,
             warming_signals=warming_signals,
             bars_median=bars_median,
@@ -1366,10 +1422,12 @@ class ScannerService:
         LOGGER.info(
             "pipeline_cycle session=%s discovered=%s selected=%s attempted=%s history_empty=%s "
             "below_180=%s bars_median=%s bars_max=%s evaluated=%s formed=%s cost_passed=%s "
-            "policy_ready=%s published=%s final_buy=%s entry_wait=%s gaps=%s warmup_pending=%s",
+            "structural_ready=%s structural_below_3000=%s policy_ready=%s published=%s "
+            "final_buy=%s entry_wait=%s gaps=%s warmup_pending=%s",
             status.session.value, discovered, len(candidates), attempted, history_empty,
             history_below_ready, bars_median, ordered_counts[-1] if ordered_counts else 0,
             evaluated_gates, sum(formed_counts.values()), sum(cost_pass_counts.values()),
+            structural_ready_count, structural_below_3000,
             sum(policy_ready_counts.values()), published, final_buys, entry_waits,
             gap_symbols, warmup_pending,
         )

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-09-28T03:14:30+09:00",
+  "updated_at": "2026-09-28T03:40:25+09:00",
   "current_step": 3,
   "completed_steps": [
     "기존 저장소와 인계 보고서 확인",
@@ -163,7 +163,9 @@
     "2026-09-28 fixed scalp shadow-ledger cost reporting: gross zero-cost execution plans now persist separate actual policy costs and report gross plus net outcomes; reject scalp plans lacking reporting costs; legacy open plans and already-settled legacy scalp rows without stored actual costs no longer contaminate net-return/EV aggregates; targeted 8 tests and full 548-test safe suite, Ruff, git diff --check passed; no official gates or live portfolio changed",
     "2026-09-28 US_DAY timing audit: 2026-09-24 12:33 KST was exactly 153 minutes after the 10:00 KST US_DAY open; observed 139-154 bars therefore do not alone prove KIS data loss, while the 180-bar official gate necessarily blocks official evaluation until about 13:00 KST; inspect raw page timestamps and expected tradable-minute gaps before changing the fetcher or any gate",
     "2026-09-28 KIS overseas minute diagnostics: include request page count beside raw response rows, parsed rows, oldest/newest timestamps; targeted overseas tests and full safe suite passed with reserved tuning tests excluded, plus Ruff and diff-check; this enables future live raw-page diagnosis but does not retroactively prove missing bars",
-    "2026-09-28 engine-path audit: HistoryCache stores US_DAY bars in a session-only namespace and filters the fetch result to that session; scanner passes that one frame to evaluate(), where _analyze_structure derives both 3/5/15m structure and 1m trigger from it. The separate 3000-bar background warm-up is not passed into the evaluator as structural context. Thus 3000 is a retention/warm target, not a guaranteed 3000-bar signal-analysis input; fix requires distinct historical-structure and current-session-trigger inputs with explicit readiness, not just lowering the 180-bar official gate"
+    "2026-09-28 engine-path audit: HistoryCache stores US_DAY bars in a session-only namespace and filters the fetch result to that session; scanner passes that one frame to evaluate(), where _analyze_structure derives both 3/5/15m structure and 1m trigger from it. The separate 3000-bar background warm-up is not passed into the evaluator as structural context. Thus 3000 is a retention/warm target, not a guaranteed 3000-bar signal-analysis input; fix requires distinct historical-structure and current-session-trigger inputs with explicit readiness, not just lowering the 180-bar official gate",
+    "2026-09-28 local fix: pass current-session trigger bars separately from rolling US_REGULAR structural context (US extended sessions); clip both sources to completed bars as-of evaluation time; make 15m structure use the structural frame while session-specific 1/3/5m triggers remain on session bars; require exactly 3000 structural bars plus the session's own readiness for official ENTRY; US_DAY provisional evaluation floor is 30 current-session bars, never an official-entry bypass",
+    "2026-09-28 regression: incomplete 3000-bar context is forced provisional and a complete 3000-bar context preserves official ENTRY; 555 safe tests collected, full safe regression passed, Ruff and git diff --check passed; prohibited tuning tests excluded; compileall not counted (protected __pycache__ permission failure); live KIS history depth and Render deployment remain unverified"
   ],
   "files": {
     "config.py": "created; qualification/risk/cost/data/model and scanner deadline-margin settings centralized",
@@ -223,7 +225,7 @@
     "non_15m_strategy_downtrend_gate_fixed": true,
     "public_strategy_rejection_diagnostics_added": true,
     "latest_safe_operational_test_count": 528,
-    "latest_local_safe_test_count": 548,
+    "latest_local_safe_test_count": 555,
     "latest_local_safe_test_exclusions": [
       "tests/test_controlled_tuning.py",
       "tests/test_controlled_tuning_audit.py",
@@ -276,11 +278,11 @@
     "official_evidence": "actual KIS one-minute bars with point-in-time candidate universe"
   },
   "next_actions": [
-    "P0: split immutable rolling structural context (up to 3000 actual KIS 1m bars) from the current session's signal/trigger bars; prove the historical source can supply the context for US_DAY, keep VWAP/session patterns scoped to the trigger session, and only permit official ENTRY when the strategy's own required frames plus structural readiness are met. Then test early-session readiness without weakening costs, risk, or no-lookahead rules",
+    "P0: locally split rolling structural context (up to 3000 actual KIS 1m bars) from the current session trigger and gated official ENTRY on complete context; next verify with an active KIS session that US_REGULAR context actually backfills to 3000 bars for US_DAY symbols and measure any provider/session limitation before claiming early-session availability",
     "restore the Render service after identifying why it is suspended; then verify health, exact version badge, and resume a fresh active-session baseline without claiming the missed interval",
     "push session work batch after US baseline completes (scalp + session sequence + provisional floor; all green locally)",
     "egress diet IMPLEMENTED locally (diag JSON gated behind checkbox, top-5 blocks always visible, daemon idles off-session; full 541 green); push together after Oct 1 resume",
-    "US_DAY: compare raw KIS page row timestamps with the 10:00 KST open and each expected tradable minute to distinguish elapsed session time/no-trade bars from true fetch loss; current 180-bar gate blocks before about 13:00 KST, so design a strategy-specific current-session trigger over an intact, available 3000-bar structural context without promoting incomplete structures",
+    "US_DAY live audit: compare raw KIS page timestamps with the 10:00 KST open and expected tradable minutes; local current-session floor is now 30 bars but official ENTRY still requires 3000 completed structural bars and strategy-required trigger frames; establish whether KIS regular-session history can populate that separate context for each US_DAY candidate",
     "record live US probe: 2 cycles 35 attempted, 31-33 warming provisional, 34 evaluated/published, 0 false officials, VWAP formed-but-blocked 1; provisional gates proven at scale",
     "verify >=5 entry symbols and T1 reach on real KIS data after scanner completion; record evidence and report",
     "1-minute scalping IMPLEMENTED locally (2 profiles, separate SCALP portfolio + frame table, EV-measured, 8 tests green, full 536 green); push after US baseline completes",

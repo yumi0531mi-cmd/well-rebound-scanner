@@ -4,7 +4,7 @@ import logging
 import threading
 from collections.abc import Iterator
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timedelta
 from pathlib import Path
 from time import perf_counter
@@ -24,7 +24,7 @@ from config import (
 from .bar_store import CockroachBarStore, StoreStatus
 from .indicators import normalize_bars
 from .kis import KISClient
-from .models import Candidate, Market
+from .models import Candidate, Market, TradingSession
 from .sessions import KST, filter_session_bars, kr_session_window, session_exchange
 
 LOGGER = logging.getLogger(__name__)
@@ -90,6 +90,18 @@ class HistoryCache:
         return "KR-KRX-KR_REGULAR" if candidate.market == Market.KR else f"US-{candidate.exchange}-{candidate.session.value}"
 
     @staticmethod
+    def structural_candidate(candidate: Candidate) -> Candidate:
+        """Use US regular-session history as stable context for extended sessions."""
+        if candidate.market == Market.US and candidate.session != TradingSession.US_REGULAR:
+            return replace(candidate, session=TradingSession.US_REGULAR)
+        return candidate
+
+    def load_structural_bars(self, candidate: Candidate) -> pd.DataFrame:
+        """Load rolling context separately; never merge it into session triggers."""
+        structural = self.structural_candidate(candidate)
+        return self.load(structural.symbol, self._namespace(structural))
+
+    @staticmethod
     def _canonical_bars(frame: pd.DataFrame, namespace: str) -> pd.DataFrame:
         """Use naive exchange-local timestamps at every L1/L2 merge boundary."""
         data = normalize_bars(frame)
@@ -147,6 +159,9 @@ class HistoryCache:
             (self._namespace(candidate), candidate.symbol.upper()): candidate
             for candidate in candidates
         }
+        for candidate in candidates:
+            structural = self.structural_candidate(candidate)
+            unique[(self._namespace(structural), structural.symbol.upper())] = structural
         with self._state_lock:
             pending = [key for key in unique if key not in self._durable_loaded]
         if not pending:
@@ -165,7 +180,7 @@ class HistoryCache:
                     else normalize_bars(pd.concat([current, remote])).tail(STRUCTURAL_WINDOW_BARS)
                 )
                 self._durable_loaded.add(durable_key)
-        return len(pending)
+        return len({symbol for _, symbol in pending})
 
     def merge(self, symbol: str, incoming: pd.DataFrame, namespace: str = "KR-KRX-KR_REGULAR") -> pd.DataFrame:
         path = self.path(symbol, namespace)
@@ -396,14 +411,15 @@ class HistoryCache:
                 return 0
             ranked = []
             for candidate in candidates:
-                if candidate.key not in self._warm_futures:
-                    count = len(self.load(candidate.symbol, self._namespace(candidate)))
+                structural = self.structural_candidate(candidate)
+                if structural.key not in self._warm_futures:
+                    count = len(self.load_structural_bars(candidate))
                     if count < self.WARM_TARGET_BARS:
-                        ranked.append((count >= WARMUP_BARS, -count, candidate.key, candidate))
+                        ranked.append((count >= WARMUP_BARS, -count, structural.key, structural))
             scheduled = 0
-            for _, _, _, candidate in sorted(ranked)[:slots]:
-                self._warm_futures[candidate.key] = self._warm_executor.submit(
-                    self._warm_candidate, client, candidate, self.WARM_TARGET_BARS
+            for _, _, key, structural in sorted(ranked)[:slots]:
+                self._warm_futures[key] = self._warm_executor.submit(
+                    self._warm_candidate, client, structural, self.WARM_TARGET_BARS
                 )
                 scheduled += 1
             return scheduled

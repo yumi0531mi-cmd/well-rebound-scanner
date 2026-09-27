@@ -345,9 +345,11 @@ class StructuralAnalysis:
     opportunity_rejections: tuple[tuple[str, tuple[str, ...]], ...] = ()
 
 
-def _analyze_structure(bars, live_price, session, reference, indicator_cache, active_strategies):
+def _analyze_structure(bars, live_price, session, reference, indicator_cache, active_strategies,
+                       structural_bars=None):
     """Pure computations shared across live, replay and stronger-only trials."""
-    frame15 = completed_resample(bars, 15, now=reference)
+    context_bars = bars if structural_bars is None else structural_bars
+    frame15 = completed_resample(context_bars, 15, now=reference)
     frame5 = completed_resample(bars, 5, now=reference)
     frame3 = completed_resample(bars, 3, now=reference)
     transition_ready = len(frame15) >= TRANSITION_MIN_15M_BARS
@@ -399,6 +401,7 @@ def evaluate(
     strategy_portfolio: tuple[Strategy, ...] | None = None,
     classification_portfolio: tuple[Strategy, ...] | None = None,
     analysis_identity: object | None = None,
+    structural_bars: pd.DataFrame | None = None,
 ) -> ScanResult:
     evaluated_at = now or datetime.now(UTC)
     if not np.isfinite(live_price) or live_price <= 0:
@@ -425,6 +428,19 @@ def evaluate(
     # Validate every supplied completed row, including before a possible hit.
     # Invalid revised inputs must never be hidden by cache reuse.
     bars = normalize_bars(bars).tail(STRUCTURAL_WINDOW_BARS)
+    context_bars = bars
+    if structural_bars is not None:
+        context_bars = normalize_bars(structural_bars)
+        if reference is not None and not context_bars.empty:
+            context_reference = reference
+            if context_bars.index.tz is None and context_reference.tzinfo is not None:
+                context_reference = context_reference.tz_localize(None)
+            elif context_bars.index.tz is not None and context_reference.tzinfo is None:
+                context_reference = context_reference.tz_localize(context_bars.index.tz)
+            context_bars = context_bars.loc[
+                context_bars.index + pd.Timedelta(minutes=1) <= context_reference
+            ]
+        context_bars = context_bars.tail(STRUCTURAL_WINDOW_BARS)
     minute_diffs = bars.index.to_series().diff().dropna() if len(bars) > 1 else pd.Series(dtype="timedelta64[ns]")
     intraday_gaps = minute_diffs[(minute_diffs > pd.Timedelta(minutes=1)) & (minute_diffs <= pd.Timedelta(hours=4))]
     missing_minutes = int(
@@ -459,13 +475,22 @@ def evaluate(
     def build():
         return _analyze_structure(
             bars, signal_price, session, reference, indicator_cache, classified_strategies,
+            structural_bars=context_bars,
         )
     if analysis_cache is None:
         structure = build()
     else:
-        cache_key = (
+        source_identity = (
             analysis_identity if analysis_identity is not None
-            else analysis_key(bars, signal_price, session, reference),
+            else analysis_key(bars, signal_price, session, reference)
+        )
+        if structural_bars is not None:
+            source_identity = (
+                source_identity,
+                analysis_key(context_bars, signal_price, session, reference),
+            )
+        cache_key = (
+            source_identity,
             tuple(strategy.value for strategy in classified_strategies),
         )
         structure = analysis_cache.get_or_create(cache_key, build)
@@ -666,6 +691,9 @@ def evaluate(
             "missing_intraday_minutes": missing_minutes,
             "maximum_intraday_gap_minutes": maximum_gap_minutes,
             "bars_1m": len(bars),
+            "signal_bars_1m": len(bars),
+            "structural_bars_1m": len(context_bars),
+            "structural_latest_bar_at": context_bars.index[-1].isoformat() if not context_bars.empty else None,
             "bars_15m": count15,
             "bars_5m": count5,
             "bars_3m": count3,

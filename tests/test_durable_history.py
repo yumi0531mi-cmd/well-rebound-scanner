@@ -4,7 +4,7 @@ import pandas as pd
 
 from wellscan.bar_store import CockroachBarStore, StoreCooldownError, StoreStatus, _render_safe_database_url
 from wellscan.history import HistoryCache
-from wellscan.models import Candidate
+from wellscan.models import Candidate, Market, TradingSession
 
 
 def frame(start: str, periods: int, base: float = 100) -> pd.DataFrame:
@@ -227,6 +227,26 @@ def test_candidate_preload_keeps_full_3000_bars_and_avoids_individual_reads(tmp_
 
     assert cache.preload_candidates(candidates) == 2
     assert all(len(cache.load(item.symbol)) == 3000 for item in candidates)
+    assert durable.loads == 0
+
+
+def test_us_day_preload_restores_separate_regular_structural_window(tmp_path) -> None:
+    class BatchStore(FakeDurableStore):
+        def load_many(self, requests, limit):
+            assert limit == 3000
+            assert ("US-NAS-US_REGULAR", "AAPL") in requests
+            return {key: self.stored for key in requests}
+
+    candidate = Candidate(
+        "AAPL", "Apple", 200, 1, 1, 1,
+        market=Market.US, exchange="NAS", session=TradingSession.US_DAY,
+    )
+    durable = BatchStore(frame("2026-08-20 09:30", 3000))
+    cache = HistoryCache(tmp_path, durable_store=durable)  # type: ignore[arg-type]
+
+    assert cache.preload_candidates((candidate,)) == 1
+    assert len(cache.load_structural_bars(candidate)) == 3000
+    assert len(cache.load(candidate.symbol, cache._namespace(candidate))) == 3000
     assert durable.loads == 0
 
 

@@ -83,6 +83,47 @@ def test_warmup_skips_a_cache_that_already_meets_target(tmp_path) -> None:
     assert client.calls == 0
 
 
+def test_us_day_structural_cache_uses_regular_session_namespace(tmp_path) -> None:
+    candidate = Candidate(
+        "AAPL", "Apple", 200, 1, 1, 1,
+        market=Market.US, exchange="NAS", session=TradingSession.US_DAY,
+    )
+    cache = HistoryCache(tmp_path, use_environment=False)
+    regular = HistoryCache.structural_candidate(candidate)
+    cache.merge(candidate.symbol, minute_frame("2026-08-20 09:30", 3000), cache._namespace(regular))
+
+    context = cache.load_structural_bars(candidate)
+
+    assert regular.session == TradingSession.US_REGULAR
+    assert len(context) == 3000
+    assert cache._namespace(candidate) != cache._namespace(regular)
+
+
+def test_us_day_warmup_targets_regular_structural_history(tmp_path) -> None:
+    from concurrent.futures import Future
+
+    class QueuedExecutor:
+        def __init__(self):
+            self.candidates = []
+
+        def submit(self, function, client, candidate, target):
+            del function, client, target
+            self.candidates.append(candidate)
+            return Future()
+
+    candidate = Candidate(
+        "AAPL", "Apple", 200, 1, 1, 1,
+        market=Market.US, exchange="NAS", session=TradingSession.US_DAY,
+    )
+    cache = HistoryCache(tmp_path, use_environment=False)
+    cache._warm_executor.shutdown(wait=True)
+    executor = QueuedExecutor()
+    cache._warm_executor = executor  # type: ignore[assignment]
+
+    assert cache.schedule_warmup(object(), (candidate,)) == 1  # type: ignore[arg-type]
+    assert executor.candidates[0].session == TradingSession.US_REGULAR
+
+
 def test_warmup_queue_is_bounded_and_prioritizes_near_admission(tmp_path) -> None:
     from concurrent.futures import Future
 

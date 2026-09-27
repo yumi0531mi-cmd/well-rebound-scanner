@@ -83,6 +83,46 @@ def test_same_right_edge_but_different_left_edge_cannot_share_snapshot(tmp_path)
     assert cache.misses == 3 and cache.hits == 1
 
 
+def test_structural_context_is_independent_from_current_session_triggers(tmp_path):
+    source = mock_bars(3200, timezone="America/New_York")
+    signal = source.iloc[3000:3150]
+    now = instant(signal)
+
+    result = evaluate(
+        "SPLIT-CONTEXT", signal, float(signal.close.iloc[-1]),
+        memory_store(tmp_path, "split-context"), now=now,
+        session=TradingSession.US_DAY, structural_bars=source,
+    )
+
+    assert result.diagnostics["signal_bars_1m"] == 150
+    assert result.diagnostics["bars_1m"] == 150
+    assert result.diagnostics["structural_bars_1m"] == 3000
+    assert result.diagnostics["bars_15m"] >= 150
+    assert pd.Timestamp(result.diagnostics["structural_latest_bar_at"]) == signal.index[-1]
+
+
+def test_structural_context_revision_invalidates_analysis_cache(tmp_path):
+    source = mock_bars(3200, timezone="America/New_York")
+    signal = source.iloc[3000:3150]
+    context = source.iloc[:3150].copy()
+    revised = context.copy()
+    revised.loc[revised.index[200], "close"] += 0.01
+    revised.loc[revised.index[200], "high"] += 0.01
+    cache = AnalysisCache()
+    now = instant(signal)
+
+    for structural in (context, revised, context):
+        evaluate(
+            "CACHE-CONTEXT", signal, float(signal.close.iloc[-1]),
+            memory_store(tmp_path, "cache-context"), now=now,
+            session=TradingSession.US_DAY, structural_bars=structural,
+            analysis_cache=cache,
+        )
+
+    assert cache.misses == 2
+    assert cache.hits == 1
+
+
 @pytest.mark.parametrize("column", OHLCV)
 def test_every_revised_ohlcv_value_including_volume_invalidates_snapshot(tmp_path, column):
     source = mock_bars()

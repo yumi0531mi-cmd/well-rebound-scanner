@@ -6,7 +6,9 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pandas as pd
+import pytest
 
+from config import PROVISIONAL_MIN_BARS
 from wellscan.history import HistoryCache
 from wellscan.kis import KISClient, KISDeadlineError, KISError
 from wellscan.models import ALL_ENTRY_STRATEGIES, Candidate, Market, RiskState, ScanResult, Stage, Strategy, TradeLevels, TradingSession
@@ -434,6 +436,86 @@ def test_warming_band_evaluates_provisionally_without_official_record(tmp_path):
     assert breakdown["final_buy"] == 0
 
 
+def test_incomplete_structural_context_cannot_publish_official_entry(tmp_path):
+    class PartialContextHistory(FakeHistory):
+        def load_structural_bars(self, candidate):
+            del candidate
+            return bars()
+
+    observed = {}
+
+    def evaluator(symbol, frame, price, store, **kwargs):
+        del symbol, frame, price, store
+        observed["context_rows"] = len(kwargs["structural_bars"])
+        return ScanResult(
+            "KR:KRX:KR_REGULAR:005930", kwargs["now"], Stage.FINAL_BUY,
+            Strategy.RANGE_REVERSAL, RiskState.NORMAL, 100, None, None, None, None,
+            TradeLevels(entry=100, target1=104, target2=106, hard_stop=99, soft_stop=99.5),
+            {"FINAL_BUY": True}, diagnostics={"classification_assessments": {}},
+        )
+
+    validation = FakeValidation()
+    service = ScannerService(
+        config(tmp_path, initial_history_bars=2, tracking_history_bars=3000),
+        client=FakeClient([Candidate("005930", "S", 70000, 1, 100, 1000)]),
+        history=PartialContextHistory(), sequences=object(), validations=validation,
+        clock=lambda: NOW, session_resolver=resolver(), evaluator=evaluator,
+        live_revalidator=lambda result, price, now: result,
+    )
+
+    assert service.run_cycle()
+    published = service.results_snapshot().sessions[0].results[0][1]
+    breakdown = service.snapshot().discovery_breakdown["KR:KR_REGULAR"]
+    assert observed["context_rows"] == 2
+    assert published.stage == Stage.CANDIDATE
+    assert any("구조 분봉 2/3000" in reason for reason in published.reasons)
+    assert validation.recorded == []
+    assert breakdown["structural_ready"] == 0
+    assert breakdown["structural_below_3000"] == 1
+
+
+def test_complete_structural_context_preserves_official_entry_path(tmp_path):
+    context = pd.DataFrame(
+        {"open": 100.0, "high": 101.0, "low": 99.0, "close": 100.5, "volume": 1000.0},
+        index=pd.date_range(end="2026-09-07 10:00", periods=3000, freq="min"),
+    )
+
+    class CompleteContextHistory(FakeHistory):
+        def load_structural_bars(self, candidate):
+            del candidate
+            return context.copy()
+
+    observed = {}
+
+    def evaluator(symbol, frame, price, store, **kwargs):
+        del symbol, frame, price, store
+        observed["context_rows"] = len(kwargs["structural_bars"])
+        return ScanResult(
+            "KR:KRX:KR_REGULAR:005930", kwargs["now"], Stage.FINAL_BUY,
+            Strategy.RANGE_REVERSAL, RiskState.NORMAL, 100, None, None, None, None,
+            TradeLevels(entry=100, target1=104, target2=106, hard_stop=99, soft_stop=99.5),
+            {"FINAL_BUY": True}, diagnostics={"classification_assessments": {}},
+        )
+
+    validation = FakeValidation()
+    service = ScannerService(
+        config(tmp_path, initial_history_bars=2, tracking_history_bars=3000),
+        client=FakeClient([Candidate("005930", "S", 70000, 1, 100, 1000)]),
+        history=CompleteContextHistory(), sequences=object(), validations=validation,
+        clock=lambda: NOW, session_resolver=resolver(), evaluator=evaluator,
+        live_revalidator=lambda result, price, now: result,
+    )
+
+    assert service.run_cycle()
+    published = service.results_snapshot().sessions[0].results[0][1]
+    breakdown = service.snapshot().discovery_breakdown["KR:KR_REGULAR"]
+    assert observed["context_rows"] == 3000
+    assert published.stage == Stage.FINAL_BUY
+    assert len(validation.recorded) == 1
+    assert breakdown["structural_ready"] == 1
+    assert breakdown["structural_below_3000"] == 0
+
+
 def test_stale_symbol_skipped_after_three_strikes(tmp_path):
     service = ScannerService(
         config(tmp_path),
@@ -517,12 +599,12 @@ def test_below_provisional_floor_stays_data_wait(tmp_path):
     assert service.snapshot().counters["data_wait_observations"] == 1
 
 
-def test_us_day_below_target_is_provisional_not_official(tmp_path):
+def test_us_day_incomplete_structural_context_is_provisional_not_official(tmp_path):
     import time as _time
 
     frame = pd.DataFrame(
         {"open": 200.0, "high": 201.0, "low": 199.0, "close": 200.5, "volume": 1000.0},
-        index=pd.date_range(end="2026-09-04 03:59", periods=100, freq="min", tz="America/New_York"),
+        index=pd.date_range(end="2026-09-04 03:29", periods=100, freq="min", tz="America/New_York"),
     )
     friday = pd.Timestamp("2026-09-04 03:30", tz="America/New_York").to_pydatetime()
 
@@ -532,13 +614,19 @@ def test_us_day_below_target_is_provisional_not_official(tmp_path):
             RiskState.NORMAL, 100, None, None, None, None,
             TradeLevels(entry=200, target1=208, target2=212, hard_stop=198, soft_stop=199),
             {"FINAL_BUY": True}, diagnostics={"classification_assessments": {}},
-        )
+    )
 
     validation = FakeValidation()
+
+    class DayHistory(FakeHistory):
+        def load_structural_bars(self, candidate):
+            del candidate
+            return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
+
     service = ScannerService(
         config(tmp_path, initial_history_bars=250),
         client=FakeClient([Candidate("AAPL", "A", 200, 1, 100, 1000, market=Market.US, exchange="NAS", session=TradingSession.US_DAY)]),
-        history=FakeHistory(frame), sequences=object(), validations=validation,
+        history=DayHistory(frame), sequences=object(), validations=validation,
         clock=lambda: friday,
         session_resolver=lambda market, now: SessionStatus(Market.US, TradingSession.US_DAY, True, "test"),
         evaluator=evaluator, live_revalidator=lambda result, price, now: result,
@@ -732,6 +820,8 @@ def test_candidate_limit_is_derived_from_kis_call_budget():
     assert budgeted_candidate_limit(Market.KR, 10, 80) == 10
     assert budgeted_candidate_limit(Market.US, 10, 80) == 5
     assert budgeted_candidate_limit(Market.KR, 4, 80) == 0
+    with pytest.raises(ValueError, match="fixed at 3000"):
+        ScannerServiceConfig(tracking_history_bars=900)
 
 
 def test_cycle_uses_last_completed_close_and_common_engine(tmp_path):
@@ -1035,7 +1125,12 @@ def test_us_day_partial_history_is_provisional(tmp_path):
         "AAPL", "Apple", 100, 1, 1, 1,
         market=Market.US, exchange="NAS", session=TradingSession.US_DAY,
     )
-    history = FakeHistory(frame)
+    class DayHistory(FakeHistory):
+        def load_structural_bars(self, candidate):
+            del candidate
+            return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
+
+    history = DayHistory(frame)
     validation = FakeValidation()
     evaluated = []
 
@@ -1063,7 +1158,7 @@ def test_us_day_partial_history_is_provisional(tmp_path):
 
     service.run_cycle()
 
-    assert history.calls == [(candidate.key, HistoryCache.INITIAL_READY_BARS)]
+    assert history.calls == [(candidate.key, PROVISIONAL_MIN_BARS)]
     assert evaluated and evaluated[0][0] == candidate.key
     assert validation.nonfinal
     assert not validation.recorded
