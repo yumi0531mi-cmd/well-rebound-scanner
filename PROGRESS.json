@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-09-28T01:08:26+09:00",
+  "updated_at": "2026-09-28T03:12:10+09:00",
   "current_step": 3,
   "completed_steps": [
     "기존 저장소와 인계 보고서 확인",
@@ -161,7 +161,8 @@
     "2026-09-27 multi-symbol 5/5 complete (diagnostic, fixed symbols): 005930x9/T10, 000660x3/T10, 035420x3/T10, 068270x1/T10, 105560x0; combined with frozen 010170 table = 25 fills, 5 T1 (20%); still below 50-fill bar, no verdict, no claim",
     "2026-09-28 takeover audit: latest local HEAD 1f68177, tracking ref ca65d0b (23 local commits ahead; remote not freshly verified because GitHub network request failed); no Python workers found; safe regression rerun passed with reserved tuning tests excluded; Ruff and git diff --check passed; 30-899-bar evaluation remains provisional and cannot publish ENTRY; fixed-symbol 25/5 remains diagnostic only",
     "2026-09-28 fixed scalp shadow-ledger cost reporting: gross zero-cost execution plans now persist separate actual policy costs and report gross plus net outcomes; reject scalp plans lacking reporting costs; legacy open plans and already-settled legacy scalp rows without stored actual costs no longer contaminate net-return/EV aggregates; targeted 8 tests and full 548-test safe suite, Ruff, git diff --check passed; no official gates or live portfolio changed",
-    "2026-09-28 US_DAY timing audit: 2026-09-24 12:33 KST was exactly 153 minutes after the 10:00 KST US_DAY open; observed 139-154 bars therefore do not alone prove KIS data loss, while the 180-bar official gate necessarily blocks official evaluation until about 13:00 KST; inspect raw page timestamps and expected tradable-minute gaps before changing the fetcher or any gate"
+    "2026-09-28 US_DAY timing audit: 2026-09-24 12:33 KST was exactly 153 minutes after the 10:00 KST US_DAY open; observed 139-154 bars therefore do not alone prove KIS data loss, while the 180-bar official gate necessarily blocks official evaluation until about 13:00 KST; inspect raw page timestamps and expected tradable-minute gaps before changing the fetcher or any gate",
+    "2026-09-28 KIS overseas minute diagnostics: include request page count beside raw response rows, parsed rows, oldest/newest timestamps; targeted overseas tests and full safe suite passed with reserved tuning tests excluded, plus Ruff and diff-check; this enables future live raw-page diagnosis but does not retroactively prove missing bars"
   ],
   "files": {
     "config.py": "created; qualification/risk/cost/data/model and scanner deadline-margin settings centralized",
@@ -235,7 +236,7 @@
     "daemon_shadow_22_strategy_diagnostics_implemented": true,
     "first_live_shadow_sample": "US_PRE: 6 evaluated, inactive TREND_PULLBACK formed 1, active actionable 0; incomplete cycle",
     "latest_live_shadow_sample": "US_REGULAR: 36 evaluated, inactive TREND_PULLBACK 6 + TREND_CONTINUATION 6 + VWAP_RECLAIM 3 formed, active formations 0, unknown products 14",
-    "zero_entry_root_cause": "복합 원인: 미국 데이장 라이브 후보는 140개(선택 80개)지만 평가 34개 원본 분봉 중앙값 139·최대 154로 모두 180봉 미달했고 누락분봉 종목 31·stale skip 46·상품미확인 12가 발생; 22개 형성·비용통과·policy_ready·ENTRY가 모두 0. 이전 미국 정규장 표본에서는 형성 후 비용/RR 차단도 확인됐으며 승인된 1분 스캘핑은 아직 OFF/shadow 구현 전",
+    "zero_entry_root_cause": "복합 원인(실측 2026-09-24 12:33 KST): US_DAY 후보 union 140·selected 80·attempted/evaluated/published 34; 139~154 bars는 10:00 KST 개장 후 153분과 일치해 그 자체로 KIS 누락 증거가 아니며, 180봉 게이트상 약 13:00 KST 전 공식 평가가 막힘. gap_symbols 31은 원본 페이지 행·무체결 분봉 대조 전까지 실제 응답 손실로 단정 금지; stale skip 46·product_unknown 12는 별도 병목. 해당 표본에서 형성/비용/policy/ENTRY 0. 미국 정규장 형성 후 비용/RR 차단도 별도 실측됨. 1분 scalp 2종은 로컬 shadow-only이고 official ENTRY에 미포함; shadow EV 비용 계산은 2026-09-28 로컬 수정으로 보정됨",
     "latest_live_us_day_pipeline_sample": "2026-09-24 12:33 KST: union 140, selected 80, attempted/evaluated/published 34, bars median 139 max 154 target 180, history_below_180 34, gap_symbols 31, stale_skipped 46, product_unknown 12, formed/cost/policy/ENTRY 0",
     "render_service_status": "SUSPENDED at 2026-09-24 22:34 KST; root and /_stcore/health returned Service Suspended"
   },

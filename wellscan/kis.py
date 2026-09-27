@@ -592,6 +592,7 @@ class KISClient:
         rows: list[dict[str, Any]] = []
         keyb = before
         used_cursors = {before} if before else set()
+        pages = 0
         for page in range(max(1, min(10, (max_records + 119) // 120))):
             continuation_page = bool(before) or page > 0
             payload, continuation = self.get(
@@ -600,6 +601,7 @@ class KISClient:
                  "NEXT": "1" if continuation_page else "", "NREC": "120", "FILL": "", "KEYB": keyb},
                 "N" if continuation_page else "",
             )
+            pages += 1
             batch = [row for row in payload.get("output2", []) if isinstance(row, dict)]
             rows.extend(batch)
             if not batch or len(rows) >= max_records or continuation not in {"M", "F"}:
@@ -629,12 +631,13 @@ class KISClient:
             except (KeyError, TypeError, ValueError) as exc:
                 raise KISError("해외 분봉 파싱 실패") from exc
         if not records:
-            LOGGER.info("kis_minute_input market=US symbol=%s exchange=%s raw_rows=%s parsed_rows=0", symbol, exchange, len(rows))
+            LOGGER.info("kis_minute_input market=US symbol=%s exchange=%s pages=%s raw_rows=%s parsed_rows=0",
+                        symbol, exchange, pages, len(rows))
             return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
         result = normalize_bars(pd.DataFrame(records).set_index("timestamp"))
         LOGGER.info(
-            "kis_minute_input market=US symbol=%s exchange=%s raw_rows=%s parsed_rows=%s oldest=%s newest=%s",
-            symbol, exchange, len(rows), len(result), result.index.min(), result.index.max(),
+            "kis_minute_input market=US symbol=%s exchange=%s pages=%s raw_rows=%s parsed_rows=%s oldest=%s newest=%s",
+            symbol, exchange, pages, len(rows), len(result), result.index.min(), result.index.max(),
         )
         return result
 

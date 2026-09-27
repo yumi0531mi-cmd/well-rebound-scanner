@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 
 import pytest
@@ -29,8 +30,9 @@ def test_overseas_minute_continuation_uses_before_key(tmp_path: Path) -> None:
     assert calls[0]["KEYB"] == "20260820092900"
 
 
-def test_overseas_minute_cursor_uses_earliest_row_even_when_page_is_unsorted(tmp_path: Path) -> None:
+def test_overseas_minute_cursor_uses_earliest_row_even_when_page_is_unsorted(tmp_path: Path, caplog) -> None:
     client = KISClient(tmp_path)
+    caplog.set_level(logging.INFO, logger="wellscan.kis")
     calls: list[dict[str, str]] = []
 
     def row(clock: str) -> dict[str, str]:
@@ -47,6 +49,7 @@ def test_overseas_minute_cursor_uses_earliest_row_even_when_page_is_unsorted(tmp
 
     assert len(frame) == 4
     assert calls[1]["KEYB"] == "20260820092700"
+    assert "pages=2 raw_rows=4 parsed_rows=4" in caplog.text
 
 
 def test_overseas_minute_repeated_page_is_explicit_error(tmp_path: Path) -> None:
