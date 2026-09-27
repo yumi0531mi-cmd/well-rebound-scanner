@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-09-28T01:03:03+09:00",
+  "updated_at": "2026-09-28T01:06:34+09:00",
   "current_step": 3,
   "completed_steps": [
     "기존 저장소와 인계 보고서 확인",
@@ -160,7 +160,8 @@
     "2026-09-27 multi-symbol now 16 fills (005930x9, 000660x3, 035420x3, 068270x1); 105560 relaunched; still far below 50-fill verdict bar, no win-rate claim",
     "2026-09-27 multi-symbol 5/5 complete (diagnostic, fixed symbols): 005930x9/T10, 000660x3/T10, 035420x3/T10, 068270x1/T10, 105560x0; combined with frozen 010170 table = 25 fills, 5 T1 (20%); still below 50-fill bar, no verdict, no claim",
     "2026-09-28 takeover audit: latest local HEAD 1f68177, tracking ref ca65d0b (23 local commits ahead; remote not freshly verified because GitHub network request failed); no Python workers found; safe regression rerun passed with reserved tuning tests excluded; Ruff and git diff --check passed; 30-899-bar evaluation remains provisional and cannot publish ENTRY; fixed-symbol 25/5 remains diagnostic only",
-    "2026-09-28 fixed scalp shadow-ledger cost reporting: gross zero-cost execution plans now persist separate actual policy costs and report gross plus net outcomes; reject scalp plans lacking reporting costs; legacy open scalp records without stored actual costs report net as unavailable instead of gross-as-net; targeted 8 tests and full 548-test safe suite, Ruff, git diff --check passed; no official gates or live portfolio changed"
+    "2026-09-28 fixed scalp shadow-ledger cost reporting: gross zero-cost execution plans now persist separate actual policy costs and report gross plus net outcomes; reject scalp plans lacking reporting costs; legacy open scalp records without stored actual costs report net as unavailable instead of gross-as-net; targeted 8 tests and full 548-test safe suite, Ruff, git diff --check passed; no official gates or live portfolio changed",
+    "2026-09-28 US_DAY timing audit: 2026-09-24 12:33 KST was exactly 153 minutes after the 10:00 KST US_DAY open; observed 139-154 bars therefore do not alone prove KIS data loss, while the 180-bar official gate necessarily blocks official evaluation until about 13:00 KST; inspect raw page timestamps and expected tradable-minute gaps before changing the fetcher or any gate"
   ],
   "files": {
     "config.py": "created; qualification/risk/cost/data/model and scanner deadline-margin settings centralized",
@@ -276,7 +277,7 @@
     "restore the Render service after identifying why it is suspended; then verify health, exact version badge, and resume a fresh active-session baseline without claiming the missed interval",
     "push session work batch after US baseline completes (scalp + session sequence + provisional floor; all green locally)",
     "egress diet IMPLEMENTED locally (diag JSON gated behind checkbox, top-5 blocks always visible, daemon idles off-session; full 541 green); push together after Oct 1 resume",
-    "fix and verify US_DAY minute backfill/warmup so candidates reach 180 then 900 and retain 3000-bar structural tracking; investigate 31 gap symbols and 46 stale skips without relaxing gates",
+    "US_DAY: compare raw KIS page row timestamps with the 10:00 KST open and each expected tradable minute to distinguish elapsed session time/no-trade bars from true fetch loss; current 180-bar gate blocks before about 13:00 KST, so design a strategy-specific current-session trigger over an intact, available 3000-bar structural context without promoting incomplete structures",
     "record live US probe: 2 cycles 35 attempted, 31-33 warming provisional, 34 evaluated/published, 0 false officials, VWAP formed-but-blocked 1; provisional gates proven at scale",
     "verify >=5 entry symbols and T1 reach on real KIS data after scanner completion; record evidence and report",
     "1-minute scalping IMPLEMENTED locally (2 profiles, separate SCALP portfolio + frame table, EV-measured, 8 tests green, full 536 green); push after US baseline completes",
