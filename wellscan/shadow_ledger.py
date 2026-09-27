@@ -413,6 +413,7 @@ class ShadowLedger:
             counters = dict(self.counters)
         by_strategy: dict[str, dict[str, int]] = {}
         by_session: dict[str, dict[str, Any]] = {}
+        scalp_values = {item.value for item in SCALP_STRATEGIES}
         open_plans = 0
         pending_transmit = 0
         net_values: list[float] = []
@@ -433,6 +434,11 @@ class ShadowLedger:
             if bucket in {"T1", "T2"}:
                 session_entry["hits"] += 1
             net_pct = outcome.get("net_pct")
+            if strategy in scalp_values and outcome.get("cost_status") != "NET_COSTS_APPLIED":
+                # Older settled scalp rows stored gross return in the legacy
+                # net field. Keep their price-hit outcome, but exclude them
+                # from net-return/EV aggregates unless real costs are proven.
+                net_pct = None
             if isinstance(net_pct, (int, float)) and math.isfinite(net_pct):
                 net_values.append(float(net_pct))
                 session_nets.setdefault(session, []).append(float(net_pct))

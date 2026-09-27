@@ -166,3 +166,9 @@ def test_ledger_opens_and_settles_scalp(tmp_path):
     assert outcome["cost_status"] == "NET_COSTS_APPLIED"
     state = record["state"]
     assert outcome["net_pct"] == round(COSTS.net_return(state["entry_price"], state["proceeds"]), 3)
+    record["outcome"]["net_pct"] = record["outcome"]["gross_pct"]
+    record["outcome"].pop("cost_status")
+    ledger._write_record(record["day"], record["plan_id"], record)
+    legacy_summary = ledger.summary()
+    assert legacy_summary["by_strategy"]["1분 눌림 진입"]["T2"] == 1
+    assert legacy_summary["avg_net_pct"] is None
