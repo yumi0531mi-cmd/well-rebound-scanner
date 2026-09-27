@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-09-28T03:12:10+09:00",
+  "updated_at": "2026-09-28T03:14:30+09:00",
   "current_step": 3,
   "completed_steps": [
     "기존 저장소와 인계 보고서 확인",
@@ -162,7 +162,8 @@
     "2026-09-28 takeover audit: latest local HEAD 1f68177, tracking ref ca65d0b (23 local commits ahead; remote not freshly verified because GitHub network request failed); no Python workers found; safe regression rerun passed with reserved tuning tests excluded; Ruff and git diff --check passed; 30-899-bar evaluation remains provisional and cannot publish ENTRY; fixed-symbol 25/5 remains diagnostic only",
     "2026-09-28 fixed scalp shadow-ledger cost reporting: gross zero-cost execution plans now persist separate actual policy costs and report gross plus net outcomes; reject scalp plans lacking reporting costs; legacy open plans and already-settled legacy scalp rows without stored actual costs no longer contaminate net-return/EV aggregates; targeted 8 tests and full 548-test safe suite, Ruff, git diff --check passed; no official gates or live portfolio changed",
     "2026-09-28 US_DAY timing audit: 2026-09-24 12:33 KST was exactly 153 minutes after the 10:00 KST US_DAY open; observed 139-154 bars therefore do not alone prove KIS data loss, while the 180-bar official gate necessarily blocks official evaluation until about 13:00 KST; inspect raw page timestamps and expected tradable-minute gaps before changing the fetcher or any gate",
-    "2026-09-28 KIS overseas minute diagnostics: include request page count beside raw response rows, parsed rows, oldest/newest timestamps; targeted overseas tests and full safe suite passed with reserved tuning tests excluded, plus Ruff and diff-check; this enables future live raw-page diagnosis but does not retroactively prove missing bars"
+    "2026-09-28 KIS overseas minute diagnostics: include request page count beside raw response rows, parsed rows, oldest/newest timestamps; targeted overseas tests and full safe suite passed with reserved tuning tests excluded, plus Ruff and diff-check; this enables future live raw-page diagnosis but does not retroactively prove missing bars",
+    "2026-09-28 engine-path audit: HistoryCache stores US_DAY bars in a session-only namespace and filters the fetch result to that session; scanner passes that one frame to evaluate(), where _analyze_structure derives both 3/5/15m structure and 1m trigger from it. The separate 3000-bar background warm-up is not passed into the evaluator as structural context. Thus 3000 is a retention/warm target, not a guaranteed 3000-bar signal-analysis input; fix requires distinct historical-structure and current-session-trigger inputs with explicit readiness, not just lowering the 180-bar official gate"
   ],
   "files": {
     "config.py": "created; qualification/risk/cost/data/model and scanner deadline-margin settings centralized",
@@ -275,6 +276,7 @@
     "official_evidence": "actual KIS one-minute bars with point-in-time candidate universe"
   },
   "next_actions": [
+    "P0: split immutable rolling structural context (up to 3000 actual KIS 1m bars) from the current session's signal/trigger bars; prove the historical source can supply the context for US_DAY, keep VWAP/session patterns scoped to the trigger session, and only permit official ENTRY when the strategy's own required frames plus structural readiness are met. Then test early-session readiness without weakening costs, risk, or no-lookahead rules",
     "restore the Render service after identifying why it is suspended; then verify health, exact version badge, and resume a fresh active-session baseline without claiming the missed interval",
     "push session work batch after US baseline completes (scalp + session sequence + provisional floor; all green locally)",
     "egress diet IMPLEMENTED locally (diag JSON gated behind checkbox, top-5 blocks always visible, daemon idles off-session; full 541 green); push together after Oct 1 resume",
