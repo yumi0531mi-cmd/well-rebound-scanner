@@ -14,7 +14,12 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import pandas as pd
 
-from config import BACKTEST_MAX_STORED_BARS, DURABLE_PREFETCH_SYMBOLS_PER_QUERY, STRUCTURAL_WINDOW_BARS
+from config import (
+    BACKTEST_MAX_STORED_BARS,
+    DURABLE_PREFETCH_SYMBOLS_PER_QUERY,
+    STRUCTURAL_CONTEXT_SEED_BARS,
+    STRUCTURAL_WINDOW_BARS,
+)
 
 from .indicators import normalize_bars
 
@@ -549,8 +554,8 @@ class CockroachBarStore:
             raise StoreUnavailableError(self._last_error or "영구 분봉 읽기 실패") from exc
 
     def load_recent(self, namespace: str, symbol: str) -> pd.DataFrame:
-        """Latency-bounded view for the live engine."""
-        return self.load(namespace, symbol, limit=STRUCTURAL_WINDOW_BARS)
+        """Bounded entry-context seed; deeper history is fetched on demand."""
+        return self.load(namespace, symbol, limit=STRUCTURAL_CONTEXT_SEED_BARS)
 
     def load_many(
         self, requests: list[tuple[str, str]], limit: int = STRUCTURAL_WINDOW_BARS

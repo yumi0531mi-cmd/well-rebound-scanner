@@ -245,7 +245,8 @@ if st.query_params.get("admin") == "backtest":
         st.dataframe(_audit_rows, use_container_width=True, hide_index=True)
         st.caption("각 기법을 단독 포트폴리오로 실행했습니다. 시장별 비용 모델(국내 왕복 0.43% 가정)과 동일 엔진을 유지합니다.")
         with st.expander("22개 전체 원본 리포트 JSON"):
-            st.json(_batch_reports)
+            if st.checkbox("원본 리포트 전송", value=False, key="audit_22_raw_report"):
+                st.json(_batch_reports)
         st.stop()
     st.subheader("📊 백테스트 리포트")
     st.subheader("기법별 1차 목표 도달 성적표")
@@ -260,15 +261,16 @@ if st.query_params.get("admin") == "backtest":
     _access = _report.get("access_time_coverage", {})
     if _access.get("eligible_instants"):
         _access_columns = st.columns(4)
-        _access_columns[0].metric("검증된 1분 시각", f"{_access['eligible_instants']:,}")
+        _access_columns[0].metric("검증 대상 1분 시각", f"{_access['eligible_instants']:,}")
         _access_columns[1].metric("최소 평가 종목", _access["minimum_candidates_evaluated"])
         _access_columns[2].metric("최소 진입대기 종목", _access["minimum_actionable_symbols"])
         _access_columns[3].metric("5종목 충족 시각", f"{_access['actionable_minimum_pass_pct']:.2f}%")
+        st.caption(f"평가 기록 없는 시각 {_access.get('unevaluated_instants', 0):,}개도 미충족으로 포함합니다.")
         if _access["minimum_actionable_symbols"] < MIN_UNIQUE_ENTRIES_PER_SESSION:
             st.warning("장중 어느 시각에 접속해도 진입대기 종목 5개 이상이라는 기준을 충족하지 못했습니다.")
     else:
-        st.warning("동시에 5종목 이상을 평가한 1분 시각이 없어 임의 접속시각 기준을 판정할 수 없습니다.")
-    st.caption("각 완료 1분봉 시각의 진입가 대기·진입신호 종목을 동시에 집계하며, 일일 합계로 대체하지 않습니다.")
+        st.warning("검증 대상 거래일과 1분 시각이 없어 임의 접속시각 기준을 판정할 수 없습니다.")
+    st.caption("거래일의 장 시작부터 종료 전까지 1분 간격으로 집계합니다. 후보·데이터·평가 누락 시각을 포함합니다.")
     if not _report["sample_at_least_50"]:
         st.warning(f"시장별 최소 {MIN_TRADES_PER_MARKET}건 미충족 · 배포 판정 불가")
     st.subheader("신호 부족 원인 진단")
@@ -311,7 +313,8 @@ if st.query_params.get("admin") == "backtest":
         st.subheader("거래별 결과")
         st.dataframe(_report["trades"], use_container_width=True)
     with st.expander("전체 리포트 JSON"):
-        st.json(_report)
+        if st.checkbox("원본 리포트 전송", value=False, key="backtest_raw_report"):
+            st.json(_report)
     st.stop()
 # ── 백테스트 관리자 끝 ──
 
@@ -627,6 +630,19 @@ def render_result(candidate: Candidate, result: ScanResult, *, actionable: bool 
         for strategy, details in shadow_assessments.items()
         if isinstance(details, dict)
     )
+    flow_status = str(result.diagnostics.get("flow_30m_status") or "UNKNOWN_SESSION")
+    flow_direction = str(result.diagnostics.get("flow_30m_direction") or "미확정")
+    flow_change = result.diagnostics.get("flow_30m_change_pct")
+    flow_bars = int(result.diagnostics.get("bars_30m_session") or 0)
+    if flow_status in {"AVAILABLE", "PARTIAL_SESSION"} and isinstance(flow_change, (int, float)):
+        flow_prefix = "당일" if flow_status == "AVAILABLE" else "부분"
+        flow_30m_text = f"{flow_prefix} {flow_direction} {flow_change:+.2f}% · {flow_bars}봉"
+    elif flow_status == "WAITING_30M_CLOSE":
+        flow_30m_text = "첫 완료 30분봉 대기"
+    elif flow_status == "INCOMPLETE_30M_DATA":
+        flow_30m_text = "30분봉 원본 데이터 불완전"
+    else:
+        flow_30m_text = "미확정"
     if actionable:
         tile_class = "buy" if result.final_buy and quote_available else "waiting"
         engine_status_text = _stage_text(result.stage)
@@ -657,6 +673,7 @@ def render_result(candidate: Candidate, result: ScanResult, *, actionable: bool 
             f'<div class="action-cell">T1 {price_text(levels.target1, "T1 구조 미산출")}</div>'
             f'<div class="action-cell">T2 {price_text(levels.target2, "T2 구조 미산출")}</div>'
             f'<div class="action-cell">추세 {html.escape(result.trend_label)}</div>'
+            f'<div class="action-cell">30분 당일 흐름 {html.escape(flow_30m_text)}</div>'
             f'<div class="action-cell">진입 ETA {html.escape(entry_eta)}</div>'
             f'<div class="action-cell">T1 ETA {html.escape(target1_eta)}</div>'
             f'<div class="action-cell">T2 ETA {html.escape(target2_eta)}</div>'
@@ -683,11 +700,12 @@ def render_result(candidate: Candidate, result: ScanResult, *, actionable: bool 
             unsafe_allow_html=True,
         )
         _live_price_content(quote)
-        summary = st.columns(4)
+        summary = st.columns(5)
         summary[0].metric("1차 순손익비", price_text(result.diagnostics.get("net_rr_target1")))
         summary[1].metric("추세", result.trend_label)
-        summary[2].metric("Swing 폭", price_text(result.net_swing_pct) + "%" if result.net_swing_pct is not None else "미확정")
-        summary[3].metric("활성 기법", f"{len(result.matched_strategies)}개")
+        summary[2].metric("30분 당일 흐름", flow_30m_text)
+        summary[3].metric("Swing 폭", price_text(result.net_swing_pct) + "%" if result.net_swing_pct is not None else "미확정")
+        summary[4].metric("활성 기법", f"{len(result.matched_strategies)}개")
         levels = result.levels
         level_columns = st.columns(4)
         entry_label = "확정 진입가" if result.stage == Stage.FINAL_BUY else "관찰 진입가"

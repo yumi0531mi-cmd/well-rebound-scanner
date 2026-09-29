@@ -7,7 +7,7 @@ import math
 import tempfile
 from collections import defaultdict
 from collections.abc import Callable
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -30,12 +30,12 @@ from .execution import ENTRY_VALID_BARS, Bar, Phase, Plan, State, entry_price_fo
 from .execution import advance as advance_execution
 from .indicators import IndicatorCache, normalize_bars
 from .kis import KISClient
-from .models import Candidate, Market, Stage, TradingSession
+from .models import ACTIVE_STRATEGIES, Candidate, Market, Stage, TradingSession
 from .objective_report import objective_tables
 from .policy import Costs, TradingPolicy, capped_stop, liquidation_deadline, session_day
-from .probability import attach_walk_forward_estimates
+from .probability import attach_walk_forward_estimates, signal_feature_snapshot
 from .sequence import SequenceStore
-from .sessions import ENABLED_SESSIONS, filter_session_bars
+from .sessions import ENABLED_SESSIONS, filter_session_bars, kr_session_window, us_session_window
 from .statistics import win_rate_interval
 
 LOGGER = logging.getLogger(__name__)
@@ -46,13 +46,33 @@ def _valid_level(value: float | None) -> bool:
     return value is not None and math.isfinite(value) and value > 0
 
 
-def _access_time_summary(evaluated, actionable, immediate) -> dict[str, Any]:
+def _expected_access_instants(coverage, session, *, as_of=None) -> set[str]:
+    """Include active minute boundaries even when no candidate was evaluated."""
+    instants = set()
+    zone = ZoneInfo("Asia/Seoul" if session == TradingSession.KR_REGULAR else "America/New_York")
+    current = pd.Timestamp(as_of or datetime.now(UTC))
+    if current.tzinfo is None:
+        raise ValueError("접속시각 검증에는 시간대가 필요합니다")
+    for day in {value for dates in coverage.values() for value in dates}:
+        trading_day = date.fromisoformat(day)
+        window = kr_session_window(trading_day) if session == TradingSession.KR_REGULAR else us_session_window(session, trading_day)
+        if window is not None:
+            opened, closed = (pd.Timestamp(value).tz_convert(zone) for value in window)
+            closed = min(closed, current.tz_convert(zone))
+            if closed <= opened:
+                continue
+            instants.update(stamp.isoformat() for stamp in pd.date_range(opened, closed, freq="min", inclusive="left"))
+    return instants
+
+
+def _access_time_summary(evaluated, actionable, immediate, *, expected_instants=()) -> dict[str, Any]:
     """Measure exact-minute availability, including minutes with too little data."""
-    instants = sorted(evaluated)
+    instants = sorted(set(evaluated) | set(expected_instants))
     if not instants:
         return {
             "definition": "exact completed-minute continuously evaluated portfolio snapshot",
             "eligible_instants": 0,
+            "unevaluated_instants": 0,
             "minimum_actionable_symbols": None,
             "actionable_minimum_pass_pct": None,
             "minimum_immediate_entry_symbols": None,
@@ -65,7 +85,8 @@ def _access_time_summary(evaluated, actionable, immediate) -> dict[str, Any]:
     return {
         "definition": "exact completed-minute continuously evaluated portfolio snapshot",
         "eligible_instants": len(instants),
-        "minimum_candidates_evaluated": min(len(evaluated[stamp]) for stamp in instants),
+        "unevaluated_instants": sum(not evaluated.get(stamp) for stamp in instants),
+        "minimum_candidates_evaluated": min(len(evaluated.get(stamp, ())) for stamp in instants),
         "minimum_actionable_symbols": min(actionable_counts),
         "actionable_minimum_pass_pct": sum(value >= minimum for value in actionable_counts) / len(instants) * 100,
         "minimum_immediate_entry_symbols": min(immediate_counts),
@@ -506,12 +527,18 @@ def run(client: KISClient, days: int = 3, top_n: int = 10, market: Market = Mark
                         execution_counts["policy_blocked_evaluations"] += 1
                         for reason in str(policy_reasons).split(" | "):
                             policy_block_reason_counts[reason] += 1
-                    net_rr_blocked = bool(
-                        policy_reasons and "비용 차감 후 1차 목표 손익비 1.0 미달" in str(policy_reasons)
-                    )
-                    if result.matched_strategies and not net_rr_blocked:
+                    assessments = result.diagnostics.get("classification_assessments", {})
+                    assessments = assessments if isinstance(assessments, dict) else {}
+                    cost_passed = []
+                    for strategy in result.matched_strategies:
+                        assessment = assessments.get(strategy.value)
+                        if not isinstance(assessment, dict):
+                            execution_counts["cost_assessment_unavailable"] += 1
+                        elif assessment.get("planned_cost_pass") is True:
+                            cost_passed.append(strategy)
+                    if cost_passed:
                         execution_counts["cost_valid_structure_evaluations"] += 1
-                        for strategy in result.matched_strategies:
+                        for strategy in cost_passed:
                             cost_valid_strategy_counts[strategy.value] += 1
                     if result.final_buy:
                         execution_counts["signal_evaluations"] += 1
@@ -555,6 +582,7 @@ def run(client: KISClient, days: int = 3, top_n: int = 10, market: Market = Mark
                         minimum_rr=policy.minimum_rr,
                         structural_stop=float(structural_stop),
                     )
+                    signal_features = signal_feature_snapshot(result)
                     execution_state, entry_idx, exit_idx = _advance_plan_over_bars(
                         bars,
                         plan,
@@ -586,9 +614,14 @@ def run(client: KISClient, days: int = 3, top_n: int = 10, market: Market = Mark
                     outcome = _outcome_from_state(execution_state, exit_idx, entry_price)
                     reward = policy.costs.net_return(entry_price, float(result.levels.target1))
                     risk = -policy.costs.net_return(entry_price, stop)
+                    exit_time = pd.Timestamp(execution_state.exit_at)
+                    outcome_known_at = exit_time.to_pydatetime() + timedelta(minutes=1)
                     trades.append({
                         "symbol": candidate.symbol, "name": candidate.name, "strategy": result.strategy.value,
-                        "signal_at": str(bars.index[index]), "entry_at": str(bars.index[entry_idx]), "exit_at": str(bars.index[exit_idx]),
+                        "market": market.value, "session": session.value,
+                        "signal_at": instant.isoformat(), "signal_bar_at": str(bars.index[index]),
+                        "entry_at": fill_time.isoformat(), "exit_at": exit_time.isoformat(),
+                        "outcome_known_at": outcome_known_at.isoformat(),
                         "entry": round(entry_price, 4), "target1": result.levels.target1, "target2": result.levels.target2,
                         "soft_stop": result.levels.soft_stop, "hard_stop": stop,
                         "planned_hard_stop": result.levels.hard_stop,
@@ -600,7 +633,8 @@ def run(client: KISClient, days: int = 3, top_n: int = 10, market: Market = Mark
                         "evidence_confidence": result.evidence_confidence,
                         "pattern_fatigue": result.pattern_fatigue,
                         "net_swing_pct": result.net_swing_pct,
-                        "atr_pct": float(atr) / entry_price * 100,
+                        "atr_pct": signal_features["atr_pct"],
+                        "probability_features": signal_features,
                         "volume_ratio_3m": result.diagnostics.get("volume_ratio_3m"),
                         "volatility_z": result.diagnostics.get("volatility_z"),
                         "trend_persistence": result.diagnostics.get("trend_persistence"),
@@ -613,14 +647,12 @@ def run(client: KISClient, days: int = 3, top_n: int = 10, market: Market = Mark
                         "mae_pct": round(float(outcome["mae_pct"]), 3),
                     })
                     execution_counts["resolved_entries"] += 1
-                    exit_time = pd.Timestamp(bars.index[exit_idx])
-                    exit_time = exit_time.tz_localize(timezone) if exit_time.tzinfo is None else exit_time.tz_convert(timezone)
                     outcome_name = str(outcome["result"])
                     exit_kind = ("HARD_STOP" if "HARD_STOP" in outcome_name else
                                  "SOFT_STOP" if "SOFT_STOP" in outcome_name else
                                  "SESSION_CLOSE" if "SESSION_CLOSE" in outcome_name else "TARGET")
                     store.settle(candidate.key, f"exit:{bars.index[entry_idx]}:{exit_time}", exit_kind,
-                                 (exit_time + pd.Timedelta(minutes=1)).to_pydatetime(), session=session,
+                                 outcome_known_at, session=session,
                                  position_id=position_id)
                     index = max(index + 1, exit_idx + 1)
             except Exception as exc:
@@ -629,7 +661,7 @@ def run(client: KISClient, days: int = 3, top_n: int = 10, market: Market = Mark
     report = _build_report(trades, market, days, candidates, errors, coverage)
     report["probability_model"] = attach_walk_forward_estimates(trades)
     report["session"] = session.value
-    report["diagnostic_schema_version"] = 3
+    report["diagnostic_schema_version"] = 4
     report["stage_counts"] = dict(stage_counts)
     report["non_entry_reason_counts"] = dict(rejection_counts)
     report["matched_strategy_counts"] = dict(matched_strategy_counts)
@@ -643,6 +675,7 @@ def run(client: KISClient, days: int = 3, top_n: int = 10, market: Market = Mark
         evaluated_symbols_by_instant,
         actionable_symbols_by_instant,
         immediate_symbols_by_instant,
+        expected_instants=_expected_access_instants(coverage, session),
     )
     report["execution_counts"] = dict(execution_counts)
     report["fill_bar_rejection_counts"] = fill_bar_rejection_counts
@@ -651,7 +684,8 @@ def run(client: KISClient, days: int = 3, top_n: int = 10, market: Market = Mark
     report["point_in_time_universe"] = candidate_eligibility is not None
     report["universe_counts"] = dict(universe_counts)
     report["universe_coverage_complete"] = not universe_counts.get("missing_or_stale_snapshot_bars", 0)
-    report.update(objective_tables(trades, coverage, session, errors=errors))
+    report.update(objective_tables(trades, coverage, session, errors=errors,
+                                  strategies=[item.value for item in (strategy_portfolio or ACTIVE_STRATEGIES)]))
     if candidates_override is not None:
         report["assumptions"]["bias_warning"] = "외부 지정 종목 표본: 당시 전시장 후보군 아님 · 표본 선정편향 존재"
     if candidate_eligibility is not None:

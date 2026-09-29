@@ -17,8 +17,8 @@ from config import (
     HISTORY_INITIAL_READY_BARS,
     HISTORY_WARM_TARGET_BARS,
     HISTORY_WARMUP_QUEUE_LIMIT,
+    STRUCTURAL_CONTEXT_SEED_BARS,
     STRUCTURAL_WINDOW_BARS,
-    WARMUP_BARS,
 )
 
 from .bar_store import CockroachBarStore, StoreStatus
@@ -97,9 +97,13 @@ class HistoryCache:
         return candidate
 
     def load_structural_bars(self, candidate: Candidate) -> pd.DataFrame:
-        """Load rolling context separately; never merge it into session triggers."""
+        """Return available rolling context, seeded cheaply and deepened on demand."""
         structural = self.structural_candidate(candidate)
-        return self.load(structural.symbol, self._namespace(structural))
+        return self.load(
+            structural.symbol,
+            self._namespace(structural),
+            limit=STRUCTURAL_WINDOW_BARS,
+        )
 
     @staticmethod
     def _canonical_bars(frame: pd.DataFrame, namespace: str) -> pd.DataFrame:
@@ -111,7 +115,14 @@ class HistoryCache:
         data.index = data.index.tz_convert(timezone).tz_localize(None)
         return normalize_bars(data)
 
-    def load(self, symbol: str, namespace: str = "KR-KRX-KR_REGULAR") -> pd.DataFrame:
+    def load(
+        self,
+        symbol: str,
+        namespace: str = "KR-KRX-KR_REGULAR",
+        limit: int = STRUCTURAL_CONTEXT_SEED_BARS,
+    ) -> pd.DataFrame:
+        if limit <= 0:
+            raise ValueError("분봉 조회 한도는 양수여야 합니다")
         path = self.path(symbol, namespace)
         try:
             local = pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
@@ -123,8 +134,20 @@ class HistoryCache:
             with self._state_lock:
                 durable_missing = durable_key not in self._durable_loaded
             if self._durable_store is not None and durable_missing:
-                loader = getattr(self._durable_store, "load_recent", self._durable_store.load)
-                remote = self._canonical_bars(loader(namespace, symbol), namespace)
+                loader = getattr(self._durable_store, "load_recent", None)
+                if callable(loader):
+                    restored = loader(namespace, symbol)
+                else:
+                    loader = self._durable_store.load
+                    try:
+                        restored = loader(
+                            namespace,
+                            symbol,
+                            limit=min(STRUCTURAL_CONTEXT_SEED_BARS, limit),
+                        )
+                    except TypeError:
+                        restored = loader(namespace, symbol)
+                remote = self._canonical_bars(restored, namespace).tail(STRUCTURAL_CONTEXT_SEED_BARS)
                 if not self._durable_store.status().available:
                     raise RuntimeError("영구 분봉 읽기 실패: " + self._durable_store.status().last_error)
                 with self._state_lock:
@@ -135,14 +158,18 @@ class HistoryCache:
                         if existing_remote is None or existing_remote.empty
                         else normalize_bars(
                             pd.concat([self._canonical_bars(existing_remote, namespace), remote])
-                        ).tail(3000)
+                        ).tail(STRUCTURAL_WINDOW_BARS)
                     )
             with self._state_lock:
                 remote = self._durable_frames.get(durable_key)
                 remote = None if remote is None else remote.copy()
             if remote is not None and not remote.empty:
-                local = remote.copy() if local.empty else normalize_bars(pd.concat([remote, local])).tail(3000)
-            return local
+                local = (
+                    remote.copy()
+                    if local.empty
+                    else normalize_bars(pd.concat([remote, local])).tail(STRUCTURAL_WINDOW_BARS)
+                )
+            return local.tail(min(limit, STRUCTURAL_WINDOW_BARS))
         except (OSError, ValueError, KeyError) as exc:
             raise RuntimeError(f"분봉 캐시 읽기 실패: {namespace}:{symbol}") from exc
 
@@ -151,7 +178,7 @@ class HistoryCache:
             return self._metrics.get(candidate.key)
 
     def preload_candidates(self, candidates: tuple[Candidate, ...]) -> int:
-        """Restore every candidate's full structural window in DB-side batches."""
+        """Restore a bounded 900-bar context seed in DB-side batches."""
         loader = getattr(self._durable_store, "load_many", None)
         if not callable(loader) or not candidates:
             return 0
@@ -166,13 +193,16 @@ class HistoryCache:
             pending = [key for key in unique if key not in self._durable_loaded]
         if not pending:
             return 0
-        restored = loader(pending, limit=STRUCTURAL_WINDOW_BARS)
+        seed_limit = min(STRUCTURAL_CONTEXT_SEED_BARS, STRUCTURAL_WINDOW_BARS)
+        restored = loader(pending, limit=seed_limit)
         if not self._durable_store.status().available:
             raise RuntimeError("영구 분봉 묶음 읽기 실패: " + self._durable_store.status().last_error)
         with self._state_lock:
             for durable_key in pending:
                 namespace, _ = durable_key
-                remote = self._canonical_bars(restored.get(durable_key, pd.DataFrame()), namespace)
+                remote = self._canonical_bars(
+                    restored.get(durable_key, pd.DataFrame()), namespace
+                ).tail(seed_limit)
                 current = self._durable_frames.get(durable_key)
                 self._durable_frames[durable_key] = (
                     remote
@@ -188,14 +218,14 @@ class HistoryCache:
         if self._durable_store is None:
             path.parent.mkdir(parents=True, exist_ok=True)
             with FileLock(str(path) + ".lock", timeout=5):
-                existing = self.load(symbol, namespace)
+                existing = self.load(symbol, namespace, limit=STRUCTURAL_WINDOW_BARS)
                 combined = incoming.copy() if existing.empty else pd.concat([existing, incoming])
                 combined = normalize_bars(combined).tail(STRUCTURAL_WINDOW_BARS)
                 temporary = path.with_suffix(".tmp")
                 combined.to_csv(temporary, index_label="timestamp")
                 temporary.replace(path)
         else:
-            existing = self.load(symbol, namespace)
+            existing = self.load(symbol, namespace, limit=STRUCTURAL_WINDOW_BARS)
             combined = incoming.copy() if existing.empty else pd.concat([existing, incoming])
             combined = normalize_bars(combined).tail(STRUCTURAL_WINDOW_BARS)
         if self._durable_store is not None:
@@ -266,7 +296,10 @@ class HistoryCache:
 
     def backfill(self, client: KISClient, symbol: str, target_bars: int = 1000, max_days: int = 12) -> pd.DataFrame:
         """Compatibility wrapper for domestic callers."""
-        cached = self.load(symbol)
+        cached = self.load(
+            symbol,
+            limit=min(max(target_bars, STRUCTURAL_CONTEXT_SEED_BARS), STRUCTURAL_WINDOW_BARS),
+        )
         result, _, _ = self._domestic_backfill(client, symbol, cached, target_bars, max_days)
         return result
 
@@ -324,7 +357,11 @@ class HistoryCache:
         started = perf_counter()
         namespace = self._namespace(candidate)
         load_started = perf_counter()
-        cached = self.load(candidate.symbol, namespace)
+        cached = self.load(
+            candidate.symbol,
+            namespace,
+            limit=min(max(target_bars, STRUCTURAL_CONTEXT_SEED_BARS), STRUCTURAL_WINDOW_BARS),
+        )
         load_seconds = perf_counter() - load_started
         cached_before = len(cached)
         if candidate.market == Market.KR:
@@ -388,14 +425,24 @@ class HistoryCache:
                             error=f"{type(exc).__name__}: {exc}",
                         )
 
-    def schedule_warmup(self, client: KISClient, candidates: tuple[Candidate, ...]) -> int:
-        """Continue bounded 3000-bar warm-up without building an unbounded queue.
+    def schedule_seed_warmup(self, client: KISClient, candidates: tuple[Candidate, ...]) -> int:
+        """Prepare basic context even before a history-dependent setup forms."""
+        return self.schedule_warmup(client, candidates, target_bars=STRUCTURAL_CONTEXT_SEED_BARS)
+
+    def schedule_warmup(
+        self, client: KISClient, candidates: tuple[Candidate, ...], *, target_bars: int | None = None,
+    ) -> int:
+        """Share one bounded queue between initial seeds and formed deep context.
 
         One background worker preserves the shared KIS request limiter and keeps
-        prolonged history paging out of the price/structure request path.  A
-        cold candidate nearest the 900-bar admission line is finished first;
-        admitted candidates then continue toward the 3000-bar contract.
+        prolonged history paging out of the price/structure request path. The
+        default 3000 target is reserved for formed setups; the seed wrapper
+        prepares 900 bars first so insufficient history cannot prevent its own
+        recovery. Both queues share the same worker and total slot limit.
         """
+        target = self.WARM_TARGET_BARS if target_bars is None else target_bars
+        if not isinstance(target, int) or not 0 < target <= STRUCTURAL_WINDOW_BARS:
+            raise ValueError("워밍업 목표는 구조 캐시 최대 범위 이내의 양수여야 합니다")
         with self._warm_lock:
             completed = {key: future for key, future in self._warm_futures.items() if future.done()}
             for key, future in completed.items():
@@ -409,17 +456,17 @@ class HistoryCache:
             slots = max(0, HISTORY_WARMUP_QUEUE_LIMIT - len(self._warm_futures))
             if not slots:
                 return 0
-            ranked = []
+            ranked = {}
             for candidate in candidates:
                 structural = self.structural_candidate(candidate)
                 if structural.key not in self._warm_futures:
                     count = len(self.load_structural_bars(candidate))
-                    if count < self.WARM_TARGET_BARS:
-                        ranked.append((count >= WARMUP_BARS, -count, structural.key, structural))
+                    if count < target:
+                        ranked[structural.key] = (-count, structural.key, structural)
             scheduled = 0
-            for _, _, key, structural in sorted(ranked)[:slots]:
+            for _, key, structural in sorted(ranked.values())[:slots]:
                 self._warm_futures[key] = self._warm_executor.submit(
-                    self._warm_candidate, client, structural, self.WARM_TARGET_BARS
+                    self._warm_candidate, client, structural, target
                 )
                 scheduled += 1
             return scheduled
@@ -427,11 +474,47 @@ class HistoryCache:
     def _warm_candidate(
         self, client: KISClient, candidate: Candidate, target_bars: int
     ) -> pd.DataFrame:
+        if target_bars > STRUCTURAL_CONTEXT_SEED_BARS:
+            self._restore_deep_history(candidate)
         scope = getattr(client, "metering_scope", None)
         if callable(scope):
             with scope(candidate.market.value, candidate.session.value):
                 return self.backfill_candidate(client, candidate, target_bars)
         return self.backfill_candidate(client, candidate, target_bars)
+
+    def _restore_deep_history(self, candidate: Candidate) -> None:
+        """Load stored deep context only after a formed setup schedules warm-up."""
+        structural = self.structural_candidate(candidate)
+        namespace = self._namespace(structural)
+        durable_key = (namespace, structural.symbol.upper())
+        with self._state_lock:
+            cached = self._durable_frames.get(durable_key)
+            if cached is not None and len(cached) >= STRUCTURAL_WINDOW_BARS:
+                return
+        store = self._durable_store
+        loader = getattr(store, "load", None)
+        if not callable(loader):
+            return
+        try:
+            try:
+                restored = loader(namespace, structural.symbol, limit=STRUCTURAL_WINDOW_BARS)
+            except TypeError:
+                restored = loader(namespace, structural.symbol)
+            if store is not None and not store.status().available:
+                raise RuntimeError("영구 분봉 깊은 복구 실패: " + store.status().last_error)
+            deep = self._canonical_bars(restored, namespace).tail(STRUCTURAL_WINDOW_BARS)
+            if deep.empty:
+                return
+            with self._state_lock:
+                current = self._durable_frames.get(durable_key)
+                self._durable_frames[durable_key] = (
+                    deep
+                    if current is None or current.empty
+                    else normalize_bars(pd.concat([current, deep])).tail(STRUCTURAL_WINDOW_BARS)
+                )
+                self._durable_loaded.add(durable_key)
+        except Exception as exc:
+            LOGGER.info("deep_history_restore_deferred symbol=%s error=%s", candidate.key, exc)
 
     def warmup_pending(self) -> int:
         with self._warm_lock:

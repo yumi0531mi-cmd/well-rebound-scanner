@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 
 from config import (
+    DAY_FLOW_TIMEFRAME_MINUTES,
     MAX_COMPLETED_BAR_AGE_SECONDS,
     STRATEGY_FRAME_REQUIREMENTS,
     STRUCTURAL_WINDOW_BARS,
@@ -32,9 +33,11 @@ from .policy import (
     capped_stop,
     enforce_live_deadline,
     live_rr_valid,
+    session_day,
 )
 from .probability import causal_factor_evidence
 from .sequence import SequenceStore, risk_day
+from .sessions import KST, NEW_YORK, kr_session_window, us_session_window
 from .strengthening import StrengtheningProfile, collect_evidence, filter_opportunities
 
 # 15-minute MA60 needs 900 completed one-minute bars. This remains the
@@ -386,6 +389,71 @@ def _analyze_structure(bars, live_price, session, reference, indicator_cache, ac
     )
 
 
+def completed_session_flow_30m(
+    one_minute_bars: pd.DataFrame,
+    session: TradingSession | None,
+    now: datetime,
+) -> dict[str, int | float | str | None]:
+    """Describe current-session open-to-last-closed 30m flow, never an entry gate."""
+    unavailable: dict[str, int | float | str | None] = {
+        "bars_30m_session": 0,
+        "flow_30m_status": "UNKNOWN_SESSION",
+        "flow_30m_direction": "미확정",
+        "flow_30m_change_pct": None,
+        "flow_30m_last_completed_at": None,
+    }
+    if session is None or session == TradingSession.CLOSED or now.tzinfo is None:
+        return unavailable
+
+    timezone = KST if session == TradingSession.KR_REGULAR else NEW_YORK
+    trading_day = session_day(session, now)
+    window = (
+        kr_session_window(trading_day)
+        if session == TradingSession.KR_REGULAR
+        else us_session_window(session, trading_day)
+    )
+    if window is None:
+        return {**unavailable, "flow_30m_status": "NO_SESSION_WINDOW"}
+
+    data = normalize_bars(one_minute_bars)
+    if data.empty:
+        return {**unavailable, "flow_30m_status": "NO_SESSION_BARS"}
+    if data.index.tz is not None:
+        data.index = data.index.tz_convert(timezone).tz_localize(None)
+    local_open = pd.Timestamp(window[0]).tz_convert(timezone).tz_localize(None)
+    local_close = pd.Timestamp(window[1]).tz_convert(timezone).tz_localize(None)
+    local_now = pd.Timestamp(now.astimezone(timezone).replace(tzinfo=None))
+    data = data.loc[(data.index >= local_open) & (data.index < local_close)]
+    if data.empty:
+        status = "WAITING_30M_CLOSE" if local_now < local_open + pd.Timedelta(minutes=30) else "NO_SESSION_BARS"
+        return {**unavailable, "flow_30m_status": status}
+
+    completed = completed_resample(data, DAY_FLOW_TIMEFRAME_MINUTES, now=local_now)
+    if completed.empty:
+        status = (
+            "WAITING_30M_CLOSE"
+            if local_now < local_open + pd.Timedelta(minutes=DAY_FLOW_TIMEFRAME_MINUTES)
+            else "INCOMPLETE_30M_DATA"
+        )
+        return {
+            **unavailable,
+            "flow_30m_status": status,
+        }
+
+    first_open = float(completed.open.iloc[0])
+    last_close = float(completed.close.iloc[-1])
+    change_pct = (last_close / first_open - 1.0) * 100.0
+    direction = "상승" if last_close > first_open else "하락" if last_close < first_open else "시가 부근"
+    complete_from_open = data.index[0] <= local_open + pd.Timedelta(minutes=1)
+    return {
+        "bars_30m_session": len(completed),
+        "flow_30m_status": "AVAILABLE" if complete_from_open else "PARTIAL_SESSION",
+        "flow_30m_direction": direction,
+        "flow_30m_change_pct": change_pct,
+        "flow_30m_last_completed_at": completed.index[-1].isoformat(),
+    }
+
+
 def evaluate(
     symbol: str,
     one_minute_bars: pd.DataFrame,
@@ -666,6 +734,7 @@ def evaluate(
         signal_price,
     )
     factor_evidence = causal_factor_evidence(bars, levels.entry, levels.target1)
+    session_flow_30m = completed_session_flow_30m(bars, session, evaluated_at)
     result = ScanResult(
         symbol=symbol,
         evaluated_at=evaluated_at,
@@ -694,6 +763,7 @@ def evaluate(
             "signal_bars_1m": len(bars),
             "structural_bars_1m": len(context_bars),
             "structural_latest_bar_at": context_bars.index[-1].isoformat() if not context_bars.empty else None,
+            **session_flow_30m,
             "bars_15m": count15,
             "bars_5m": count5,
             "bars_3m": count3,

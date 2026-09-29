@@ -124,7 +124,7 @@ def test_us_day_warmup_targets_regular_structural_history(tmp_path) -> None:
     assert executor.candidates[0].session == TradingSession.US_REGULAR
 
 
-def test_warmup_queue_is_bounded_and_prioritizes_near_admission(tmp_path) -> None:
+def test_warmup_queue_is_bounded_and_prioritizes_most_complete_context(tmp_path) -> None:
     from concurrent.futures import Future
 
     class QueuedExecutor:
@@ -149,4 +149,41 @@ def test_warmup_queue_is_bounded_and_prioritizes_near_admission(tmp_path) -> Non
     scheduled = cache.schedule_warmup(object(), candidates)  # type: ignore[arg-type]
 
     assert scheduled == cache.warmup_pending() == 4
-    assert executor.symbols == ["000001", "000002", "000005", "000004"]
+    assert executor.symbols == ["000004", "000003", "000001", "000002"]
+
+
+def test_empty_seed_is_scheduled_without_formation_and_shares_deep_queue(tmp_path):
+    from concurrent.futures import Future
+
+    class QueuedExecutor:
+        def __init__(self):
+            self.calls = []
+
+        def submit(self, function, client, candidate, target):
+            self.calls.append((candidate, target))
+            return Future()
+
+    cache = HistoryCache(tmp_path, use_environment=False)
+    cache._warm_executor.shutdown(wait=True)
+    cache._warm_executor = QueuedExecutor()
+    candidate = Candidate("AAPL", "Apple", 200, 1, 1, 1, market=Market.US,
+                          exchange="NAS", session=TradingSession.US_DAY)
+    assert cache.schedule_seed_warmup(object(), (candidate, candidate)) == 1
+    structural, target = cache._warm_executor.calls[0]
+    assert structural.session == TradingSession.US_REGULAR
+    assert target == 900
+    assert cache.schedule_warmup(object(), (candidate,)) == 0
+    assert cache.warmup_pending() == 1
+
+
+def test_seed_worker_never_restores_deep_3000_context(tmp_path, monkeypatch):
+    cache = HistoryCache(tmp_path, use_environment=False)
+    targets = []
+
+    def forbidden(_candidate):
+        raise AssertionError("seed warmup must not load 3000 rows")
+
+    monkeypatch.setattr(cache, "_restore_deep_history", forbidden)
+    monkeypatch.setattr(cache, "backfill_candidate", lambda client, candidate, target: targets.append(target))
+    cache._warm_candidate(object(), Candidate("005930", "Samsung", 100, 1, 1, 1), 900)
+    assert targets == [900]

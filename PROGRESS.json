@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-09-28T22:48:50+09:00",
+  "updated_at": "2026-09-29T09:05:55+09:00",
   "current_step": 3,
   "completed_steps": [
     "기존 저장소와 인계 보고서 확인",
@@ -184,6 +184,14 @@
     "2026-09-28 uncommitted work audit (other AI): probability trains on settled-only outcomes, objective tables mark small samples no-verdict, coverage denominator includes skipped minutes, 30m session flow is diagnostic-only; independently verified full suite minus 3 forbidden files: 575 passed, 0 failed; ruff clean, diff clean",
     "2026-09-28 OPEN POLICY QUESTION (needs explicit approval, not auto-resolved): uncommitted work lowers official ENTRY admission from 900-bar floor to 30-bar floor plus per-strategy frame checks, so official ENTRY no longer requires 3000-bar context (recorded per evaluation as deep_context_blocks_entry False). Thresholds, costs, and active-6 unchanged. Holding commit decision pending approval."
   ],
+  "resumption_2026_09_29": {
+    "policy_resolution": "Prior OPEN POLICY QUESTION resolved against user's explicit instruction to implement strategy-specific 1/3/5/15/30m roles and reduce/restructure 3000 bars if burdensome. 30 bars opens evaluation only; strategy-specific completed frames, fresh quote, original cost and risk checks remain mandatory. 900 is background seed, 3000 retained maximum; no active strategy or qualification target changed.",
+    "cold_context_fix": "History-dependent setups could not form from cold cache and therefore could not schedule history. Added pre-formation 900-bar seeds; formed-only 3000 deep requests share one worker/four-job bounded queue, deduplicated structural keys and existing KIS soft-call deferral. Seeds never restore 3000 DB rows.",
+    "verification": "81 targeted tests passed; full safe regression 578 passed, 0 failed, 12326 deprecation warnings. Seven excluded suites enumerated in verified_metrics. Full-repo Ruff passed with three inaccessible old pytest-directory warnings; diff-check passed. Fixture-based tests are not real market evidence.",
+    "data_access": "User selected a separate date-safe file, then said its path was unknown: no authorization to deserialize mixed-period PKLs. Both originals and auth cache remain unopened. No eligible separate file found in supplied directory. KIS_APP_KEY/KIS_APP_SECRET/DATABASE_URL absent in Process/User/Machine presence checks; values never displayed.",
+    "deployment": "Local only. No push, activation, secret/provider changes or deployment. Last Render public health HTTP503 at 2026-09-28 20:57:21 KST; deployed SHA/version fields are historical.",
+    "acceptance": "NOT_PROVEN. No new actual KIS replay, point-in-time five-symbol coverage or T1 evidence. A date-safe dataset or user-configured approved KIS runtime is required. Disputed previous diagnostic aggregate remains excluded."
+  },
   "files": {
     "config.py": "qualification/risk/cost/data/model and scanner deadline-margin settings centralized; UI status poll 30s and live-price options 30/60/120s locally",
     "FREE_RESOURCE_BUDGET.md": "provider ceilings, internal free-tier targets, measured-vs-unavailable usage, graceful-degradation policy, and recovery checklist; no false claim of automatic quota enforcement",
@@ -197,10 +205,10 @@
     "wellscan/validation.py": "signal-time features and unqualified probability/EV persisted",
     "wellscan/engine.py": "strategy-specific timeframe gates; 22-strategy assessments plus input-order/gap diagnostics and completed current-session 30m flow context (nonblocking)",
     "tests/test_engine_flow_30m.py": "30m current-session flow only includes completed candles and marks partial data; it is not an entry gate",
-    "wellscan/scanner_service.py": "900-bar fast seed; 3000-bar deep-context completeness is diagnostic/nonblocking and warmup runs only for formed setups; per-strategy timeframe checks, four-stage pipeline counters, rotation, deadlines, recovery, live coverage, and KIS REST cooldown fallback",
+    "wellscan/scanner_service.py": "30-bar evaluation fast path with strategy-specific readiness; bounded pre-formation 900-bar seeds and formed-only optional 3000 context; seed counter, pipeline, deadlines, recovery and cooldown fallback",
     "wellscan/realtime.py": "bounded per-record trailing schema extensions accepted; malformed boundaries rejected",
     "wellscan/kis.py": "thread-local deadline plus safe minute-input row/date/page logs without credentials",
-    "wellscan/history.py": "900-bar durable seed, up to 3000 available rolling context, deep durable restore only after a formed setup schedules bounded background warmup",
+    "wellscan/history.py": "900-bar durable/background seed independent of formation; shared bounded deduplicated seed/deep queue; retain up to 3000 rolling bars and restore deep context only for formed setups",
     "wellscan/bar_store.py": "serialized CockroachDB connection reused; bounded 900-bar live seed and batched reads; candidate and live access snapshots persisted",
     "tests/controlled_tuning.py": "active portfolio or selected one-strategy profiles; aggregate 80% goal and 70% acceptable floor; reserved dates blocked",
     "tests/research_setup_audit.py": "read-only 3000-bar rejection/near-miss diagnostic; reserved source intervals blocked"
@@ -234,17 +242,17 @@
     "inactive_16_best_sample_candidate": "D10-failed_breakdown-reclaim KR: 2/2 T1, insufficient sample",
     "inactive_16_official_performance": false,
     "live_access_snapshot_persistence_implemented": true,
-    "live_access_qualification_status": "COLLECTING_FROM_0.10.5_DEPLOYMENT",
+    "live_access_qualification_status": "BLOCKED_SERVICE_UNAVAILABLE_LAST_HEALTH_2026_09_28_2057_KST",
     "latest_deployed_commit": "ca65d0b",
     "strategy_specific_timeframes_implemented": true,
     "same_day_reentry_after_rearm_implemented": true,
     "strategy_22_kis_admin_audit_implemented": true,
-    "strategy_22_kis_retest_status": "READY_ON_RENDER_ADMIN_AUTH_REQUIRED",
+    "strategy_22_kis_retest_status": "BLOCKED_DATE_SAFE_DATA_OR_APPROVED_KIS_RUNTIME_REQUIRED",
     "false_shared_overheat_missed_fixed": true,
     "non_15m_strategy_downtrend_gate_fixed": true,
     "public_strategy_rejection_diagnostics_added": true,
     "latest_safe_operational_test_count": 528,
-    "latest_local_safe_test_count": 575,
+    "latest_local_safe_test_count": 578,
     "latest_local_safe_test_exclusions": [
       "tests/test_external_history.py",
       "tests/test_controlled_tuning.py",
@@ -255,8 +263,8 @@
       "tests/test_tuning_feasibility.py"
     ],
     "latest_local_candidate_change": "900-bar seed/optional 3000 context plus causal probability v2, live ATR feature completion, strategy-specific cost counts and full elapsed-session access-minute denominator; local only, source APP_VERSION unchanged because not deployed",
-    "latest_local_targeted_test_count": 70,
-    "latest_local_targeted_test_scope": "Intermediate targeted run: probability/backtest/objective/target/web suites, 70 passed; final expanded regression: 575 passed, 0 failed, 12325 deprecation warnings. No actual market data used for these unit regressions.",
+    "latest_local_targeted_test_count": 81,
+    "latest_local_targeted_test_scope": "Warmup/scanner/durable history: 81 passed. Full safe regression 2026-09-29 KST: 578 passed, 0 failed, 12326 warnings; seven suites excluded. No actual market data used.",
     "kis_rate_limit_continuity_contract": {
       "scanner_loop_stops_on_rest_cooldown": false,
       "candidate_source": "same-market/session recent snapshot only; explicitly marked fallback",
@@ -286,7 +294,8 @@
     "meaning": "conservative forward live audit dates, not the historical-backtest completion estimate"
   },
   "historical_kis_validation_plan": {
-    "can_start_immediately": true,
+    "can_start_immediately": false,
+    "current_blocker": "No approved KIS credentials present locally or permitted date-safe dataset. Mixed-period PKL access not authorized. Render last health HTTP503.",
     "kr_regular": "date-addressable KIS one-minute backfill is implemented",
     "us_pre_regular_after": "backward-cursor KIS one-minute backfill is implemented",
     "us_day": "current KIS contract supplies at most one day, so exact 60-day history requires forward collection",
@@ -322,6 +331,8 @@
     "official_evidence": "actual KIS one-minute bars with point-in-time candidate universe"
   },
   "next_actions": [
+    "P0 input: obtain separate KIS bars without reserved dates or have user configure KIS credentials in approved runtime secret store, never chat. Original PKLs unopened; frozen 010170 not rerun. Two fixed symbols cannot prove five-symbol access coverage.",
+    "P0 after data access: permitted-date point-in-time multi-symbol 22-strategy funnel and exact-minute coverage; distinguish formation/cost/signal/simulated fill/T1. Keep 80%/70%, original costs and market 50-fill minimum; report shortages, never invented performance.",
     "P0 continuity: keep the daemon/UI cycle alive under KIS cooldown, but never claim fresh actionable ENTRY without fresh KIS quote and completed bars; measure cache fallback duration and missed access minutes after service recovery",
     "P0 verify host-level continuity: Render suspension/free-hour/egress caps cannot be bypassed by code; after manual service recovery, measure actual quota use and establish a separate permitted failover plan before claiming uptime",
     "P1 implement/validate KIS WebSocket-to-minute cache only after confirming official KR/US trade fields, exchange timestamps, volume semantics, gaps, and session boundaries; current WebSocket publishes last ticks and is not yet the scanner's minute-bar source",
@@ -340,7 +351,7 @@
     "report formation, cost pass, fill, and T1 rates without claiming unqualified win rates; keep 2026-08-17 through 19 and holdout-candidates excluded",
     "retain the current active six until the new independent KIS audit produces sufficient evidence; do not promote tiny samples",
     "run immediate KIS historical backfill and causal point-in-time candidate reconstruction for sessions whose API supports it; do not wait for December",
-    "verify the first real KIS access snapshot in each active market session; 2026-09-21 is Sunday so no active-session sample exists yet",
+    "after recovery, use session_status at one aware instant for both KR/US and collect fresh active-session access snapshots; previous weekday assertion about 2026-09-21 was incorrect",
     "accumulate exact-minute live coverage and count incomplete or missing active-session minutes as failures rather than excluding them",
     "derive a causal setup or target-capacity selection rule from measured bottlenecks; reject it unless both entry count and T1 outcomes improve; preserve the 3000-bar maximum context for formed setups without making it a common gate",
     "continue actual KIS candidate snapshots, access snapshots, and 60-day minute cache; do not present Yahoo diagnostic results as qualification",

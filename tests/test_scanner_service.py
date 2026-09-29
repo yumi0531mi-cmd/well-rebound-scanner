@@ -546,7 +546,7 @@ def test_warming_band_evaluates_provisionally_without_official_record(tmp_path):
     assert breakdown["final_buy"] == 0
 
 
-def test_incomplete_structural_context_cannot_publish_official_entry(tmp_path):
+def test_incomplete_deep_context_does_not_block_strategy_ready_entry(tmp_path):
     class PartialContextHistory(FakeHistory):
         def load_structural_bars(self, candidate):
             del candidate
@@ -577,9 +577,11 @@ def test_incomplete_structural_context_cannot_publish_official_entry(tmp_path):
     published = service.results_snapshot().sessions[0].results[0][1]
     breakdown = service.snapshot().discovery_breakdown["KR:KR_REGULAR"]
     assert observed["context_rows"] == 2
-    assert published.stage == Stage.CANDIDATE
-    assert any("구조 분봉 2/3000" in reason for reason in published.reasons)
-    assert validation.recorded == []
+    assert published.stage == Stage.FINAL_BUY
+    assert published.diagnostics["deep_context_bars"] == 2
+    assert published.diagnostics["deep_context_complete"] is False
+    assert published.diagnostics["deep_context_blocks_entry"] is False
+    assert len(validation.recorded) == 1
     assert breakdown["structural_ready"] == 0
     assert breakdown["structural_below_3000"] == 1
 
@@ -709,14 +711,19 @@ def test_below_provisional_floor_stays_data_wait(tmp_path):
     assert service.snapshot().counters["data_wait_observations"] == 1
 
 
-def test_us_day_incomplete_structural_context_is_provisional_not_official(tmp_path):
+def test_us_day_deep_structural_context_is_not_an_entry_gate(tmp_path):
     import time as _time
 
     frame = pd.DataFrame(
         {"open": 200.0, "high": 201.0, "low": 199.0, "close": 200.5, "volume": 1000.0},
-        index=pd.date_range(end="2026-09-04 03:29", periods=100, freq="min", tz="America/New_York"),
+        index=pd.date_range("2026-09-07 20:02", periods=120, freq="min"),
     )
-    friday = pd.Timestamp("2026-09-04 03:30", tz="America/New_York").to_pydatetime()
+    now = datetime(2026, 9, 8, 2, 1, 30, tzinfo=UTC)
+
+    class DayClient(FakeClient):
+        def overseas_current_price(self, symbol, exchange):
+            self.price_calls.append((exchange, symbol))
+            return 200.5, 0.0, now.astimezone(UTC)
 
     def evaluator(symbol, frame, price, store, **kwargs):
         return ScanResult(
@@ -735,18 +742,18 @@ def test_us_day_incomplete_structural_context_is_provisional_not_official(tmp_pa
 
     service = ScannerService(
         config(tmp_path, initial_history_bars=250),
-        client=FakeClient([Candidate("AAPL", "A", 200, 1, 100, 1000, market=Market.US, exchange="NAS", session=TradingSession.US_DAY)]),
+        client=DayClient([Candidate("AAPL", "A", 200, 1, 100, 1000, market=Market.US, exchange="NAS", session=TradingSession.US_DAY)]),
         history=DayHistory(frame), sequences=object(), validations=validation,
-        clock=lambda: friday,
+        clock=lambda: now,
         session_resolver=lambda market, now: SessionStatus(Market.US, TradingSession.US_DAY, True, "test"),
         evaluator=evaluator, live_revalidator=lambda result, price, now: result,
     )
     status = SessionStatus(Market.US, TradingSession.US_DAY, True, "test")
     service._scan_session(status, _time.monotonic() + 60, 60)
-    assert validation.recorded == []
+    assert len(validation.recorded) == 1
     breakdown = service.snapshot().discovery_breakdown["US:US_DAY"]
-    assert breakdown["warming_provisional"] == 1
-    assert breakdown["final_buy"] == 0
+    assert breakdown["structural_below_3000"] == 1
+    assert breakdown["final_buy"] == 1
 
 
 def test_us_day_can_publish_with_30_session_bars_and_complete_structure(tmp_path):
@@ -956,6 +963,37 @@ def test_warmup_deferred_when_cycle_over_kis_budget(tmp_path):
     assert service.snapshot().counters["history_warmup_deferred"] == 1
 
 
+def test_cold_candidate_gets_seed_history_before_any_setup_forms(tmp_path):
+    scheduled = []
+
+    class SeedHistory(FakeHistory):
+        def load_structural_bars(self, candidate):
+            return self.frame.iloc[:0]
+
+        def schedule_seed_warmup(self, client, candidates):
+            scheduled.append(("seed", tuple(item.symbol for item in candidates)))
+            return len(candidates)
+
+        def schedule_warmup(self, client, candidates):
+            scheduled.append(("deep", tuple(item.symbol for item in candidates)))
+            return len(candidates)
+
+    def unavailable_setup(*args, **kwargs):
+        return SimpleNamespace(final_buy=False, stage=Stage.DATA_WAIT, evaluated_at=kwargs["now"],
+                               diagnostics={"classification_assessments": {}}, reasons=())
+
+    validation = FakeValidation()
+    service = ScannerService(
+        config(tmp_path), client=FakeClient([Candidate("005930", "Samsung", 100, 1, 1, 1)]),
+        history=SeedHistory(), validations=validation, clock=lambda: NOW,
+        session_resolver=resolver(), evaluator=unavailable_setup,
+    )
+    assert service.run_cycle()
+    assert scheduled == [("seed", ("005930",)), ("deep", ())]
+    assert service.snapshot().counters["history_seed_warmups_scheduled"] == 1
+    assert validation.recorded == []
+
+
 def test_discovery_rotation_advances_only_by_attempted_candidates(tmp_path):
     candidates = [Candidate(f"{index:06d}", str(index), 100, 1, 1, 1) for index in range(5)]
     service = ScannerService(
@@ -982,7 +1020,7 @@ def config(tmp_path: Path, **changes):
 
 def test_candidate_limit_is_derived_from_kis_call_budget():
     defaults = ScannerServiceConfig()
-    assert defaults.initial_history_bars == 900
+    assert defaults.initial_history_bars == 30
     assert defaults.tracking_history_bars == HistoryCache.WARM_TARGET_BARS == 3000
     assert defaults.request_deadline_margin_seconds == 8.0
     assert defaults.maximum_completed_bar_age_seconds == 600.0
@@ -1176,7 +1214,7 @@ def test_cold_cache_work_does_not_start_without_worst_case_call_budget(tmp_path)
     service = ScannerService(
         config(
             tmp_path,
-            cycle_budget_seconds=6,
+            cycle_budget_seconds=5,
             request_deadline_margin_seconds=1,
             initial_history_bars=HistoryCache.WARM_TARGET_BARS,
         ),
@@ -1283,7 +1321,7 @@ def test_us_day_live_revalidation_uses_day_exchange_code(tmp_path):
     assert client.price_calls == [("BAQ", "AAPL")]
 
 
-def test_us_day_partial_history_is_provisional(tmp_path):
+def test_us_day_completed_history_waits_for_strategy_setup(tmp_path):
     now = datetime(2026, 9, 8, 2, 1, 30, tzinfo=UTC)  # 22:01:30 New York
     index = pd.date_range("2026-09-07 20:02", periods=120, freq="min")
     frame = pd.DataFrame(
@@ -1332,8 +1370,8 @@ def test_us_day_partial_history_is_provisional(tmp_path):
     assert validation.nonfinal
     assert not validation.recorded
     assert service.snapshot().counters["data_wait_observations"] == 0
-    assert service.results_snapshot().sessions[0].results[0][1].stage == Stage.CANDIDATE
-    assert service.snapshot().counters["warming_provisional"] == 1
+    assert service.results_snapshot().sessions[0].results[0][1].stage == Stage.DATA_WAIT
+    assert service.snapshot().counters["warming_provisional"] == 0
 
 
 def test_nonfinal_result_is_observed_without_recording_signal(tmp_path):

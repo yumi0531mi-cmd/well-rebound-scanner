@@ -212,10 +212,10 @@ def test_remote_history_restores_empty_local_cache(tmp_path) -> None:
     assert durable.loads == 1
 
 
-def test_candidate_preload_keeps_full_3000_bars_and_avoids_individual_reads(tmp_path) -> None:
+def test_candidate_preload_uses_900_bar_seed_and_avoids_individual_reads(tmp_path) -> None:
     class BatchStore(FakeDurableStore):
         def load_many(self, requests, limit):
-            assert limit == 3000
+            assert limit == 900
             return {key: self.stored for key in requests}
 
     durable = BatchStore(frame("2026-08-20 09:00", 3000))
@@ -226,14 +226,14 @@ def test_candidate_preload_keeps_full_3000_bars_and_avoids_individual_reads(tmp_
     )
 
     assert cache.preload_candidates(candidates) == 2
-    assert all(len(cache.load(item.symbol)) == 3000 for item in candidates)
+    assert all(len(cache.load(item.symbol)) == 900 for item in candidates)
     assert durable.loads == 0
 
 
 def test_us_day_preload_restores_separate_regular_structural_window(tmp_path) -> None:
     class BatchStore(FakeDurableStore):
         def load_many(self, requests, limit):
-            assert limit == 3000
+            assert limit == 900
             assert ("US-NAS-US_REGULAR", "AAPL") in requests
             return {key: self.stored for key in requests}
 
@@ -245,12 +245,32 @@ def test_us_day_preload_restores_separate_regular_structural_window(tmp_path) ->
     cache = HistoryCache(tmp_path, durable_store=durable)  # type: ignore[arg-type]
 
     assert cache.preload_candidates((candidate,)) == 1
-    assert len(cache.load_structural_bars(candidate)) == 3000
-    assert len(cache.load(candidate.symbol, cache._namespace(candidate))) == 3000
+    assert len(cache.load_structural_bars(candidate)) == 900
+    assert len(cache.load(candidate.symbol, cache._namespace(candidate))) == 900
     assert durable.loads == 0
 
 
-def test_live_candidate_keeps_full_3000_bar_structure_when_entry_warmup_is_900(tmp_path) -> None:
+def test_deep_history_is_loaded_only_when_optional_warmup_is_requested(tmp_path) -> None:
+    class BatchStore(FakeDurableStore):
+        def load_many(self, requests, limit):
+            assert limit == 900
+            return {key: self.stored.tail(limit) for key in requests}
+
+    candidate = Candidate("005930", "삼성전자", 70000, 1, 1, 1)
+    durable = BatchStore(frame("2026-08-20 09:00", 3000))
+    cache = HistoryCache(tmp_path, durable_store=durable)  # type: ignore[arg-type]
+    assert cache.preload_candidates((candidate,)) == 1
+
+    assert len(cache.load_structural_bars(candidate)) == 900
+    assert durable.loads == 0
+
+    cache._restore_deep_history(candidate)
+
+    assert len(cache.load_structural_bars(candidate)) == 3000
+    assert durable.loads == 1
+
+
+def test_live_candidate_loads_bounded_seed_before_optional_deep_warmup(tmp_path) -> None:
     class Client:
         def minute_day(self, *args, **kwargs):
             del args, kwargs
@@ -263,7 +283,7 @@ def test_live_candidate_keeps_full_3000_bar_structure_when_entry_warmup_is_900(t
         Client(), Candidate("005930", "삼성전자", 70000, 1, 1, 1), 900  # type: ignore[arg-type]
     )
 
-    assert len(restored) == 3000
+    assert len(restored) == 900
 
 
 def test_new_bars_are_written_to_durable_store(tmp_path) -> None:

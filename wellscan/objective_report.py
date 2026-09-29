@@ -35,8 +35,11 @@ def objective_tables(trades, coverage, session, *, strategies=None, errors=()):
         measured = len(timing) == len(winners) and bool(winners)
         goal_pct = TARGET1_HIT_RATE_GOAL * 100
         floor_pct = TARGET1_HIT_RATE_FLOOR * 100
-        target80 = "FAIL(데이터 오류)" if errors else "FAIL(표본 없음)" if rate is None else "PASS" if rate >= goal_pct else f"FAIL({goal_pct:g}% 미만)"
-        floor70 = "FAIL(데이터 오류)" if errors else "FAIL(표본 없음)" if rate is None else "PASS" if rate >= floor_pct else f"FAIL({floor_pct:g}% 미만)"
+        insufficient = ("판정 불가(데이터 오류)" if errors else
+                        "판정 불가(체결 없음)" if not values else
+                        f"판정 불가(표본 {len(values)}/{MIN_TRADES_PER_MARKET})" if len(values) < MIN_TRADES_PER_MARKET else None)
+        target80 = insufficient or ("PASS" if rate >= goal_pct else f"FAIL({goal_pct:g}% 미만)")
+        floor70 = insufficient or ("PASS" if rate >= floor_pct else f"FAIL({floor_pct:g}% 미만)")
         strategy_rows.append({"기법명": name, "진입 건수": len(values), "1차 목표 도달 건수": len(winners),
                               "도달률": rate,
                               "평균 도달 시간(분)": sum(t["target1_minutes"] for t in timing) / len(timing) if measured else None,
@@ -62,5 +65,6 @@ def objective_tables(trades, coverage, session, *, strategies=None, errors=()):
             "metric_note": (
                 "도달률 분모는 진입 건수, 종목 수는 중복 제거. "
                 "시간은 성공 거래의 1분봉 시각 차이; 시가/보수적 체결봉을 포함한 봉 수. "
-                "80% 목표와 70% 하한은 별도 표시하며 튜닝 결과로 배포 판정 금지."
+                f"기법별 {MIN_TRADES_PER_MARKET}체결 미만은 판정 불가. "
+                "80% 목표와 70% 하한의 관측 비교이며 독립 검증·운영 활성화 판정을 대신하지 않음."
             )}

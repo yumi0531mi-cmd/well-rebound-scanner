@@ -37,6 +37,7 @@ US_EXTENDED_SLIPPAGE = 0.002
 # Data sufficiency and live cadence
 WARMUP_BARS = 900
 STRUCTURAL_WINDOW_BARS = 3000
+STRUCTURAL_CONTEXT_SEED_BARS = 900
 HISTORY_INITIAL_READY_BARS = 180
 HISTORY_WARM_TARGET_BARS = 3000
 HISTORY_WARMUP_QUEUE_LIMIT = 4
@@ -52,9 +53,10 @@ KIS_CYCLE_SOFT_BUDGET_CALLS = 400
 KIS_RATE_LIMIT_COOLDOWN_SECONDS = 61
 # UI status polling is not a market-data clock.  Keep state-only websocket
 # deltas slow enough to avoid turning an idle browser tab into egress load.
-UI_STATUS_POLL_SECONDS = 5
-# Avoid one-second REST/UI churn; realtime WebSocket ticks remain available.
-LIVE_QUOTE_REFRESH_OPTIONS_SECONDS = (5, 10, 15)
+UI_STATUS_POLL_SECONDS = 30
+# UI sampling is slower than the scanner's 60-second engine cycle by design;
+# fast polling does not make the underlying scan more current.
+LIVE_QUOTE_REFRESH_OPTIONS_SECONDS = (30, 60, 120)
 # Paper outcomes are resolved from closed one-minute bars, not sampled quotes.
 # Rotate a bounded batch once per minute so many open paper cases cannot fan
 # out into an unbounded burst of REST requests.
@@ -63,6 +65,7 @@ VALIDATION_CASES_PER_REFRESH = 12
 BACKTEST_MAX_STORED_BARS = 32000
 DURABLE_PREFETCH_SYMBOLS_PER_QUERY = 20
 SCANNER_CYCLE_SECONDS = 60.0
+DAY_FLOW_TIMEFRAME_MINUTES = 30
 SCANNER_REQUEST_DEADLINE_MARGIN_SECONDS = 8.0
 CANDIDATE_SNAPSHOT_INTERVAL_SECONDS = 300
 CANDIDATE_FALLBACK_MAX_AGE_SECONDS = 8 * 60 * 60
@@ -78,7 +81,7 @@ TARGET_DISTANCE_STRICT_MAX_ATR = 4.0
 # Walk-forward probability model (features are observed at signal time only)
 PROBABILITY_MIN_TRAINING_TRADES = 30
 PROBABILITY_L2_PENALTY = 1.0
-PROBABILITY_MODEL_VERSION = "causal-logit-v1"
+PROBABILITY_MODEL_VERSION = "causal-logit-v2-resolved"
 PROBABILITY_FEATURE_FIELDS = (
     "score",
     "persistence",

@@ -34,7 +34,6 @@ from config import (
     SCANNER_CYCLE_SECONDS,
     SCANNER_REQUEST_DEADLINE_MARGIN_SECONDS,
     STRUCTURAL_WINDOW_BARS,
-    WARMUP_BARS,
 )
 
 from . import ENGINE_VERSION
@@ -65,17 +64,16 @@ LOGGER = logging.getLogger(__name__)
 KIS_REQUEST_INTERVAL_SECONDS = 0.25
 DISCOVERY_CALL_RESERVE = {Market.KR: 20, Market.US: 30}
 WARM_CALL_RESERVE_PER_CANDIDATE = 2
-# HistoryCache can make one newest-page refresh plus three full eight-page KR
-# days, or one newest plus nine US back-pages.  A fresh quote is then required
-# only for ENTRY_WAIT/FINAL_BUY revalidation, so reserve that worst case too.
-COLD_CALL_RESERVE_PER_CANDIDATE = {Market.KR: 26, Market.US: 11}
+# The fast admission request asks only for the recent trigger window. Deep
+# context seeds warm separately; deeper history is reserved for formed setups.
+COLD_CALL_RESERVE_PER_CANDIDATE = {Market.KR: 2, Market.US: 2}
 RECENT_ERROR_LIMIT = 20
 SEEN_CASE_LIMIT = 2_000
 SESSION_RESULT_LIMIT = 80
 # US_DAY intraday history is a current-session trigger source, not the long
-# structural source. Open provisional evaluation after the existing 30-bar
-# floor; per-strategy timeframe checks plus a separate, complete 3000-bar
-# structural context still gate official ENTRY.
+# structural source. All sessions start evaluation after the 30-bar floor;
+# each strategy's own completed-frame requirements decide readiness. The
+# 3000-bar context is deep background history, not a universal entry gate.
 US_DAY_INITIAL_HISTORY_BARS = PROVISIONAL_MIN_BARS
 
 
@@ -91,10 +89,9 @@ class ScannerServiceConfig:
     tracking_budget_fraction: float = 0.25
     max_candidates_per_session: int = 80
     discovery_limit_each: int = 100
-    # Signal admission matches the engine's strict 900-bar MA60 requirement.
-    # The 3000-bar structural window is warmed/tracked separately; requiring
-    # more than the live cache can retain would suppress every candidate.
-    initial_history_bars: int = WARMUP_BARS
+    # Fast path fetches the shared 30-bar floor. Longer frame requirements
+    # are enforced per strategy; historical context warms independently.
+    initial_history_bars: int = PROVISIONAL_MIN_BARS
     tracking_history_bars: int = STRUCTURAL_WINDOW_BARS
     max_tracking_cases: int = 100
     maximum_completed_bar_age_seconds: float = MAX_COMPLETED_BAR_AGE_SECONDS
@@ -179,6 +176,7 @@ class ScannerCounters:
     candidate_prefetches: int = 0
     candidate_prefetch_symbols: int = 0
     candidate_prefetch_errors: int = 0
+    history_seed_warmups_scheduled: int = 0
     history_warmups_scheduled: int = 0
     history_warmup_errors: int = 0
     candidate_empty_discoveries: int = 0
@@ -1131,6 +1129,7 @@ class ScannerService:
         bars_target = 0
         warming_sequences = None
         product_unknown = 0
+        deep_context_candidates: list[Candidate] = []
         evaluated_gates = 0
         final_buys = 0
         entry_waits = 0
@@ -1259,9 +1258,10 @@ class ScannerService:
                 else:
                     structural_below_3000 += 1
                 # Session triggers and long structural context are independent
-                # readiness contracts. Partial context is visible for shadow
-                # diagnostics, but isolated from official ENTRY state.
-                warming = not session_ready or not structural_ready
+                # Deep history remains a rolling context target, not a blanket
+                # admission gate. Strategy-specific completed-frame checks in
+                # the engine decide whether a setup has enough evidence.
+                warming = not session_ready
                 close = self._latest_completed_close(bars, status.session, current)
                 self._stale_streak.pop(stale_key, None)
                 policy = self.client.trading_policy(candidate)
@@ -1295,6 +1295,22 @@ class ScannerService:
                     eval_store,
                     **evaluation_kwargs,
                 )
+                if is_dataclass(result) and not isinstance(result, type):
+                    diagnostics = dict(getattr(result, "diagnostics", {}) or {})
+                    diagnostics.update({
+                        "deep_context_bars": structural_count,
+                        "deep_context_target_bars": self.config.tracking_history_bars,
+                        "deep_context_complete": structural_ready,
+                        "deep_context_blocks_entry": False,
+                    })
+                    result = replace(result, diagnostics=diagnostics)
+                if not structural_ready:
+                    assessments_for_warmup = (
+                        result.diagnostics.get("classification_assessments", {})
+                        if isinstance(getattr(result, "diagnostics", None), dict) else {}
+                    )
+                    if isinstance(assessments_for_warmup, dict) and assessments_for_warmup:
+                        deep_context_candidates.append(candidate)
                 if warming:
                     if not (is_dataclass(result) and not isinstance(result, type)):
                         raise RuntimeError("provisional evaluation requires a ScanResult result")
@@ -1307,10 +1323,11 @@ class ScannerService:
                         result,
                         stage=Stage.CANDIDATE,
                         reasons=tuple(getattr(result, "reasons", None) or ()) + tuple(
-                            reason for reason, ready in (
+                            reason
+                            for reason, ready in (
                                 (f"예열중: 세션 분봉 {len(session_bars)}/{history_target}·비공식", session_ready),
-                                (f"예열중: 구조 분봉 {structural_count}/{self.config.tracking_history_bars}·비공식", structural_ready),
-                            ) if not ready
+                            )
+                            if not ready
                         ),
                     )
                 self._counters.candidates_evaluated += 1
@@ -1418,7 +1435,12 @@ class ScannerService:
                 self._counters.history_warmup_deferred += 1
             else:
                 try:
-                    warmup_scheduled = int(schedule_warmup(self.client, tuple(candidates)) or 0)
+                    seed_scheduler = getattr(self.history, "schedule_seed_warmup", None)
+                    if callable(seed_scheduler):
+                        seeds = int(seed_scheduler(self.client, tuple(candidates)) or 0)
+                        warmup_scheduled += seeds
+                        self._counters.history_seed_warmups_scheduled += seeds
+                    warmup_scheduled += int(schedule_warmup(self.client, tuple(deep_context_candidates)) or 0)
                     self._counters.history_warmups_scheduled += warmup_scheduled
                     pending_reader = getattr(self.history, "warmup_pending", None)
                     warmup_pending = int(pending_reader()) if callable(pending_reader) else 0

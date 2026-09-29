@@ -7,6 +7,7 @@ from datetime import UTC, date, datetime
 import pandas as pd
 import pytest
 
+from config import PROBABILITY_MODEL_VERSION
 from wellscan.execution import EXECUTION_VERSION
 from wellscan.models import RiskState, ScanResult, Stage, Strategy, TradeLevels, TradingSession
 from wellscan.policy import Costs
@@ -179,7 +180,7 @@ def test_signal_case_persists_common_engine_display_snapshot_and_loads_old_rows(
     assert restored.completed_bar_at == case.signaled_at
     assert restored.probability_features["score"] == 100
     assert restored.probability_features["atr_pct"] is None
-    assert restored.probability_model_version == "causal-logit-v1"
+    assert restored.probability_model_version == PROBABILITY_MODEL_VERSION
     assert restored.probability_status == "SIGNAL_FEATURES_UNAVAILABLE"
 
     old_payload = {

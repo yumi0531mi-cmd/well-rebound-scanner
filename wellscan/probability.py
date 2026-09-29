@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import math
 from collections import defaultdict
+from datetime import timedelta
 from typing import Any
 
 import numpy as np
@@ -30,6 +31,16 @@ def signal_feature_snapshot(result: Any) -> dict[str, float | None]:
         "pattern_fatigue": result.pattern_fatigue,
         "net_swing_pct": result.net_swing_pct,
     }
+    # The engine publishes absolute ATR and the completed-bar signal price.
+    # Derive the same causal feature for live signals and historical replay;
+    # a later execution price must never enter the signal feature snapshot.
+    if result.diagnostics.get("atr_pct") is None:
+        try:
+            atr = float(result.diagnostics["atr_3m"])
+            observed = float(result.diagnostics["observed_price"])
+            direct["atr_pct"] = 100 * atr / observed if math.isfinite(atr) and math.isfinite(observed) and atr > 0 and observed > 0 else None
+        except (KeyError, TypeError, ValueError, ZeroDivisionError):
+            direct["atr_pct"] = None
     payload: dict[str, float | None] = {}
     for name in PROBABILITY_FEATURE_FIELDS:
         value = direct.get(name, result.diagnostics.get(name))
@@ -140,7 +151,7 @@ def estimate_live_signal(features: dict[str, float | None], evaluated_at: Any,
                 or not isinstance(state, dict) or state.get("phase") != "CLOSED" or not state.get("exit_at")):
             continue
         resolved = pd.Timestamp(state["exit_at"])
-        if resolved.tzinfo is None or resolved >= current:
+        if resolved.tzinfo is None or resolved.to_pydatetime() + timedelta(minutes=1) >= current:
             continue
         vector = _vector({"probability_features": getattr(case, "probability_features", None)})
         if vector is not None:
@@ -163,38 +174,75 @@ def estimate_live_signal(features: dict[str, float | None], evaluated_at: Any,
     }
 
 
-def attach_walk_forward_estimates(trades: list[dict[str, Any]]) -> dict[str, Any]:
-    """Predict each timestamp from strictly earlier resolved entries only."""
-    ordered = sorted(enumerate(trades), key=lambda item: pd.Timestamp(item[1]["entry_at"]))
-    prior_features: list[np.ndarray] = []
-    prior_labels: list[float] = []
-    predictions: list[tuple[float, float]] = []
-    groups: dict[pd.Timestamp, list[tuple[int, dict[str, Any]]]] = defaultdict(list)
-    for item in ordered:
-        groups[pd.Timestamp(item[1]["entry_at"])].append(item)
+def _aware_time(value: Any) -> pd.Timestamp | None:
+    try:
+        stamp = pd.Timestamp(value)
+    except (TypeError, ValueError):
+        return None
+    return stamp if not pd.isna(stamp) and stamp.tzinfo is not None else None
 
-    for instant in sorted(groups):
-        usable = len(prior_features) >= PROBABILITY_MIN_TRAINING_TRADES and len(set(prior_labels)) == 2
-        fitted = _fit_logistic(np.vstack(prior_features), np.asarray(prior_labels)) if usable else None
-        for _index, trade in groups[instant]:
+
+def _outcome_known_time(trade: dict[str, Any], signal_at: pd.Timestamp) -> pd.Timestamp | None:
+    result = str(trade.get("result", ""))
+    if result not in {"TARGET2", "HARD_STOP", "SOFT_STOP", "SESSION_CLOSE"} and not result.startswith("TARGET1_THEN_"):
+        return None
+    entered, exited = _aware_time(trade.get("entry_at")), _aware_time(trade.get("exit_at"))
+    if entered is None or exited is None or not signal_at <= entered <= exited:
+        return None
+    completed_at = pd.Timestamp(exited.to_pydatetime() + timedelta(minutes=1))
+    known = _aware_time(trade["outcome_known_at"]) if "outcome_known_at" in trade else completed_at
+    return known if known is not None and known >= completed_at else None
+
+
+def attach_walk_forward_estimates(trades: list[dict[str, Any]]) -> dict[str, Any]:
+    """Predict at signal time, using only outcomes known before that signal."""
+    predictions: list[tuple[float, float]] = []
+    cohorts = defaultdict(list)
+    unverifiable_outcomes = 0
+    for index, trade in enumerate(trades):
+        trade.update(target1_probability=None, expected_value_r=None, probability_training_trades=0,
+                     probability_status="SIGNAL_TIME_UNAVAILABLE", probability_model_version=PROBABILITY_MODEL_VERSION)
+        instant = _aware_time(trade.get("signal_at"))
+        if instant is None:
+            unverifiable_outcomes += 1
+            continue
+        known_at = _outcome_known_time(trade, instant)
+        unverifiable_outcomes += int(known_at is None)
+        cohorts[(trade.get("market"), trade.get("session"))].append((index, trade, instant, known_at))
+
+    for cohort in cohorts.values():
+        groups = defaultdict(list)
+        events = []
+        for index, trade, instant, known_at in cohort:
+            groups[instant].append(trade)
             vector = _vector(trade)
-            probability = _predict(vector, fitted) if vector is not None and fitted is not None else None
-            rr = trade.get("net_rr_target1")
-            expected_r = probability * float(rr) - (1 - probability) if probability is not None and rr is not None else None
-            trade["target1_probability"] = probability
-            trade["expected_value_r"] = expected_r
-            trade["probability_training_trades"] = len(prior_features)
-            trade["probability_status"] = "WALK_FORWARD" if probability is not None else "INSUFFICIENT_PRIOR_TRADES"
-            if probability is not None:
-                predictions.append((probability, float(target1_hit(trade))))
-        for _, trade in groups[instant]:
-            vector = _vector(trade)
-            if vector is not None:
-                prior_features.append(vector)
-                prior_labels.append(float(target1_hit(trade)))
+            if known_at is not None and vector is not None:
+                events.append((known_at, index, vector, float(target1_hit(trade))))
+        events.sort(key=lambda item: (item[0], item[1]))
+        prior_features, prior_labels = [], []
+        cursor = 0
+        for instant in sorted(groups):
+            while cursor < len(events) and events[cursor][0] < instant:
+                prior_features.append(events[cursor][2])
+                prior_labels.append(events[cursor][3])
+                cursor += 1
+            usable = len(prior_features) >= PROBABILITY_MIN_TRAINING_TRADES and len(set(prior_labels)) == 2
+            fitted = _fit_logistic(np.vstack(prior_features), np.asarray(prior_labels)) if usable else None
+            for trade in groups[instant]:
+                vector = _vector(trade)
+                probability = _predict(vector, fitted) if vector is not None and fitted is not None else None
+                rr = trade.get("net_rr_target1")
+                expected_r = probability * float(rr) - (1 - probability) if probability is not None and rr is not None else None
+                trade.update(target1_probability=probability, expected_value_r=expected_r,
+                             probability_training_trades=len(prior_features),
+                             probability_status="WALK_FORWARD_UNQUALIFIED" if probability is not None else
+                             "SIGNAL_FEATURES_UNAVAILABLE" if vector is None else "INSUFFICIENT_PRIOR_TRADES")
+                if probability is not None and _outcome_known_time(trade, instant) is not None:
+                    predictions.append((probability, float(target1_hit(trade))))
 
     if not predictions:
-        return {"status": "INSUFFICIENT_PRIOR_TRADES", "predictions": 0, "brier_score": None, "calibration": []}
+        return {"status": "INSUFFICIENT_PRIOR_TRADES", "predictions": 0, "brier_score": None, "calibration": [],
+                "unverifiable_outcome_times": unverifiable_outcomes}
     buckets: dict[int, list[float]] = defaultdict(list)
     for probability, label in predictions:
         buckets[min(9, int(probability * 10))].append(label)
@@ -204,7 +252,8 @@ def attach_walk_forward_estimates(trades: list[dict[str, Any]]) -> dict[str, Any
         "model_version": PROBABILITY_MODEL_VERSION,
         "status": "WALK_FORWARD_UNQUALIFIED",
         "predictions": len(predictions),
+        "unverifiable_outcome_times": unverifiable_outcomes,
         "brier_score": float(np.mean([(probability - label) ** 2 for probability, label in predictions])),
         "calibration": calibration,
-        "note": "예측은 동일 시각 이전 거래만 학습하며, 독립 검증 통과 전에는 70/80% 승률 증명이 아님",
+        "note": "동일 시장·세션에서 신호 시각 전에 청산봉까지 확정된 결과만 학습 · 독립 검증 전 승률 판정 불가",
     }

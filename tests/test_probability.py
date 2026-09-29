@@ -15,8 +15,12 @@ from wellscan.probability import (
 
 def _trade(index, at=None, hit=None):
     hit = index % 3 != 0 if hit is None else hit
+    entered = at or datetime(2026, 1, 2, 9, tzinfo=UTC) + timedelta(minutes=index * 3)
     return {
-        "entry_at": (at or datetime(2026, 1, 2, 9) + timedelta(minutes=index)).isoformat(),
+        "signal_at": entered.isoformat(),
+        "entry_at": entered.isoformat(),
+        "exit_at": (entered + timedelta(minutes=1)).isoformat(),
+        "outcome_known_at": (entered + timedelta(minutes=2)).isoformat(),
         "result": "TARGET2" if hit else "HARD_STOP",
         "score": 50 + index % 40,
         "persistence": 0.2 + (index % 7) / 10,
@@ -34,7 +38,7 @@ def _trade(index, at=None, hit=None):
 
 def test_probability_uses_only_strictly_earlier_timestamp_groups():
     trades = [_trade(index) for index in range(30)]
-    shared = datetime(2026, 1, 3, 9)
+    shared = datetime(2026, 1, 3, 9, tzinfo=UTC)
     trades.extend((_trade(30, shared, True), _trade(31, shared, False)))
     changed = deepcopy(trades)
     changed[-1]["result"] = "TARGET2"
@@ -103,3 +107,56 @@ def test_live_estimate_uses_only_already_resolved_immutable_cases():
     assert result["probability_training_trades"] == 30
     assert 0 < result["target1_probability"] < 1
     assert result["expected_value_r"] is not None
+
+
+def test_walk_forward_cannot_train_on_still_open_trade_outcomes():
+    trades = [_trade(index) for index in range(31)]
+    trades[0]["exit_at"] = trades[-1]["entry_at"]
+    trades[0]["outcome_known_at"] = trades[-1]["outcome_known_at"]
+    attach_walk_forward_estimates(trades)
+    assert trades[-1]["probability_training_trades"] == 29
+    assert trades[-1]["target1_probability"] is None
+
+
+def test_walk_forward_uses_signal_time_and_completed_exit_bar():
+    trades = [_trade(index) for index in range(31)]
+    last = trades[-1]
+    signal_time = pd.Timestamp(trades[-2]["outcome_known_at"])
+    last["signal_at"] = signal_time.isoformat()
+    attach_walk_forward_estimates(trades)
+    assert last["probability_training_trades"] == 29
+    assert last["target1_probability"] is None
+
+
+def test_walk_forward_excludes_unverifiable_resolution_times():
+    trades = [_trade(index) for index in range(31)]
+    trades[0].pop("exit_at")
+    trades[0].pop("outcome_known_at")
+    attach_walk_forward_estimates(trades)
+    assert trades[-1]["probability_training_trades"] == 29
+
+
+def test_walk_forward_does_not_mix_market_or_session_training():
+    trades = [_trade(index) for index in range(31)]
+    for trade in trades:
+        trade.update(market="KR", session="KR_REGULAR")
+    trades[0].update(market="US", session="US_REGULAR")
+    attach_walk_forward_estimates(trades)
+    assert trades[-1]["probability_training_trades"] == 29
+
+
+def test_live_atr_feature_uses_completed_signal_price_not_later_quote():
+    result = SimpleNamespace(**_trade(0), diagnostics={"atr_3m": 2., "observed_price": 100., "live_observed_price": 120.})
+    snapshot = signal_feature_snapshot(result)
+    assert snapshot["atr_pct"] == 2.
+    result.diagnostics["live_observed_price"] = 150.
+    assert signal_feature_snapshot(result)["atr_pct"] == 2.
+    result.diagnostics["observed_price"] = float("inf")
+    assert signal_feature_snapshot(result)["atr_pct"] is None
+
+
+def test_unresolved_outcome_is_never_used_as_a_training_loss():
+    trades = [_trade(index) for index in range(31)]
+    trades[0]["result"] = "UNRESOLVED_DATA_END"
+    attach_walk_forward_estimates(trades)
+    assert trades[-1]["probability_training_trades"] == 29

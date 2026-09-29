@@ -3,7 +3,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from wellscan.backtest import _access_time_summary, _entry_fill, _net_return, _overseas_history, _simulate_exit, run
+from wellscan.backtest import _access_time_summary, _entry_fill, _expected_access_instants, _net_return, _overseas_history, _simulate_exit, run
 from wellscan.models import Candidate, Market, RiskState, ScanResult, Stage, Strategy, TradeLevels, TradingSession
 from wellscan.policy import Costs, TradingPolicy
 
@@ -33,6 +33,31 @@ def test_access_time_summary_does_not_hide_minutes_with_fewer_than_five_evaluati
     assert result["eligible_instants"] == 1
     assert result["minimum_candidates_evaluated"] == 1
     assert result["actionable_minimum_pass_pct"] == 0
+
+
+def test_access_time_summary_keeps_entirely_unevaluated_minutes():
+    symbols = {"A", "B", "C", "D", "E"}
+    result = _access_time_summary({"09:01": symbols}, {"09:01": symbols}, {},
+                                  expected_instants={"09:00", "09:01", "09:02"})
+    assert result["eligible_instants"] == 3
+    assert result["unevaluated_instants"] == 2
+    assert result["minimum_candidates_evaluated"] == 0
+    assert result["minimum_actionable_symbols"] == 0
+    assert result["actionable_minimum_pass_pct"] == pytest.approx(100 / 3)
+
+
+def test_expected_access_minutes_cover_whole_session_including_open_and_gaps():
+    instants = _expected_access_instants({"A": ["2026-08-25"]}, TradingSession.KR_REGULAR)
+    assert len(instants) == 390
+    assert "2026-08-25T09:00:00+09:00" in instants
+    assert "2026-08-25T15:29:00+09:00" in instants
+    assert "2026-08-25T15:30:00+09:00" not in instants
+
+
+def test_access_grid_excludes_future_minutes_and_keeps_us_session_timezone():
+    instants = _expected_access_instants({"A": ["2026-08-25"]}, TradingSession.US_REGULAR,
+                                        as_of="2026-08-25T09:33:00-04:00")
+    assert instants == {f"2026-08-25T09:{minute}:00-04:00" for minute in (30, 31, 32)}
 
 
 def test_entry_is_checked_only_after_signal() -> None:
@@ -196,8 +221,11 @@ def test_production_backtest_uses_plan_state_advance_not_legacy_helpers(monkeypa
         TradeLevels(entry=100, target1=104, target2=106, soft_stop=99,
                     hard_stop=98.5, structural_stop=98),
         {"FINAL_BUY": True},
-        matched_strategies=(Strategy.RANGE_REVERSAL,),
-        diagnostics={"atr_3m": 1., "policy_minimum_rr": 1.},
+        matched_strategies=(Strategy.RANGE_REVERSAL, Strategy.OVERSOLD_REVERSAL),
+        diagnostics={"atr_3m": 1., "observed_price": 100., "policy_minimum_rr": 1., "classification_assessments": {
+            Strategy.RANGE_REVERSAL.value: {"planned_cost_pass": True},
+            Strategy.OVERSOLD_REVERSAL.value: {"planned_cost_pass": False},
+        }},
     )
     monkeypatch.setattr("wellscan.backtest.evaluate", lambda *args, **kwargs: signal)
     rows = []
@@ -208,7 +236,7 @@ def test_production_backtest_uses_plan_state_advance_not_legacy_helpers(monkeypa
             rows.append((100, 101, 99.5, 100, 1000))
     # First tested signal occurs at day-25 index 6, fills at index 8, and only
     # the following completed bar may establish T1/T2.
-    rows[9] = (100, 107, 99.5, 106, 1000)
+    rows[9] = (100.2, 107, 99.5, 106, 1000)
     history = pd.DataFrame(rows, columns=["open", "high", "low", "close", "volume"], index=indexes)
     candidate = Candidate("TEST", "Test", 100, 0, 1, 1)
     eligibility_checks = []
@@ -227,10 +255,12 @@ def test_production_backtest_uses_plan_state_advance_not_legacy_helpers(monkeypa
         policy_provider=lambda _: TradingPolicy(costs, "STOCK"),
     )
     assert report["errors"] == []
-    assert report["diagnostic_schema_version"] == 3
+    assert report["diagnostic_schema_version"] == 4
     assert report["stage_counts"][Stage.FINAL_BUY.value] >= 1
     assert report["matched_strategy_counts"][Strategy.RANGE_REVERSAL.value] >= 1
     assert report["cost_valid_strategy_counts"][Strategy.RANGE_REVERSAL.value] >= 1
+    assert report["matched_strategy_counts"][Strategy.OVERSOLD_REVERSAL.value] >= 1
+    assert report["cost_valid_strategy_counts"].get(Strategy.OVERSOLD_REVERSAL.value, 0) == 0
     assert isinstance(report["strategy_evaluation_counts"], dict)
     assert isinstance(report["opportunity_rejection_counts"], dict)
     assert isinstance(report["opportunity_near_miss_counts"], dict)
@@ -243,6 +273,14 @@ def test_production_backtest_uses_plan_state_advance_not_legacy_helpers(monkeypa
     assert not report["universe_coverage_complete"]
     assert report["status"] == "PARTIAL"
     assert not report["sample_goal_met"]
+    assert report["access_time_coverage"]["eligible_instants"] == 780
+    assert report["access_time_coverage"]["unevaluated_instants"] > 0
+    trade = report["trades"][0]
+    assert pd.Timestamp(trade["signal_at"]).tzinfo is not None
+    assert pd.Timestamp(trade["signal_at"]) <= pd.Timestamp(trade["entry_at"])
+    assert pd.Timestamp(trade["outcome_known_at"]) > pd.Timestamp(trade["exit_at"])
+    assert trade["entry"] == 100.2
+    assert trade["atr_pct"] == trade["probability_features"]["atr_pct"] == 1.
 
 
 def test_backtest_allows_a_new_same_day_entry_after_exit_and_nonfinal_rearm(monkeypatch):

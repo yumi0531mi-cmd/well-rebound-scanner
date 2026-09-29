@@ -25,9 +25,9 @@ def test_strategy_and_day_denominators_are_not_merged():
               dict(strategy="B", symbol="X", entry_at="2026-08-25 11:00+09:00", result="HARD_STOP")]
     result = objective_tables(trades, {"X": ["2026-08-25", "2026-08-26"]}, TradingSession.KR_REGULAR, strategies=["A", "B", "C"])
     a, b, c = result["strategy_target1"]
-    assert a["판정"] == "PASS" and a["평균 도달 시간(분)"] == 3
-    assert b["판정"] == "FAIL(80% 미만)"
-    assert c["판정"] == "FAIL(표본 없음)"
+    assert a["판정"] == "판정 불가(표본 1/50)" and a["평균 도달 시간(분)"] == 3
+    assert b["판정"] == "판정 불가(표본 1/50)"
+    assert c["판정"] == "판정 불가(체결 없음)"
     day = result["daily_target1"][0]
     assert day["진입 종목 수"] == 1 and day["진입 건수"] == 2 and day["도달률"] == 50
     assert result["daily_target1"][1]["도달률"] is None
@@ -38,9 +38,9 @@ def test_strategy_and_day_denominators_are_not_merged():
 def test_seventy_percent_floor_is_reported_without_becoming_eighty_percent_pass():
     trades = [
         dict(strategy="A", symbol=str(index), entry_at="2026-08-25 10:00+09:00",
-             result="TARGET2" if index < 7 else "HARD_STOP",
-             target1_minutes=3 if index < 7 else None, target1_bars=3 if index < 7 else None)
-        for index in range(10)
+             result="TARGET2" if index < 35 else "HARD_STOP",
+             target1_minutes=3 if index < 35 else None, target1_bars=3 if index < 35 else None)
+        for index in range(50)
     ]
     row = objective_tables(trades, {str(index): ["2026-08-25"] for index in range(10)},
                            TradingSession.KR_REGULAR, strategies=["A"])["strategy_target1"][0]
@@ -48,3 +48,13 @@ def test_seventy_percent_floor_is_reported_without_becoming_eighty_percent_pass(
     assert row["80% 목표 판정"] == "FAIL(80% 미만)"
     assert row["70% 하한 판정"] == "PASS"
     assert row["판정"] == "FAIL(80% 미만)"
+
+
+def test_tiny_perfect_sample_and_data_errors_cannot_pass():
+    trades = [dict(strategy="A", symbol="X", entry_at="2026-08-25 10:00+09:00", result="TARGET2") for _ in range(49)]
+    for errors in ((), ("missing bars",)):
+        row = objective_tables(trades, {"X": ["2026-08-25"]}, TradingSession.KR_REGULAR,
+                               strategies=["A"], errors=errors)["strategy_target1"][0]
+        assert row["도달률"] == 100
+        assert row["80% 목표 판정"].startswith("판정 불가")
+        assert row["70% 하한 판정"].startswith("판정 불가")
