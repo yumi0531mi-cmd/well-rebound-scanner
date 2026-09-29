@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-09-29T23:15:09+09:00",
+  "updated_at": "2026-09-30T00:46:19+09:00",
   "current_step": 3,
   "completed_steps": [
     "기존 저장소와 인계 보고서 확인",
@@ -185,7 +185,8 @@
     "2026-09-28 OPEN POLICY QUESTION (needs explicit approval, not auto-resolved): uncommitted work lowers official ENTRY admission from 900-bar floor to 30-bar floor plus per-strategy frame checks, so official ENTRY no longer requires 3000-bar context (recorded per evaluation as deep_context_blocks_entry False). Thresholds, costs, and active-6 unchanged. Holding commit decision pending approval.",
     "2026-09-29 replay resumability rebuilt: replay_permitted_kis.py runs one symbol per checkpoint (atomic tmp+replace, input-hash skip, single-instance lock, 20s heartbeat); full 5-symbol replay completed in 741s with 0 trades, 0 errors, 8 strategies formed; final JSON merged from checkpoints; no push, no deploy",
     "2026-09-29 cost-gap analysis on 51 formed examples (not a code change): median gross reward 0.288pct vs median gross risk 0.285pct, planned net RR median -0.238, only 1 of 51 reaches 1.0; median gross target needed for RR=1.0 at same stops is 1.145pct, ~4x offered. Conclusion: rejections are policy-correct, not a defect; no threshold touched. Next: multi-symbol sample, Oct 1 deploy, live measurement.",
-    "2026-09-29 user pullback prototype v1 (offline, production untouched): fixed 4pct rule fires nowhere on 25 large-cap files; ATR-relative rule fires 4x but all fail RR (targets = impulse-high retest too close); user 9/18 exits imply measured-move targets, not retests; v2 will test measured targets across all 5 days"
+    "2026-09-29 user pullback prototype v1 (offline, production untouched): fixed 4pct rule fires nowhere on 25 large-cap files; ATR-relative rule fires 4x but all fail RR (targets = impulse-high retest too close); user 9/18 exits imply measured-move targets, not retests; v2 will test measured targets across all 5 days",
+    "2026-09-30 pullback v2 (measured-move targets) on 25 permitted files: 4 formed, RR 0.01-0.43, 0 pass; csv prices verified real vs live quotes (ratios 0.986-1.019); large-cap pullbacks lack 1.15pct gross edge; no production change"
   ],
   "resumption_2026_09_29": {
     "policy_resolution": "Prior OPEN POLICY QUESTION resolved against user's explicit instruction to implement strategy-specific 1/3/5/15/30m roles and reduce/restructure 3000 bars if burdensome. 30 bars opens evaluation only; strategy-specific completed frames, fresh quote, original cost and risk checks remain mandatory. 900 is background seed, 3000 retained maximum; no active strategy or qualification target changed.",
