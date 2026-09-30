@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-09-30T21:45:46+09:00",
+  "updated_at": "2026-10-01T00:08:53+09:00",
   "current_step": 3,
   "completed_steps": [
     "기존 저장소와 인계 보고서 확인",
@@ -192,7 +192,8 @@
     "2026-09-30 Oct 1 runbook drafted (preconditions, push, verify, rollback); not executed, dashboards unverified",
     "2026-09-30 22x5 permitted matrix COMPLETE (all 22 strategies x 5 symbols, warmup prepended): 0 fills, 0 T1, 0 errors across all runs; calm large-cap 5-day window yields nothing tradable; diagnostic only, no verdict change (still 25 fills / 4 T1 total)",
     "2026-09-30 volatile batch complete: 071090 PARTIAL/0, 270520/043260 NO_TRADES/0, 005030+266690 no bars on any of 9 days (suspended/delisted or code changed); full suite 578 passed 0 failed on current tree; no verdict change (still 25 fills / 4 T1)",
-    "2026-09-30 user pullback encoded as 3rd shadow profile (impulse-pullback-reclaim measured targets, 22 untouched, shadow-only, EV-measured); fires 1min before user 9/18 entries on real bars; full 581 green, ruff clean; push held"
+    "2026-09-30 user pullback encoded as 3rd shadow profile (impulse-pullback-reclaim measured targets, 22 untouched, shadow-only, EV-measured); fires 1min before user 9/18 entries on real bars; full 581 green, ruff clean; push held",
+    "2026-10-01 pre-push gate: full suite minus 3 forbidden 581 passed 0 failed, ruff clean, diff clean, Render still 503 before push; pushing 44-commit batch as 0.11.12-oct1-batch"
   ],
   "resumption_2026_09_29": {
     "policy_resolution": "Prior OPEN POLICY QUESTION resolved against user's explicit instruction to implement strategy-specific 1/3/5/15/30m roles and reduce/restructure 3000 bars if burdensome. 30 bars opens evaluation only; strategy-specific completed frames, fresh quote, original cost and risk checks remain mandatory. 900 is background seed, 3000 retained maximum; no active strategy or qualification target changed.",
