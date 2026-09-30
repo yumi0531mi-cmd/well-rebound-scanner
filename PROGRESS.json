@@ -190,7 +190,9 @@
     "2026-09-30 rally audit on 25 permitted files: daily ranges 1.3-5.7pct but max capturable rally legs mostly 0.5-1.9pct (only 4 of 25 days above 2pct); after 0.43pct costs almost nothing clears RR 1.0; range is not edge; fixed-5 large caps understate opportunity vs ranking universe; no production change",
     "2026-09-30 launched 22x5 permitted matrix (4 locked workers, warmup+5day frames, resume-skip); all workers verified alive by CPU growth",
     "2026-09-30 Oct 1 runbook drafted (preconditions, push, verify, rollback); not executed, dashboards unverified",
-    "2026-09-30 22x5 permitted matrix COMPLETE (all 22 strategies x 5 symbols, warmup prepended): 0 fills, 0 T1, 0 errors across all runs; calm large-cap 5-day window yields nothing tradable; diagnostic only, no verdict change (still 25 fills / 4 T1 total)"
+    "2026-09-30 22x5 permitted matrix COMPLETE (all 22 strategies x 5 symbols, warmup prepended): 0 fills, 0 T1, 0 errors across all runs; calm large-cap 5-day window yields nothing tradable; diagnostic only, no verdict change (still 25 fills / 4 T1 total)",
+    "2026-09-30 volatile batch complete: 071090 PARTIAL/0, 270520/043260 NO_TRADES/0, 005030+266690 no bars on any of 9 days (suspended/delisted or code changed); full suite 578 passed 0 failed on current tree; no verdict change (still 25 fills / 4 T1)",
+    "2026-09-30 user pullback encoded as 3rd shadow profile (impulse-pullback-reclaim measured targets, 22 untouched, shadow-only, EV-measured); fires 1min before user 9/18 entries on real bars; full 581 green, ruff clean; push held"
   ],
   "resumption_2026_09_29": {
     "policy_resolution": "Prior OPEN POLICY QUESTION resolved against user's explicit instruction to implement strategy-specific 1/3/5/15/30m roles and reduce/restructure 3000 bars if burdensome. 30 bars opens evaluation only; strategy-specific completed frames, fresh quote, original cost and risk checks remain mandatory. 900 is background seed, 3000 retained maximum; no active strategy or qualification target changed.",
