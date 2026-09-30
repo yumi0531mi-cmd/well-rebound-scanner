@@ -19,7 +19,12 @@ from wellscan.models import (
     Strategy,
     TradingSession,
 )
-from wellscan.opportunities import classify, scalp_pullback_entry, scalp_vwap_reclaim
+from wellscan.opportunities import (
+    classify,
+    scalp_pullback_entry,
+    scalp_user_pullback,
+    scalp_vwap_reclaim,
+)
 from wellscan.policy import TradingPolicy, estimated_costs
 from wellscan.shadow_ledger import ShadowLedger
 
@@ -59,7 +64,7 @@ def vwap_rows():
 
 def test_scalp_portfolio_does_not_touch_22():
     assert len(ALL_ENTRY_STRATEGIES) == 22
-    assert len(SCALP_STRATEGIES) == 2
+    assert len(SCALP_STRATEGIES) == 3
     assert not set(SCALP_STRATEGIES) & set(ALL_ENTRY_STRATEGIES)
 
 
@@ -123,6 +128,43 @@ def test_scalp_assessment_is_qualified_but_never_policy_ready():
     assert assessment["scalp_qualified"] is True
     assert assessment["policy_ready"] is False
     assert assessment["shadow_ready"] is False
+
+
+def test_user_pullback_fires_on_impulse_reclaim():
+    rows = [(100.0, 100.1, 99.9, 100.0, 1000.0)] * 12
+    rows += [
+        (100.9, 101.12, 100.88, 101.0, 1400.0),
+        (101.0, 102.12, 100.88, 102.0, 1400.0),
+        (102.0, 103.12, 101.88, 103.0, 1400.0),
+        (103.0, 104.12, 102.88, 104.0, 1400.0),
+        (104.0, 105.12, 103.88, 105.0, 1400.0),
+        (105.0, 105.62, 104.88, 105.5, 1400.0),
+        (105.5, 106.12, 105.38, 106.0, 1400.0),
+        (106.5, 106.6, 105.9, 106.0, 1400.0),
+        (106.0, 106.4, 105.9, 106.3, 3200.0),
+    ]
+    data1 = frame_from_rows(rows)
+    item = scalp_user_pullback(data1, 106.3, {})
+    assert item is not None
+    assert item.strategy == Strategy.SCALP_USER_PULLBACK
+    assert 0 < item.structural_stop < item.entry < item.target1 < item.target2
+
+
+def test_user_pullback_rejects_flat_market():
+    rows = [(100.0, 100.1, 99.9, 100.0, 1000.0)] * 22
+    data1 = frame_from_rows(rows)
+    assert scalp_user_pullback(data1, 100.0, {}) is None
+
+
+def test_classify_includes_all_three_scalps():
+    empty = pd.DataFrame()
+    long_rows = [(99.5, 99.6, 99.4, 99.55, 1000.0)] * 20 + impulse_rows()
+    long_raw = pd.DataFrame(
+        long_rows, columns=["open", "high", "low", "close", "volume"],
+        index=pd.date_range(start="2026-08-25 09:00", periods=len(long_rows), freq="min"),
+    )
+    found = classify(empty, empty, empty, 100.75, SESSION, frame1=long_raw, include_scalp=True)
+    assert {item.strategy for item in found} <= set(SCALP_STRATEGIES)
 
 
 def test_ledger_opens_and_settles_scalp(tmp_path):

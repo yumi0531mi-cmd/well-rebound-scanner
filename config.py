@@ -145,6 +145,7 @@ STRATEGY_FRAME_REQUIREMENTS = {
 SCALP_FRAME_REQUIREMENTS = {
     "1분 눌림 진입": {1: 30},
     "1분 VWAP 회복": {1: 30},
+    "1분 눌림 추매": {1: 30},
 }
 if len(STRATEGY_FRAME_REQUIREMENTS) != 22:
     raise RuntimeError("기법별 시간축 요구사항은 22개 전체를 포함해야 합니다")

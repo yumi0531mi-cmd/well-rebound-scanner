@@ -1050,6 +1050,52 @@ def scalp_vwap_reclaim(
     )
 
 
+def scalp_user_pullback(
+    data1: pd.DataFrame,
+    live_price: float,
+    audit: dict[str, list[str]] | None = None,
+) -> Opportunity | None:
+    """20-bar impulse with shallow pullback reclaim and measured targets.
+
+    Encodes the user's pyramiding dip-buy shape: a multi-ATR intraday
+    impulse, a pullback holding above the impulse low, and a volume-backed
+    reclaim. Shadow-only; measured by EV in the shadow ledger.
+    """
+    strategy = Strategy.SCALP_USER_PULLBACK
+    if len(data1) < 21:
+        if audit is not None:
+            audit[strategy.value] = ["1분봉 구조 부족"]
+        return None
+    window = data1.iloc[-20:-1] if len(data1) > 20 else data1.iloc[:-1]
+    current = data1.iloc[-1]
+    atr = float(current.atr)
+    impulse_high = float(window.high.max())
+    impulse_low = float(window.low.min())
+    impulse_range = impulse_high - impulse_low
+    if not np.isfinite(atr) or atr <= 0 or impulse_low <= 0:
+        return None
+    live_gap = abs(float(live_price) - float(current.close)) / float(current.close) if live_price > 0 else 1.0
+    volume_ratio = float(current.volume_ratio)
+    depth_atr = (impulse_high - float(current.close)) / atr
+    support = float(data1.low.iloc[max(0, len(data1) - 6):len(data1)].min())
+    conditions = {
+        "20봉 3ATR 이상 충격": impulse_range >= 3.0 * atr,
+        "0.5~2.0ATR 눌림": 0.5 <= depth_atr <= 2.0,
+        "충격 저점 유지": float(current.low) >= impulse_low,
+        "직전봉 대비 반등": float(current.close) > float(data1.close.iloc[-2]),
+        "거래량 1.5배 이상": current.volume > 0 and volume_ratio >= 1.5,
+        "ATR 0.2~3%": 0.002 <= atr / float(current.close) <= 0.03,
+        "라이브가 이탈 없음": live_gap <= 0.01,
+        "유동성 확인": current.volume > 0 and volume_ratio >= 1.5,
+    }
+    return _pattern_levels(
+        strategy, conditions, float(current.close), support, None, atr,
+        float(current.close) + impulse_range,
+        "20봉 충격 후 얕은 눌림·거래량 재상승", audit,
+        measured_move=impulse_range,
+    )
+
+
 def classify(frame15: pd.DataFrame, frame5: pd.DataFrame, frame3: pd.DataFrame, live_price: float, session: TradingSession | None,
              *, prepared: tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame] | None = None,
              audit: dict[str, list[str]] | None = None,
@@ -1120,11 +1166,12 @@ def classify(frame15: pd.DataFrame, frame5: pd.DataFrame, frame3: pd.DataFrame, 
                 if audit is not None:
                     audit[strategy.value] = [f"1분봉 구조 부족 {len(data1)}/{need}"]
                 continue
-            item = (
-                scalp_pullback_entry(data1, live_price, audit)
-                if strategy == Strategy.SCALP_PULLBACK_ENTRY
-                else scalp_vwap_reclaim(data1, live_price, audit)
-            )
+            factories = {
+                Strategy.SCALP_PULLBACK_ENTRY: scalp_pullback_entry,
+                Strategy.SCALP_VWAP_RECLAIM: scalp_vwap_reclaim,
+                Strategy.SCALP_USER_PULLBACK: scalp_user_pullback,
+            }
+            item = factories[strategy](data1, live_price, audit)
             if item is not None:
                 opportunities.append(item)
     core_strategies = (
