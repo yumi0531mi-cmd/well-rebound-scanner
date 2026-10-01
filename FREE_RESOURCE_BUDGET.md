@@ -1,5 +1,122 @@
 # Free-resource budget and continuity policy
 
+## October 1 takeover: verified state and next implementation contract
+
+At 2026-10-01 00:23:54 KST, a fresh remote lookup returned main
+`7d0ba35cd60ee1b9abce01beedb913cdea18291a`, matching local HEAD. Public
+health still returned HTTP503. Source version is `0.11.12-oct1-batch`;
+deployment and provider quota resets remain unverified. A push has already
+occurred this KST day: do not issue another push or repeat the old runbook.
+Midnight KST is not evidence of a provider billing-window reset.
+
+The policy below is partly implemented locally in `wellscan/resource_budget.py`.
+It consumes timestamped provider readings and gates NEW optional deep warmup
+admission. It does not yet collect provider metrics automatically, cancel queued
+work, cap total hosting traffic, or guarantee service uptime. Existing required
+seed collection, live evaluation and outcome tracking remain unchanged.
+
+### Direct dashboard observation, October 1 00:39–00:44 KST
+
+Render authenticated dashboard: workspace suspended for bandwidth; 5.4/5 GB,
+564.97/750 instance hours, 67/500 pipeline minutes. Breakdown: service-initiated
+2.64 GB, WebSocket 2.44 GB, HTTP 331 MB. Billing still says September.
+Latest successful deployment is ca65d0b, not pushed candidate 7d0ba35.
+Cockroach tab has an expired login; displayed RU/trial banners are stale and
+must not be ingested as current provider evidence. No paid/settings action taken.
+
+### Implemented telemetry input contract
+
+`config.py: RESOURCE_USAGE_PATH` points to an ignored runtime JSON file, not
+a secret file. No producer/credentials have been provisioned yet: absence yields
+UNKNOWN. Never fabricate a reset timestamp or refresh an old observation date.
+
+Root `resources` maps every `RESOURCE_BUDGETS` key to an object containing:
+`unit`, `scope_kind`, `scope_id`, `source` (provider-api/provider-dashboard),
+`period_start`, `period_end`, `observed_at` (timezone-aware ISO timestamps),
+`used`, and actual account `limit`. Include `previous` with the same scope,
+unit, source and billing window plus its observed_at and used. Supply workspace
+totals, not one service's subset. No API keys, URLs or tokens belong here.
+
+Readings older than one hour, missing resources, invalid numbers/units, reset
+mismatches and missing 1–24-hour comparisons yield UNKNOWN. Forecast uses the
+larger monthly-average/recent rate through the actual period end. Storage uses
+recent growth, never a fictitious monthly reset. Internal ceiling is the lower
+of configured target and 80% of verified account limit. WITHIN_INTERNAL_BUDGET
+means only that this projection fits, not proven future availability.
+
+Only WITHIN_INTERNAL_BUDGET admits new optional 3000-bar warmup. UNKNOWN or
+RESTRICT_OPTIONAL leaves required 900-bar seed, candidate evaluation, fresh-price
+checks, risk/cost rules and outcome tracking intact. Already queued work is
+bounded by the existing queue but is not cancelled by this first implementation.
+Supabase is not enabled; add its verified policies/producer before any migration.
+
+### Provider scope and conservative internal targets
+
+| Provider | Internal operating target | Scope and unresolved evidence |
+| --- | --- | --- |
+| Render | 3 GB outbound, 600 instance hours, 350 build minutes per billing window | Include all workspace services, all browsers and service-initiated traffic; verify actual build allowance in account. |
+| Existing Cockroach Basic | 35M RU, 7 GiB total storage | Confirm this cluster retains Basic terms. Current pricing page qualifies legacy terms by creation date/current term; do not assume new clusters receive the same entitlement. |
+| Supabase Plan B | 300 MB database, 3 GB uncached egress, 0.7 GB object storage | Not provisioned/activated by this plan. Free DB is 500 MB; egress and cached egress are distinct allowances, not a pooled 10 GB. |
+| UptimeRobot | Scanner monitor remains paused | A five-minute monitor can keep the host running; GitHub keep-awake workflow is a second source and must be counted too. |
+
+Supabase is not an automatic failover guarantee: free projects may pause
+after inactivity and free automatic DB backups are not included. Do not
+mirror every minute bar into two databases. If independently approved,
+Plan B should carry bounded essential state/checkpoints with a tested restore
+procedure; metadata alone cannot restore lost history or prove T1 outcomes.
+
+### Required accounting and pacing
+
+Record provider, resource/unit, account scope, period_start/end, used,
+observed_at, quota and source. Account-specific readings stay outside this
+public repository. Missing/stale/reset-ambiguous samples are UNKNOWN, never
+zero. Do not subtract samples spanning resets. Storage is cumulative, not
+reset monthly. Count shared services and reserve for metrics reporting lag.
+
+Use actual billing-window length (31-day October, not hard-coded30).
+For a full31-day window, 3GB implies about96.8MB/day and35M RU implies about
+1.13M RU/day. These are proposed rates, not measurements. Estimate month-end
+with both recent24h/7d and lifetime-in-window rates; reserve separately for
+startup warmup. Fresh provider samples must corroborate any safe projection.
+
+Proposed Render3GB allocation: browser traffic1GB, service traffic1.5GB,
+restart/measurement reserve0.5GB. Reallocate only after measurement; do not
+infer savings from a30s UI setting alone. New browser tabs add traffic.
+Forecast must be tested at specified peak symbols/sessions/users and after
+a cold restart, not just in one idle browser.
+
+### Work priority and reduction before a projected overrun
+
+1. Preserve fresh market observations, official risk checks, open-position
+   outcome tracking and minimum evidence persistence. Never lower T1/risk
+   qualification or make a stale ENTRY to fit an infrastructure quota.
+2. Disable optional debug payloads, redundant UI refresh and research jobs
+   first. Keep one shared scanner/cache per host, not one worker per viewer.
+3. Reuse ranking snapshots, closed-minute bars and pure calculations. Persist
+   changed rows only (already present in HistoryCache.merge); do not claim
+   that existing path rewrites all3000 rows on every merge.
+4. Profile per-upsert retention SQL and evidence-table growth. Batch or
+   cadence retention only after tests; do not delete candidate/trade evidence
+   to hide resource consumption or failed coverage. No deletion authorized.
+5. Reserve basic900-bar context acquisition separately from optional3000-bar
+   enrichment so throttling does not recreate the cold-formation deadlock.
+6. If core-only projected use exceeds a hard quota, report infeasibility and
+   obtain an approved alternative architecture. Free-host suspension cannot
+   be bypassed; adding Supabase does not fix Render suspension.
+
+Implementation gates: deterministic tests for missing/stale/reset samples,
+31-day pacing, resource-unit mixups and core-work priority; read-only provider
+adapter/manual timestamped readings first; one full active day and3-7day
+projection next. Only then enable optional-work adaptation and consider
+unpausing monitoring. No quota-proof or T1-complete claim before evidence.
+
+Official references checked October1:
+- https://render.com/docs/free
+- https://render.com/docs/outbound-bandwidth
+- https://www.cockroachlabs.com/cockroachdb/pricing/
+- https://supabase.com/pricing
+- https://help.uptimerobot.com/en/articles/11358364-how-to-create-your-first-monitor-on-uptimerobot-quick-setup-guide
+
 ## Non-negotiable limitation
 
 Free quotas are provider-enforced hard limits, not uptime guarantees. The

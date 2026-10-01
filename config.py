@@ -50,6 +50,19 @@ DISCOVERY_CACHE_SECONDS = 180
 # Background warmup scheduling yields for a cycle once KIS calls pass this.
 # Official evaluation is never throttled; tune after October metering.
 KIS_CYCLE_SOFT_BUDGET_CALLS = 400
+# Provider readings are separate from estimated KIS response bytes. No secrets.
+RESOURCE_USAGE_PATH = ".scanner_data/provider-usage.json"
+RESOURCE_USAGE_MAX_AGE_SECONDS = 3600
+RESOURCE_USAGE_MAX_BYTES = 65536
+# Conservative internal targets, NOT account entitlement assertions.
+# key: (unit, scope kind, internal target, cumulative monthly counter)
+RESOURCE_BUDGETS = {
+    "render_egress": ("bytes", "workspace", 3_000_000_000, True),
+    "render_hours": ("hours", "workspace", 600, True),
+    "render_build": ("minutes", "workspace", 350, True),
+    "cockroach_ru": ("RU", "cluster", 35_000_000, True),
+    "cockroach_storage": ("bytes", "cluster", 7 * 1024**3, False),
+}
 KIS_RATE_LIMIT_COOLDOWN_SECONDS = 61
 # UI status polling is not a market-data clock.  Keep state-only websocket
 # deltas slow enough to avoid turning an idle browser tab into egress load.

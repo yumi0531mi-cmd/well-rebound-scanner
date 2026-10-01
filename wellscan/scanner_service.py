@@ -31,6 +31,7 @@ from config import (
     KIS_CYCLE_SOFT_BUDGET_CALLS,
     MIN_UNIQUE_ENTRIES_PER_SESSION,
     PROVISIONAL_MIN_BARS,
+    RESOURCE_USAGE_PATH,
     SCANNER_CYCLE_SECONDS,
     SCANNER_REQUEST_DEADLINE_MARGIN_SECONDS,
     STRUCTURAL_WINDOW_BARS,
@@ -45,6 +46,7 @@ from .kis import KISClient, KISDeadlineError, KISError, KISRateLimitCooldown
 from .local_snapshot import LocalCandidateSnapshotStore
 from .models import ALL_ENTRY_STRATEGIES, Candidate, Market, ScanResult, Stage, TradingSession
 from .policy import session_day
+from .resource_budget import load_resource_budget
 from .sequence import SequenceStore
 from .sessions import (
     ENABLED_SESSIONS,
@@ -97,6 +99,7 @@ class ScannerServiceConfig:
     maximum_completed_bar_age_seconds: float = MAX_COMPLETED_BAR_AGE_SECONDS
     candidate_fallback_max_age_seconds: float = CANDIDATE_FALLBACK_MAX_AGE_SECONDS
     status_path: Path = Path(".scanner_data/scanner-service-status.json")
+    resource_usage_path: Path = Path(RESOURCE_USAGE_PATH)
 
     def __post_init__(self) -> None:
         if self.cycle_interval_seconds <= 0 or self.cycle_budget_seconds <= 0:
@@ -1425,6 +1428,7 @@ class ScannerService:
                 self._error("candidate-unexpected", exc, symbol=candidate.key, session=status.session.value)
         warmup_scheduled = 0
         warmup_pending = 0
+        resource_budget = load_resource_budget(self.config.resource_usage_path, self._aware_now())
         schedule_warmup = getattr(self.history, "schedule_warmup", None)
         pre_warmup_delta: dict[str, Any] = {"calls": 0, "bytes": 0, "buckets": {}}
         if callable(schedule_warmup):
@@ -1440,7 +1444,10 @@ class ScannerService:
                         seeds = int(seed_scheduler(self.client, tuple(candidates)) or 0)
                         warmup_scheduled += seeds
                         self._counters.history_seed_warmups_scheduled += seeds
-                    warmup_scheduled += int(schedule_warmup(self.client, tuple(deep_context_candidates)) or 0)
+                    # Preserve required seed collection; shed optional 3000-bar
+                    # expansion first. Provider usage UNKNOWN is not permission.
+                    if resource_budget["allow_deep_warmup"]:
+                        warmup_scheduled += int(schedule_warmup(self.client, tuple(deep_context_candidates)) or 0)
                     self._counters.history_warmups_scheduled += warmup_scheduled
                     pending_reader = getattr(self.history, "warmup_pending", None)
                     warmup_pending = int(pending_reader()) if callable(pending_reader) else 0
@@ -1503,6 +1510,7 @@ class ScannerService:
             published=published,
             warmup_scheduled=warmup_scheduled,
             warmup_pending=warmup_pending,
+            resource_budget=resource_budget,
         )
         LOGGER.info(
             "pipeline_cycle session=%s discovered=%s selected=%s attempted=%s history_empty=%s "

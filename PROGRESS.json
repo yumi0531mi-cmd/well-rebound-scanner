@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-10-01T00:08:53+09:00",
+  "updated_at": "2026-10-01T09:58:00+09:00",
   "current_step": 3,
   "completed_steps": [
     "기존 저장소와 인계 보고서 확인",
@@ -227,6 +227,27 @@
       "C:/Users/cj123/Documents/Codex/2026-09-14/new-chat/스캐너_최종완성_실행계획_2026-09-29.md"
     ]
   },
+  "october_1_takeover": {
+    "user_request": "Resume scanner-completion work, design free-resource limits across Render/Cockroach/Supabase/UptimeRobot, and advise GPT-6 Astra versus GPT-5.6 Sol reasoning level. Prior interactive stop superseded; recurring automation remains paused unless separately requested.",
+    "verified_remote": "Fresh git ls-remote:7d0ba35cd60ee1b9abce01beedb913cdea18291a equals localHEAD. SourceAPP_VERSION0.11.12-oct1-batch. No additional push performed; one-push-per-KST-day rule applies.",
+    "verified_health": "2026-10-01T00:23:54+09:00 public healthHTTP503. Deployed badge/build state and provider quota resets not confirmed. Do not equate KSTmidnight with account reset.",
+    "quota_audit": "Existing KIS soft-call budget is not a provider monthly usage controller. HistoryCache.merge already sends changed rows only. Per-upsert retention SQL/evidence table growth and a second keep-awake source in GitHub workflow need budgeting. Official Cockroach pricing now qualifies legacy Basic entitlements by cluster creation/current term; verify actual account before assuming applicability. Supabase free pause/500MB/egress constraints make it an unproven PlanB, not guaranteed failover.",
+    "changes": "Updated FREE_RESOURCE_BUDGET.md with provider-scoped targets,31-day pacing,UNKNOWN/stale/reset handling,core-work priority and implementation/measurement gates; marked OCT1_RUNBOOK_DRAFT.md push as already done and old rollback references historical. Documentation/design only; no automatic controller implemented in this turn.",
+    "verification_limits": "Other AI581-test claim and new shadow profile not independently rerun/audited in this turn. T1,5-symbol qualification and actual full-month headroom not proven. No secrets read/displayed, prohibited data accessed, paid operation, activation, settings change or deployment.",
+    "next": "Read actual deployment/quota dashboard state; implement/test timestamped provider-usage forecasts before optional-work throttling; reproduce cost-gap/22-strategy evidence from permitted datasets. Keep operational freshness, risk/cost and T1 criteria unchanged."
+  },
+  "october_1_resource_guard": {
+    "status": "LOCAL_VERIFIED_NOT_DEPLOYED",
+    "implementation": "config.py internal Render/Cockroach budgets; resource_budget.py bounded nonsecret provider-reading loader with scope/unit/freshness/reset checks and monthly/recent-rate forecast. UNKNOWN or projected excess defers NEW optional deep warmup only; required 900-bar seeds, core evaluation, risk/cost/freshness and outcome tracking preserved. UI reports recent-scan resource state.",
+    "not_implemented": "No automatic authenticated provider metrics producer, total-traffic hard cap, queued-work cancellation, Supabase migration or guaranteed uptime. No provider readings fabricated from KIS bytes; absent telemetry stays UNKNOWN.",
+    "verification": "612 passed,0 failures,0 errors,0 skips in23.257s; seven excluded suites match verified_metrics.latest_local_safe_test_exclusions. Ruff targeted files passed. JUnit: C:/Users/cj123/Documents/Codex/2026-09-14/new-chat/scanner-safe-regression-20261001-quota-final.xml",
+    "render_before_reset": "Authenticated dashboard Oct1 00:39-00:44KST: workspace suspended for5.4/5GB,564.97/750h,67/500pipeline minutes. September billing. Last successful deployca65d0b. Fresh remote check still7d0ba35; not deployed proof.",
+    "render_reset_observed": "Oct1 09:58KST authenticated Billing shows October,0MB/5GB,0h/750h,0min/500min and no workspace suspension banner. Service Live on oldca65d0b. At09:59:06KST manually deployed already-pushed7d0ba35 without additional git push: dep-daur0mg473hc73c9t70g. Build in progress; health/new badge not yet verified.",
+    "cockroach": "Existing tab has Session Expired modal. Old displayed Disabled/RU/trial-expiry messages are not fresh evidence. User asked to log in manually; no secrets requested.",
+    "deadline": "Requested09:00KST upload not completed. Approval review usage exhausted00:45KST; user resumed09:56KST. Report missed deadline, not a completed background deployment.",
+    "approval": "Additional Oct1 push exception requested; no explicit answer yet. No further push or provider settings changes performed. Recurring automation remains paused.",
+    "next": "Verify reset service health and actual deployed SHA/badge; await required login/push exception. Commit exact verified files locally, preserve unrelated indicators.py. Wire verified read-only provider metrics only with an approved credential path; measure full-month feasibility before any uptime claim. Continue permitted-data signal/cost/T1 diagnosis separately."
+  },
   "files": {
     "config.py": "qualification/risk/cost/data/model and scanner deadline-margin settings centralized; UI status poll 30s and live-price options 30/60/120s locally",
     "FREE_RESOURCE_BUDGET.md": "provider ceilings, internal free-tier targets, measured-vs-unavailable usage, graceful-degradation policy, and recovery checklist; no false claim of automatic quota enforcement",
@@ -287,7 +308,7 @@
     "non_15m_strategy_downtrend_gate_fixed": true,
     "public_strategy_rejection_diagnostics_added": true,
     "latest_safe_operational_test_count": 528,
-    "latest_local_safe_test_count": 578,
+    "latest_local_safe_test_count": 612,
     "latest_local_safe_test_exclusions": [
       "tests/test_external_history.py",
       "tests/test_controlled_tuning.py",
@@ -366,7 +387,8 @@
     "official_evidence": "actual KIS one-minute bars with point-in-time candidate universe"
   },
   "next_actions": [
-    "USER STOP 2026-09-29: handoff documents delivered; do not continue scanner runs or reactivate scheduled work without user resumption. Next owner should read user_stop_handoff_2026_09_29 and both reports before older next-actions entries.",
+    "OCT1 RESUMED: follow october_1_resource_guard and october_1_takeover first. Sept29 interactive stop superseded by user; recurring automation remains paused. Local quota guard612 safe regressions passed; authenticate Cockroach separately, verify Render reset and exact deployedSHA/health/badge. Additional daily push exception still awaiting explicit reply.",
+    "HISTORICAL USER STOP 2026-09-29: handoff documents delivered; retained for provenance, no longer the current interactive work state. Read user_stop_handoff_2026_09_29 and both reports for background.",
     "2026-09-29 supersedes earlier missing-local-key/data actions: actual KIS auth/quote verified,5x4-day separate dataset available. Advance from sparse formation/cost diagnosis to chronological per-strategy replay and broader permitted-date history; official point-in-time candidate membership and product metadata remain unverified.",
     "P0 input: obtain separate KIS bars without reserved dates or have user configure KIS credentials in approved runtime secret store, never chat. Original PKLs unopened; frozen 010170 not rerun. Two fixed symbols cannot prove five-symbol access coverage.",
     "P0 after data access: permitted-date point-in-time multi-symbol 22-strategy funnel and exact-minute coverage; distinguish formation/cost/signal/simulated fill/T1. Keep 80%/70%, original costs and market 50-fill minimum; report shortages, never invented performance.",

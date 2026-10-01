@@ -963,8 +963,12 @@ def test_warmup_deferred_when_cycle_over_kis_budget(tmp_path):
     assert service.snapshot().counters["history_warmup_deferred"] == 1
 
 
-def test_cold_candidate_gets_seed_history_before_any_setup_forms(tmp_path):
+@pytest.mark.parametrize("budget_state", ["UNKNOWN", "RESTRICT_OPTIONAL", "WITHIN_INTERNAL_BUDGET"])
+def test_cold_candidate_gets_seed_history_before_any_setup_forms(tmp_path, monkeypatch, budget_state):
     scheduled = []
+    monkeypatch.setattr("wellscan.scanner_service.load_resource_budget", lambda *args: {
+        "state": budget_state, "allow_deep_warmup": budget_state == "WITHIN_INTERNAL_BUDGET", "resources": {},
+    })
 
     class SeedHistory(FakeHistory):
         def load_structural_bars(self, candidate):
@@ -989,8 +993,14 @@ def test_cold_candidate_gets_seed_history_before_any_setup_forms(tmp_path):
         session_resolver=resolver(), evaluator=unavailable_setup,
     )
     assert service.run_cycle()
-    assert scheduled == [("seed", ("005930",)), ("deep", ())]
+    expected = [("seed", ("005930",))]
+    if budget_state == "WITHIN_INTERNAL_BUDGET":
+        expected.append(("deep", ()))
+    assert scheduled == expected
     assert service.snapshot().counters["history_seed_warmups_scheduled"] == 1
+    breakdown = service.snapshot().discovery_breakdown["KR:KR_REGULAR"]
+    assert breakdown["resource_budget"]["state"] == budget_state
+    assert breakdown["evaluated"] == 1
     assert validation.recorded == []
 
 

@@ -1350,6 +1350,12 @@ with st.expander("처리 시간 실측 · 미충족 이유"):
                 f"진입{_stages.get('final_buy', 0)}"
             )
     if _discovery_breakdown:
+        _budget_states = {
+            stages.get("resource_budget", {}).get("state", "UNKNOWN")
+            for stages in _discovery_breakdown.values() if isinstance(stages, dict)
+        }
+        _budget_label = " · ".join(sorted(_budget_states))
+        st.caption(f"무료 자원 점검(최근 스캔): {_budget_label} · UNKNOWN=측정 미확인, 무중단 보장 아님. 선택적 심화 수집만 제어합니다.")
         st.caption("발견 단계 계측 · 원응답→세션→중복제거→선택→분봉→상품→평가→진입")
         st.caption("KIS 바이트는 응답 본문 추정치(전체 네트워크 전송량 아님)이며, 캐시 적중은 로컬 분봉 재사용으로 백필 호출을 생략한 경우입니다.")
         if _show_diag:
