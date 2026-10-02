@@ -97,3 +97,13 @@ destructive, treat it as destructive and ask.
   WS is preferred. Report received age/delay honestly; no latency guarantee.
 - Trace each symbol's 22 strategies through readiness/formation/cost/fill-band/
   selection/final publication. Do not force passes or repeat frozen backtests.
+
+## 8. US penny and surge views (2026-10-02)
+
+- User reiterated US penny/surge coverage. Default minimum display price is
+  USD0.01 in all US views; dedicated penny view is below USD1. US surge view
+  means gain above7%, with no20% upper display cap. Keep the KR view unchanged.
+- These are overlapping views of the same observed KIS candidate feed, not
+  duplicate scans and not a claim that every listed US stock is discovered.
+- Sub-dollar prices retain four decimals in UI. Entry/cost/risk checks stay
+  unchanged; a penny/surge candidate is not automatically an actionable entry.

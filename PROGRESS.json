@@ -1,18 +1,28 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-10-02T23:22:00+09:00",
+  "october_2_penny_views": {
+    "status": "659_SAFE_TESTS_PASSED_LOCAL_ONLY_NOT_DEPLOYED",
+    "authorization": "User explicitly reiterates US penny stocks and existing surge view. Discovery/entry risk rules are not relaxed.",
+    "cause": "US full/normal UI default minimum2USD hid sub2 stocks. Existing surge display admitted only7<gain<=20%,hiding US gains above20. KIS ranking requests PRC1/PRC2 empty,so no equivalent broker-request price floor found. Universe remains observed volume/turnover rankings,not all-market exhaustive.",
+    "changes": "config.py US_DISPLAY_MIN_PRICE0.01,US_PENNY_PRICE_CEILING1,display gain cutoffs centralized. US modes full/normal/surge/penny;surge>7% without upper cap;penny<1USD. KR surge<=20 unchanged. Same shared feed,no added KIS calls. price_text uses4decimals below1USD. Existing costs,stops,strategy conditions and quotation cadence unchanged.",
+    "verification": "51 focused synthetic/UI tests passed;659 full safe tests passed,0failed,15069 warnings,27.30s;seven excluded suites unchanged. Ruff and diff-check passed. JUnit scanner-safe-regression-20261002-penny.xml in workspace. No backtest replay or performance claim.",
+    "deployment": "LOCAL ONLY. Oct2 push already used by c300eac;no further push/restart to preserve cache. Public0.11.13 still has old price/surge display filters until next approved batch. User-selectable0.1USD already exists in old surge view but does not remove its20%cap."
+  },
+  "updated_at": "2026-10-02T23:42:00+09:00",
   "october_2_strategy_expansion": {
-    "status": "636_SAFE_TESTS_PASSED_PENDING_COMMIT_AND_DEPLOY",
+    "status": "DEPLOYED_VERIFIED_LIVE_ACCEPTANCE_NOT_MET",
     "authorization": "Latest user explicitly requests one-second prices, expand beyond six without duplicates, trace rejection gates. Supersedes historical six-only hold; does not authorize forcing condition passes or relaxing costs/stops/T1 evidence.",
     "implementation": "19 non-opening-window strategies active; original six keep ordering. Three narrow opening strategies preserved as diagnostic-only; three separate scalp profiles remain shadow. Per-symbol22-row trace separates missing frames, formation failures, activation,product,plannedRR,fillband,currentRR,selection and final stage. UI detail opt-in,not one-second bulk transmission. ENGINE_VERSION multi-strategy-19-gate-trace-v1 separates new evidence.",
     "quotes": "Default compact UI1s; shared deduplicated REST fallback request buckets1s instead of3,WS preferred; existing5s max freshness preserved,invalid prices refused,received age/delay shown. Broker throttling/network latency still apply; no guaranteed exchange-to-screen1s SLA.",
     "verification": "636 passed,0failed,15069 dependency warnings,26.31s; seven excluded suites unchanged. Targeted76passed. Ruff passed,diff-check passed. Old disabled-strategy assertions updated to explicit subset or approved19/narrow3 policy,not removed. Synthetic tests only,no performance claim. JUnit scanner-safe-regression-20261002-active19-final.xml in workspace.",
-    "deployment": "Fresh ls-remote23:20KST still7d0ba35; previous approval-review limitation no longer blocks read-only network. No Oct2 push yet. Batch once after exact-file commit; preserve unrelated indicators.py. Deployed fields remain unchanged pendingSHA/health/badge proof.",
+    "deployment": "Oct2 single push c300eac9d8c0e118ec732b5fce9cfeecb5a279f9 reverified by fresh ls-remote23:26KST. Authenticated Render reports Free,Live,last successful SHA c300eac,Auto-Deploy duration2m54s. Public health200/ok23:26:34KST and exact badge0.11.13-live1s-min2-goal3/engine multi-strategy-19-gate-trace-v1 confirmed. No extra push/redeploy or provider setting changes.",
+    "live_ui_verification": "23:26-28KST/10:26-28EDT:KR closed,US_REGULAR active. Default1s,display3,19active/min2target3 visible. REST current prices changed across snapshots (HYG77.23->77.24,SNXX17.09->17.07,USO142.69->142.76); observed receive-age0.0-2.9s including delay labels,not end-to-end latency distribution or1s SLA. WS status changed connecting->connected,but sampled displayed prices remained REST. Per-symbol22-strategy trace checkbox/select and rendered dataframe visually verified for SNXX;3/20 15m,10/25 5m,17/25 3m in trend rows,formation false,unknown cost blank/None,first gate data readiness.",
+    "live_limits": "Cold post-deploy sample pool70,UI filtered/evaluated52,DATA_WAIT51,ENTRY0,WAIT0;daemon access evaluated67 then70,all-universe incomplete. Aggregate blocks include missing strategy frames,unknown/nonstandard products22,and individual volume/open-reclaim/prior-session-data conditions. These are different snapshot scopes,not one synchronized funnel. Cockroach startup failure/localCSV fallback persists;durable candidate/access writes0. No T1 proof,minimum2 unmet,monthly quota still UNKNOWN.",
     "next": "Verify public deployment,then inspect actual per-symbol gates in US active session. Do not repeat frozen010170 or read prohibited dates. Free DB migration and measured monthly quota feasibility remain unfinished."
   },
   "october_2_count_contract_deployment": {
-    "status": "625_SAFE_TESTS_PASSED_COMMIT_PUSH_BLOCKED_NOT_DEPLOYED",
+    "status": "HISTORICAL_BLOCKER_RESOLVED_SEE_october_2_strategy_expansion",
     "deployment_blocker": "git add/commit failed index.lock Permission denied in linked worktree git metadata. Following escalated push was NOT executed because automatic approval review hit usage limit. Latest changes remain uncommitted; last localHEAD5b10d8a,last freshly verified remote7d0ba35. Do not bypass review or report deployment success.",
     "zero_entry_diagnosis": "ZERO_ENTRY_DIAGNOSIS_20261002.md: deterministic synthetic QuoteBook+SnapshotCoordinator reproduction with WS absent gives errors at0/30/60/90s despite successful REST;1s polling recovers after first tick.30s UI vs5s REST freshness confirmed incompatible without another consumer. UI defect only,not proof of daemon zero-entry cause. Runtime strategy counts6 active/22 classified verified. No strategy activation or signal conditions changed.",
     "verification": "625 passed,0failed,12328warnings,25.32s;seven prohibited/research suites excluded as before. Ruff passed with3 pre-existing inaccessible pytest temp directories skipped. Full JUnit scanner-safe-regression-20261002-min2-final.xml. No profitability or latency qualification.",
@@ -342,7 +352,7 @@
     "inactive_16_official_performance": false,
     "live_access_snapshot_persistence_implemented": true,
     "live_access_qualification_status": "SERVICE_RESTORED_OCT1_LOCAL_FALLBACK_ZERO_ACTIONABLE_IN_LATEST_SAMPLE_CRITERIA_NOT_MET",
-    "latest_deployed_commit": "7d0ba35",
+    "latest_deployed_commit": "c300eac9d8c0e118ec732b5fce9cfeecb5a279f9",
     "strategy_specific_timeframes_implemented": true,
     "same_day_reentry_after_rearm_implemented": true,
     "strategy_22_kis_admin_audit_implemented": true,
@@ -351,7 +361,7 @@
     "non_15m_strategy_downtrend_gate_fixed": true,
     "public_strategy_rejection_diagnostics_added": true,
     "latest_safe_operational_test_count": 528,
-    "latest_local_safe_test_count": 636,
+    "latest_local_safe_test_count": 659,
     "latest_local_safe_test_exclusions": [
       "tests/test_external_history.py",
       "tests/test_controlled_tuning.py",
@@ -373,7 +383,7 @@
       "stale_or_missing_cache": "no official entry; incomplete access snapshot recorded",
       "provider_or_host_suspension_bypass": false
     },
-    "latest_deployed_version": "0.11.12-oct1-batch",
+    "latest_deployed_version": "0.11.13-live1s-min2-goal3",
     "latest_local_verified_version": "0.11.11-call-cadence",
     "render_status_recheck_2026_09_28": "2026-09-28 20:57:21 KST: public health HTTP 503; no deployment performed",
     "post_04fc8ab_targeted_tests": 49,
@@ -433,7 +443,8 @@
     "official_evidence": "actual KIS one-minute bars with point-in-time candidate universe"
   },
   "next_actions": [
-    "LATEST OCT2 APPROVAL supersedes six-only hold below:19 active,22 classified,1s quotes,per-symbol gate trace.636 safe tests passed; batch today's single push and verify SHA/health/badge before saying deployed. No forced passes or T1 qualification.",
+    "US penny/surge display fix659 safe tests passed,local only:default0.01USD,penny<1USD,surge>7% without20%cap,4decimal sub-dollar display. Include in next permitted batch with new candidate app version;Oct2 push already used. Do not confuse inclusion with passed entry conditions.",
+    "LATEST OCT2 DEPLOYMENT VERIFIED:c300eac/0.11.13/health200/RenderLive;19active,22trace,1sUI. Today's push used;no further push. Investigate cold per-strategy frame readiness,900seed throughput and unavailable durable evidence;REST receive-age0-2.9s observed despite1sUI. No forced passes,T1 qualification,or free-uptime guarantee.",
     "OCT2 USER APPROVAL: implement minimum2/target3 at every access time,default live3; explicitly requested web deployment for feedback. Batch the tested1s UI/count/SQL savings/quota guard in today's single push,verify remoteSHA/health/UIbadge. DB migration and performance qualification remain incomplete.",
     "OCT2 supersedes old login blocker: Turso Starter(Free) verified,no payment method; quotas500M/10M/5GB/3GB. Read october_2_turso_and_live_quotes and quota report. Local1s compact price UI+SQL savings624 safe tests,not deployed. DB adapter/budget feasibility incomplete; do not claim unlimited free operation or1s end-to-end latency.",
     "OCT1 15:41KST: prioritize october_1_cockroach_recovery. Production7d0ba35/0.11.12 verified Live+health200+badge; local fe23f02 quota guard and SQL savings are not deployed. Account console login required; do not assume monthly free credits are available without payment eligibility or treat cached fallback error as current DB probe.",

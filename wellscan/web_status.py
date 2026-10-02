@@ -14,6 +14,8 @@ import threading
 from dataclasses import dataclass
 from enum import StrEnum
 
+from config import DISPLAY_SURGE_MIN_CHANGE_PCT, KR_DISPLAY_SURGE_MAX_CHANGE_PCT, US_PENNY_PRICE_CEILING
+
 from .models import Candidate, Market, ScanResult, Stage, TradingSession
 
 ADMIN_TOKEN_ENV = "WELLSCAN_ADMIN_TOKEN"
@@ -151,17 +153,23 @@ class PipelineIssueCollector:
 
 def candidate_matches_filter(candidate: Candidate, mode: str, minimum_price: float, maximum_price: float) -> bool:
     """Apply cheap user display filters after the shared heavy market scan."""
-    if mode not in {"전체", "일반주", "급등주"}:
+    if mode not in {"전체", "일반주", "급등주", "동전주"}:
         raise ValueError("unknown candidate display mode")
     if not all(math.isfinite(value) for value in (minimum_price, maximum_price)) or minimum_price > maximum_price:
         raise ValueError("invalid candidate price range")
-    if not math.isfinite(candidate.price) or not minimum_price <= candidate.price <= maximum_price:
+    if not math.isfinite(candidate.price) or candidate.price <= 0 or not minimum_price <= candidate.price <= maximum_price:
         return False
+    if mode == "동전주":
+        return candidate.market == Market.US and candidate.price < US_PENNY_PRICE_CEILING
     if mode == "전체":
         return True
     if not math.isfinite(candidate.change_pct):
         return False
-    return 0 <= candidate.change_pct <= 7 if mode == "일반주" else 7 < candidate.change_pct <= 20
+    if mode == "일반주":
+        return 0 <= candidate.change_pct <= DISPLAY_SURGE_MIN_CHANGE_PCT
+    return candidate.change_pct > DISPLAY_SURGE_MIN_CHANGE_PCT and (
+        candidate.market == Market.US or candidate.change_pct <= KR_DISPLAY_SURGE_MAX_CHANGE_PCT
+    )
 
 
 def shared_scan_key(market: Market, session: TradingSession) -> tuple[str, str]:

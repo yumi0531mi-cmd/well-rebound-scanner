@@ -18,6 +18,7 @@ from config import (
     BACKTEST_MAX_TOP_N,
     BACKTEST_MIN_DAYS,
     BACKTEST_MIN_TOP_N,
+    DISPLAY_SURGE_MIN_CHANGE_PCT,
     LIVE_DETAIL_REFRESH_SECONDS,
     LIVE_DISPLAY_DEFAULT_SYMBOLS,
     LIVE_DISPLAY_MAX_SYMBOLS,
@@ -31,6 +32,8 @@ from config import (
     TARGET1_HIT_RATE_GOAL,
     TARGET_ACTIONABLE_SYMBOLS,
     UI_STATUS_POLL_SECONDS,
+    US_DISPLAY_MIN_PRICE,
+    US_PENNY_PRICE_CEILING,
     VALIDATION_CASES_PER_REFRESH,
     VALIDATION_TRACKING_REFRESH_SECONDS,
 )
@@ -434,7 +437,8 @@ def rest_price(market: Market, symbol: str, exchange: str, session: TradingSessi
 def price_text(value: float | None, unavailable: str = "산출 대기") -> str:
     if value is None or not math.isfinite(value):
         return unavailable
-    return f"{value:,.2f}".rstrip("0").rstrip(".")
+    decimals = 4 if 0 < abs(value) < 1 else 2
+    return f"{value:,.{decimals}f}".rstrip("0").rstrip(".")
 
 
 def utc_timestamp_text(value: datetime | None, unavailable: str = "시각 미수신") -> str:
@@ -770,7 +774,8 @@ with st.sidebar:
         f"미국 {us_status.label}{' 감시중' if us_status.active else ''}"
     )
     st.info(f"현재 세션: {status.label}" + (" · 감시 중" if status.active else " · 신규 신호 중지"))
-    mode = st.radio("후보 모드", ["전체", "일반주", "급등주"], horizontal=True)
+    modes = ["전체", "일반주", "급등주"] + (["동전주"] if market == Market.US else [])
+    mode = st.radio("후보 모드", modes, horizontal=True)
     display_count = st.slider("표시 후보", LIVE_DISPLAY_MIN_SYMBOLS, LIVE_DISPLAY_MAX_SYMBOLS, LIVE_DISPLAY_DEFAULT_SYMBOLS)
     refresh_seconds = int(st.radio(
         "현재가 화면 갱신",
@@ -783,16 +788,17 @@ with st.sidebar:
         minimum_price = st.number_input("최소 가격(원)", 100.0, 300000.0, 1000.0, 100.0)
         maximum_price = st.number_input("최대 가격(원)", 1000.0, 1000000.0, 300000.0, 1000.0)
     else:
-        default_minimum = 0.1 if mode == "급등주" else 2.0
         minimum_price = st.number_input(
             "최소 가격(USD)",
-            0.1,
+            US_DISPLAY_MIN_PRICE,
             1000.0,
-            default_minimum,
-            0.1,
+            US_DISPLAY_MIN_PRICE,
+            0.01,
+            format="%.4f",
             key=f"minimum-usd-{mode}",
         )
         maximum_price = st.number_input("최대 가격(USD)", 1.0, 10000.0, 500.0, 5.0)
+        st.caption(f"동전주: {US_PENNY_PRICE_CEILING:g}달러 미만 · 급등주: +{DISPLAY_SURGE_MIN_CHANGE_PCT:g}% 초과(상한 없음) · 가격 범위 안의 관측 후보만 표시 · 비용·손절 기준 유지")
     st.caption("후보 수집: KIS 거래량/거래대금 각 최대 300 요청 · 실제 응답 수 별도 · 전 시장 순위 보장 아님")
     st.caption("관측 후보에서 거래대금/최근 3봉 상대거래량/20봉 변동성 각 100 합집합 + 데이터 준비 종목")
     st.caption(
