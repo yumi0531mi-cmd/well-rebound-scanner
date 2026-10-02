@@ -16,12 +16,14 @@ import numpy as np
 import pandas as pd
 
 from config import (
+    ACCESS_CRITERIA_VERSION,
     BACKTEST_MAX_DAYS,
     BACKTEST_MAX_TOP_N,
     BACKTEST_MIN_DAYS,
     BACKTEST_MIN_TOP_N,
     MIN_UNIQUE_ENTRIES_PER_SESSION,
     TARGET1_HIT_RATE_GOAL,
+    TARGET_ACTIONABLE_SYMBOLS,
     WARMUP_BARS,
 )
 
@@ -70,6 +72,9 @@ def _access_time_summary(evaluated, actionable, immediate, *, expected_instants=
     instants = sorted(set(evaluated) | set(expected_instants))
     if not instants:
         return {
+            "criteria_version": ACCESS_CRITERIA_VERSION,
+            "minimum_required": MIN_UNIQUE_ENTRIES_PER_SESSION,
+            "target_required": TARGET_ACTIONABLE_SYMBOLS,
             "definition": "exact completed-minute continuously evaluated portfolio snapshot",
             "eligible_instants": 0,
             "unevaluated_instants": 0,
@@ -77,12 +82,17 @@ def _access_time_summary(evaluated, actionable, immediate, *, expected_instants=
             "actionable_minimum_pass_pct": None,
             "minimum_immediate_entry_symbols": None,
             "immediate_entry_minimum_pass_pct": None,
+            "actionable_target_pass_pct": None,
+            "immediate_entry_target_pass_pct": None,
         }
 
     actionable_counts = [len(actionable.get(stamp, ())) for stamp in instants]
     immediate_counts = [len(immediate.get(stamp, ())) for stamp in instants]
     minimum = MIN_UNIQUE_ENTRIES_PER_SESSION
     return {
+        "criteria_version": ACCESS_CRITERIA_VERSION,
+        "minimum_required": minimum,
+        "target_required": TARGET_ACTIONABLE_SYMBOLS,
         "definition": "exact completed-minute continuously evaluated portfolio snapshot",
         "eligible_instants": len(instants),
         "unevaluated_instants": sum(not evaluated.get(stamp) for stamp in instants),
@@ -91,6 +101,8 @@ def _access_time_summary(evaluated, actionable, immediate, *, expected_instants=
         "actionable_minimum_pass_pct": sum(value >= minimum for value in actionable_counts) / len(instants) * 100,
         "minimum_immediate_entry_symbols": min(immediate_counts),
         "immediate_entry_minimum_pass_pct": sum(value >= minimum for value in immediate_counts) / len(instants) * 100,
+        "actionable_target_pass_pct": sum(value >= TARGET_ACTIONABLE_SYMBOLS for value in actionable_counts) / len(instants) * 100,
+        "immediate_entry_target_pass_pct": sum(value >= TARGET_ACTIONABLE_SYMBOLS for value in immediate_counts) / len(instants) * 100,
     }
 
 

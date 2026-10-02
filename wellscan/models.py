@@ -117,8 +117,9 @@ if set(STRATEGY_FRAME_REQUIREMENTS) != {strategy.value for strategy in ALL_ENTRY
     raise RuntimeError("config.py 기법별 시간축 설정이 22개 전략 원장과 다릅니다")
 ACTIVE_STRATEGIES = tuple(Strategy(value) for value in ACTIVE_STRATEGY_VALUES)
 NARROW_TIME_STRATEGIES = frozenset(Strategy(value) for value in NARROW_TIME_STRATEGY_VALUES)
-if ACTIVE_STRATEGIES != ESTABLISHED_ACTIVE_STRATEGIES + EXPERIMENTAL_STRATEGIES:
-    raise RuntimeError("config.py 활성 전략 순서가 검증된 포트폴리오와 다릅니다")
+if (not ACTIVE_STRATEGIES or len(set(ACTIVE_STRATEGIES)) != len(ACTIVE_STRATEGIES)
+        or not set(ACTIVE_STRATEGIES) <= set(ALL_ENTRY_STRATEGIES)):
+    raise RuntimeError("활성 전략은 22개 원장 안의 중복 없는 포트폴리오여야 합니다")
 if NARROW_TIME_STRATEGIES & set(ACTIVE_STRATEGIES):
     raise RuntimeError("특정 개장 시간대 전용 전략은 운영 포트폴리오에 활성화할 수 없습니다")
 ACTIVE_STRATEGY_COUNT = len(ACTIVE_STRATEGIES)

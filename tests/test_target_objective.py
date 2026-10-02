@@ -50,7 +50,7 @@ def test_bad_structural_inputs_do_not_create_levels(entry, support, atr):
     assert _levels(Strategy.RANGE_REVERSAL, entry, support, 105, atr, 106, {"mock": True}, "mock") is None
 
 
-def test_inactive_breakout_is_not_emitted_even_when_its_old_pattern_matches(monkeypatch):
+def test_explicit_portfolio_excludes_breakout_even_when_its_pattern_matches(monkeypatch):
     from wellscan.opportunities import classify
     frame = pd.DataFrame(dict(open=99., high=100., low=98., close=99., volume=1000.,
                               ema9=100., ema20=99., vwap=99., atr=2., ma5=99., ma20=99., ma60=99.,
@@ -59,7 +59,8 @@ def test_inactive_breakout_is_not_emitted_even_when_its_old_pattern_matches(monk
     frame.loc[frame.index[-1], ["high", "close"]] = [101., 100.5]
     # A later pivot at 100 is the tested barrier; 110 is overhead resistance.
     monkeypatch.setattr("wellscan.opportunities._last_pivots", lambda _: ([110., 100.], [98.]))
-    items = classify(frame, frame, frame, 100.5, None, prepared=(frame, frame, frame))
+    items = classify(frame, frame, frame, 100.5, None, prepared=(frame, frame, frame),
+                     active_strategies=(Strategy.RANGE_REVERSAL,))
     assert Strategy.BREAKOUT not in {item.strategy for item in items}
 
 

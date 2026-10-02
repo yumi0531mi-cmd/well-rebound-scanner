@@ -1100,6 +1100,8 @@ def test_cycle_persists_exact_live_access_coverage(tmp_path):
     assert (market, session, observed_at) == ("KR", "KR_REGULAR", NOW)
     assert payload["discovered_symbols"] == payload["evaluated_symbols"] == 1
     assert payload["actionable_symbols"] == payload["immediate_entry_symbols"] == 1
+    assert payload["minimum_required"] == 2 and payload["target_required"] == 3
+    assert payload["criteria_version"] == "2026-10-02-min2-target3"
     assert payload["scan_complete"] is payload["coverage_complete"] is True
     status = service.snapshot()
     assert status.counters["access_snapshots_written"] == 1

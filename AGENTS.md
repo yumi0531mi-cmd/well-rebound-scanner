@@ -73,3 +73,27 @@ destructive, treat it as destructive and ask.
   `PROGRESS.json` only after the remote SHA, Render health 200, and the exact
   UI version badge have all been verified. Never infer deployment from a
   commit or version bump alone.
+
+## 6. User-approved access-count contract (2026-10-02)
+
+- The user explicitly replaced five actionable symbols with a minimum of TWO
+  and a target of THREE at each active-session access time; default live display
+  is THREE. This supersedes old five-symbol requirements, not old measurements.
+- Keep the full discovery universe and all 22 strategy evaluations. Observations
+  and ENTRY_WAIT do not qualify as immediately actionable entries. Record both.
+- Preserve T1 goal80%/floor70%, minimum50 fills per market, costs/stops and all
+  evidence rules. Do not pad a shortage or retroactively relabel old results.
+- Daily entry totals are diagnostic only; count qualification is per access time.
+
+## 7. User-approved strategy expansion (2026-10-02)
+
+- Latest approval supersedes the old six-only activation hold: enable the 19
+  non-opening-window strategies, preserve the three narrow-time implementations
+  as diagnostics and the three separate scalp profiles as shadow-only.
+- Preserve all costs, stops, causal completed-frame and fresh-quote checks.
+  Activation is permission to detect setups, NOT statistical qualification.
+- One symbol with several matched strategies remains one symbol/selected plan.
+- Default compact quote UI and REST fallback request cadence are one second;
+  WS is preferred. Report received age/delay honestly; no latency guarantee.
+- Trace each symbol's 22 strategies through readiness/formation/cost/fill-band/
+  selection/final publication. Do not force passes or repeat frozen backtests.

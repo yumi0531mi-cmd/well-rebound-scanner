@@ -1,7 +1,7 @@
 import ast
 from pathlib import Path
 
-from config import LIVE_DETAIL_REFRESH_SECONDS, LIVE_QUOTE_REFRESH_OPTIONS_SECONDS
+from config import LIVE_DETAIL_REFRESH_SECONDS, LIVE_DISPLAY_DEFAULT_SYMBOLS, LIVE_QUOTE_REFRESH_OPTIONS_SECONDS
 from wellscan.live_view import live_price_table
 
 
@@ -21,6 +21,7 @@ def test_five_row_payload_is_small_but_not_a_network_usage_measurement():
 def test_fast_quotes_do_not_render_heavy_cards_or_write_evidence():
     assert LIVE_QUOTE_REFRESH_OPTIONS_SECONDS[0] == 1
     assert LIVE_DETAIL_REFRESH_SECONDS == 30
+    assert LIVE_DISPLAY_DEFAULT_SYMBOLS == 3
     tree = ast.parse(Path("app.py").read_text(encoding="utf-8"))
     functions = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
     fast = functions["live_prices"]

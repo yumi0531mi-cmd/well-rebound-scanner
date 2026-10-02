@@ -25,6 +25,7 @@ from typing import Any
 import pandas as pd
 
 from config import (
+    ACCESS_CRITERIA_VERSION,
     CANDIDATE_FALLBACK_MAX_AGE_SECONDS,
     CANDIDATE_SNAPSHOT_INTERVAL_SECONDS,
     DISCOVERY_CACHE_SECONDS,
@@ -35,6 +36,7 @@ from config import (
     SCANNER_CYCLE_SECONDS,
     SCANNER_REQUEST_DEADLINE_MARGIN_SECONDS,
     STRUCTURAL_WINDOW_BARS,
+    TARGET_ACTIONABLE_SYMBOLS,
 )
 
 from . import ENGINE_VERSION
@@ -541,6 +543,8 @@ class ScannerService:
             "scan_complete": scan_complete,
             "coverage_complete": bool(scan_complete and discovered > 0 and evaluated >= discovered),
             "minimum_required": MIN_UNIQUE_ENTRIES_PER_SESSION,
+            "target_required": TARGET_ACTIONABLE_SYMBOLS,
+            "criteria_version": ACCESS_CRITERIA_VERSION,
             "failure": failure,
         }
         key = f"{status.market.value}:{status.session.value}"

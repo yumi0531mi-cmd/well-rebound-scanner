@@ -19,6 +19,9 @@ from config import (
     BACKTEST_MIN_DAYS,
     BACKTEST_MIN_TOP_N,
     LIVE_DETAIL_REFRESH_SECONDS,
+    LIVE_DISPLAY_DEFAULT_SYMBOLS,
+    LIVE_DISPLAY_MAX_SYMBOLS,
+    LIVE_DISPLAY_MIN_SYMBOLS,
     LIVE_QUOTE_REFRESH_OPTIONS_SECONDS,
     MIN_TRADES_PER_MARKET,
     MIN_UNIQUE_ENTRIES_PER_SESSION,
@@ -26,6 +29,7 @@ from config import (
     STRATEGY_FRAME_REQUIREMENTS,
     TARGET1_HIT_RATE_FLOOR,
     TARGET1_HIT_RATE_GOAL,
+    TARGET_ACTIONABLE_SYMBOLS,
     UI_STATUS_POLL_SECONDS,
     VALIDATION_CASES_PER_REFRESH,
     VALIDATION_TRACKING_REFRESH_SECONDS,
@@ -38,6 +42,7 @@ from wellscan.candidates import MAX_ANALYSIS_CANDIDATES, UniverseBook
 from wellscan.candidates import analysis_candidates as select_analysis_candidates
 from wellscan.engine import evaluate, revalidate_live
 from wellscan.execution import local_time
+from wellscan.gate_trace import strategy_gate_rows
 from wellscan.history import HistoryCache
 from wellscan.kis import KISClient, KISError
 from wellscan.live_view import live_price_table
@@ -256,8 +261,9 @@ if st.query_params.get("admin") == "backtest":
     st.write(" / ".join(f"{row['기법명']}: {row['판정']}" for row in _report["strategy_target1"]))
     st.subheader("날짜별 교차표")
     st.dataframe(_report["daily_target1"], use_container_width=True)
-    _fraction = _report["five_symbols_day_pct"]
-    st.write(f"{MIN_UNIQUE_ENTRIES_PER_SESSION}종목 이상 달성 비율: {_fraction}% · 기준 {_report['daily_criterion']}")
+    _fraction = _report.get("minimum_symbols_day_pct")
+    _report_minimum = _report.get("minimum_required", 5)
+    st.write(f"일별 진단: 최소 {_report_minimum}종목 달성 비율: {_fraction if _fraction is not None else '구판 결과·재판정 안 함'}% · 매 접속시각 기준과 별개")
     st.caption(_report["metric_note"])
     st.subheader("장중 임의 접속시각 커버리지")
     _access = _report.get("access_time_coverage", {})
@@ -266,10 +272,14 @@ if st.query_params.get("admin") == "backtest":
         _access_columns[0].metric("검증 대상 1분 시각", f"{_access['eligible_instants']:,}")
         _access_columns[1].metric("최소 평가 종목", _access["minimum_candidates_evaluated"])
         _access_columns[2].metric("최소 진입대기 종목", _access["minimum_actionable_symbols"])
-        _access_columns[3].metric("5종목 충족 시각", f"{_access['actionable_minimum_pass_pct']:.2f}%")
+        _access_minimum = _access.get("minimum_required", 5)
+        _access_columns[3].metric(f"진입대기 포함 {_access_minimum}종목 시각", f"{_access['actionable_minimum_pass_pct']:.2f}%")
+        st.caption(f"즉시진입 {_access_minimum}종목 충족: {_access['immediate_entry_minimum_pass_pct']:.2f}% · 진입대기와 즉시진입은 별도입니다.")
+        if _access.get("immediate_entry_target_pass_pct") is not None:
+            st.caption(f"목표 {_access['target_required']}종목 즉시진입 충족: {_access['immediate_entry_target_pass_pct']:.2f}%")
         st.caption(f"평가 기록 없는 시각 {_access.get('unevaluated_instants', 0):,}개도 미충족으로 포함합니다.")
-        if _access["minimum_actionable_symbols"] < MIN_UNIQUE_ENTRIES_PER_SESSION:
-            st.warning("장중 어느 시각에 접속해도 진입대기 종목 5개 이상이라는 기준을 충족하지 못했습니다.")
+        if _access["minimum_immediate_entry_symbols"] < _access_minimum:
+            st.warning(f"장중 매 접속시각 실제 진입 가능 종목 최소 {_access_minimum}개 기준 미달입니다. 관찰·진입대기로 채우지 않습니다.")
     else:
         st.warning("검증 대상 거래일과 1분 시각이 없어 임의 접속시각 기준을 판정할 수 없습니다.")
     st.caption("거래일의 장 시작부터 종료 전까지 1분 간격으로 집계합니다. 후보·데이터·평가 누락 시각을 포함합니다.")
@@ -761,7 +771,7 @@ with st.sidebar:
     )
     st.info(f"현재 세션: {status.label}" + (" · 감시 중" if status.active else " · 신규 신호 중지"))
     mode = st.radio("후보 모드", ["전체", "일반주", "급등주"], horizontal=True)
-    display_count = st.slider("표시 후보", 5, 10, 5)
+    display_count = st.slider("표시 후보", LIVE_DISPLAY_MIN_SYMBOLS, LIVE_DISPLAY_MAX_SYMBOLS, LIVE_DISPLAY_DEFAULT_SYMBOLS)
     refresh_seconds = int(st.radio(
         "현재가 화면 갱신",
         list(LIVE_QUOTE_REFRESH_OPTIONS_SECONDS),
@@ -798,7 +808,7 @@ st.markdown(
 
 st.caption(
     f"{ACTIVE_STRATEGY_COUNT}개 활성 매매기법 전체의 실제 ENTRY를 합산한 세션별 고유 진입종목 "
-    "최소 5개 기준(없으면 없음) · 80% 승률 미검증 · 자동 주문 없음 · "
+    f"기록 · 매 접속시각 진입 가능 최소 {MIN_UNIQUE_ENTRIES_PER_SESSION}개·목표 {TARGET_ACTIONABLE_SYMBOLS}개(없으면 없음) · 80% 승률 미검증 · 자동 주문 없음 · "
     "-1.5%는 손절 트리거이며 갭 손실 한도가 아님"
 )
 if not os.environ.get("WELLSCAN_INSTRUMENT_POLICIES"):
@@ -1078,7 +1088,7 @@ def render_current_session_tracking() -> None:
         return
     st.caption(
         f"{ACTIVE_STRATEGY_COUNT}개 활성 매매기법 전체 합산 · 이번 세션 고유 모의 진입종목 {progress['unique_symbols']}개 "
-        f"(최소 5개 기준, 없으면 없음) · 신호 {progress['signals']}건 · "
+        f"(세션 누계이며 매 접속시각 최소 {MIN_UNIQUE_ENTRIES_PER_SESSION}개·목표 {TARGET_ACTIONABLE_SYMBOLS}개 판정과 별개) · 신호 {progress['signals']}건 · "
         f"모의 진입 {progress['entries']}건 · 미체결 대기 {progress['pending']}건 · 실제 주문 아님"
     )
     ongoing = [
@@ -1341,6 +1351,14 @@ with st.expander("처리 시간 실측 · 미충족 이유"):
     st.caption("조건 검사 목표 p95 500ms · API 수집/화면 표시 지연과 별개 · 실측 표본이 없으면 성능 판정 불가")
     st.write({stage.value: number for stage, number in counts.items()})
     _show_diag = st.checkbox("진단 상세(JSON·표) 보기", value=False, key="diag_detail")
+    if st.checkbox("종목별 22기법 탈락 경로 보기", value=False, key="symbol_gate_trace") and results:
+        trace_index = st.selectbox(
+            "추적할 종목", range(len(results)), key="gate_trace_symbol",
+            format_func=lambda index: f"{results[index][0].symbol} · {results[index][0].name}",
+        )
+        trace_result = results[trace_index][1]
+        st.caption(f"완료봉 기준 진단: {diagnostic_timestamp_text(trace_result.diagnostics.get('completed_bar_at'))} · 체결·T1 증명 아님")
+        st.dataframe(strategy_gate_rows(trace_result), hide_index=True, use_container_width=True)
     _daemon_breakdown_source = daemon_service_status()
     _discovery_breakdown = getattr(_daemon_breakdown_source, "discovery_breakdown", None) or {}
     for _funnel_key, _stages in _discovery_breakdown.items():
@@ -1480,7 +1498,7 @@ def live_prices() -> None:
 
 
 st.subheader(f"실시간 현재가 · 우선 {display_count}종목의 현재 조건")
-st.caption("기본 1초 화면 갱신 · WS 우선 / REST 대체 조회는 3초 주기 · 수신시각은 거래소 체결시각이 아님 · 1초 초과 시 지연 표시")
+st.caption("기본 1초 화면 갱신 · WS 우선 / REST 대체 조회 1초 요청 주기(호출 제한·응답 지연 가능) · 수신시각은 거래소 체결시각이 아님 · 1초 초과 시 지연 표시")
 live_prices()
 
 

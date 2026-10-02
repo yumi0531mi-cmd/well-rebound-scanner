@@ -58,3 +58,13 @@ def test_tiny_perfect_sample_and_data_errors_cannot_pass():
         assert row["도달률"] == 100
         assert row["80% 목표 판정"].startswith("판정 불가")
         assert row["70% 하한 판정"].startswith("판정 불가")
+
+
+def test_new_count_contract_does_not_relabel_legacy_five_symbol_metric():
+    trades = [dict(strategy="A", symbol=symbol, entry_at="2026-08-25 10:00+09:00", result="TARGET2") for symbol in ("X", "Y")]
+    report = objective_tables(trades, {"X": ["2026-08-25"]}, TradingSession.KR_REGULAR, strategies=["A"])
+    assert report["minimum_required"] == 2 and report["target_required"] == 3
+    assert report["minimum_symbols_day_pct"] == 100
+    assert report["target_symbols_day_pct"] == 0
+    assert report["five_symbols_day_pct"] == 0
+    assert not report["deployment_eligible"] and not report["sample_at_least_50"]

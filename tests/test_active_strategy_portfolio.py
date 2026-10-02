@@ -21,9 +21,9 @@ def _opportunity(strategy: Strategy) -> Opportunity:
 
 
 def test_inactive_strategy_cannot_fall_back_into_engine_selection() -> None:
-    assert _select_opportunity((_opportunity(Strategy.BREAKOUT),), None, 101., 101., 1.) is None
+    assert _select_opportunity((_opportunity(Strategy.OPENING_RANGE_BREAKOUT),), None, 101., 101., 1.) is None
     active = _opportunity(Strategy.RANGE_REVERSAL)
-    assert _select_opportunity((_opportunity(Strategy.BREAKOUT), active), None, 101., 101., 1.) is active
+    assert _select_opportunity((_opportunity(Strategy.OPENING_RANGE_BREAKOUT), active), None, 101., 101., 1.) is active
 
 
 def test_production_portfolio_has_no_narrow_time_strategy() -> None:
@@ -54,14 +54,6 @@ def test_classify_does_not_execute_off_strategy_functions(monkeypatch) -> None:
         "opening_range_retest",
         "opening_range_low_reversal",
         "opening_range_breakout",
-        "red_to_green_reversal",
-        "gap_up_retest",
-        "failed_breakdown_reclaim",
-        "bull_flag_breakout",
-        "vwap_pullback_hold",
-        "descending_wedge_break",
-        "quiet_123_reversal",
-        "inside_bar_breakout",
     ):
         monkeypatch.setattr(opportunities, name, disabled)
     frame = pd.DataFrame(

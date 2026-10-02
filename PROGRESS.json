@@ -1,7 +1,27 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-10-02T11:18:00+09:00",
+  "updated_at": "2026-10-02T23:22:00+09:00",
+  "october_2_strategy_expansion": {
+    "status": "636_SAFE_TESTS_PASSED_PENDING_COMMIT_AND_DEPLOY",
+    "authorization": "Latest user explicitly requests one-second prices, expand beyond six without duplicates, trace rejection gates. Supersedes historical six-only hold; does not authorize forcing condition passes or relaxing costs/stops/T1 evidence.",
+    "implementation": "19 non-opening-window strategies active; original six keep ordering. Three narrow opening strategies preserved as diagnostic-only; three separate scalp profiles remain shadow. Per-symbol22-row trace separates missing frames, formation failures, activation,product,plannedRR,fillband,currentRR,selection and final stage. UI detail opt-in,not one-second bulk transmission. ENGINE_VERSION multi-strategy-19-gate-trace-v1 separates new evidence.",
+    "quotes": "Default compact UI1s; shared deduplicated REST fallback request buckets1s instead of3,WS preferred; existing5s max freshness preserved,invalid prices refused,received age/delay shown. Broker throttling/network latency still apply; no guaranteed exchange-to-screen1s SLA.",
+    "verification": "636 passed,0failed,15069 dependency warnings,26.31s; seven excluded suites unchanged. Targeted76passed. Ruff passed,diff-check passed. Old disabled-strategy assertions updated to explicit subset or approved19/narrow3 policy,not removed. Synthetic tests only,no performance claim. JUnit scanner-safe-regression-20261002-active19-final.xml in workspace.",
+    "deployment": "Fresh ls-remote23:20KST still7d0ba35; previous approval-review limitation no longer blocks read-only network. No Oct2 push yet. Batch once after exact-file commit; preserve unrelated indicators.py. Deployed fields remain unchanged pendingSHA/health/badge proof.",
+    "next": "Verify public deployment,then inspect actual per-symbol gates in US active session. Do not repeat frozen010170 or read prohibited dates. Free DB migration and measured monthly quota feasibility remain unfinished."
+  },
+  "october_2_count_contract_deployment": {
+    "status": "625_SAFE_TESTS_PASSED_COMMIT_PUSH_BLOCKED_NOT_DEPLOYED",
+    "deployment_blocker": "git add/commit failed index.lock Permission denied in linked worktree git metadata. Following escalated push was NOT executed because automatic approval review hit usage limit. Latest changes remain uncommitted; last localHEAD5b10d8a,last freshly verified remote7d0ba35. Do not bypass review or report deployment success.",
+    "zero_entry_diagnosis": "ZERO_ENTRY_DIAGNOSIS_20261002.md: deterministic synthetic QuoteBook+SnapshotCoordinator reproduction with WS absent gives errors at0/30/60/90s despite successful REST;1s polling recovers after first tick.30s UI vs5s REST freshness confirmed incompatible without another consumer. UI defect only,not proof of daemon zero-entry cause. Runtime strategy counts6 active/22 classified verified. No strategy activation or signal conditions changed.",
+    "verification": "625 passed,0failed,12328warnings,25.32s;seven prohibited/research suites excluded as before. Ruff passed with3 pre-existing inaccessible pytest temp directories skipped. Full JUnit scanner-safe-regression-20261002-min2-final.xml. No profitability or latency qualification.",
+    "authorization": "User approved minimum2/target3 and explicitly requested web upload for feedback on Oct2. Use today's single verified push; do not change paid plans,secrets or recurring automation.",
+    "contract": "config.py minimum2,target3,default display3(range2-10); full candidate discovery and22-strategy evaluation preserved. Reports/live snapshots record criteria_version2026-10-02-min2-target3 and both thresholds. Immediate ENTRY and ENTRY_WAIT counts separate; daily totals diagnostic only. Legacy five_symbols_day_pct retains literal5 semantics.",
+    "unchanged": "T1 goal80%,floor70%,market minimum50fills,all costs,stops,signal conditions and strategy activation unchanged. No reserved data accessed and no actual orders.",
+    "candidate_version": "0.11.13-live1s-min2-goal3",
+    "pre_deploy": "Fresh remote main7d0ba35. Public UI0.11.12 at16:44KST:US_DAY active,KR closed,69pool45evaluated view,0ENTRY/localDBfallback. No declared baseline test in current progress. Render dashboard login expired; user asked to authenticate."
+  },
   "october_2_turso_and_live_quotes": {
     "status": "FREE_CONFIRMED_QUOTA_RISKS_CALCULATED_FAST_UI_LOCAL_ONLY",
     "account": "Authenticated Billing: Starter(Free), monthly Oct1-Nov1, no payment method. Analytics:0/500M reads,0/10M writes,0/3GB sync,0/5GB storage,next invoice0USD. No database activity. No account/settings/data changes.",
@@ -331,7 +351,7 @@
     "non_15m_strategy_downtrend_gate_fixed": true,
     "public_strategy_rejection_diagnostics_added": true,
     "latest_safe_operational_test_count": 528,
-    "latest_local_safe_test_count": 624,
+    "latest_local_safe_test_count": 636,
     "latest_local_safe_test_exclusions": [
       "tests/test_external_history.py",
       "tests/test_controlled_tuning.py",
@@ -400,9 +420,12 @@
       "30m": "completed current-session open-to-last-close flow shown as nonblocking context, not a trade filter"
     },
     "implemented_strategy_count": 22,
-    "strategy_selection_rule": "evaluate all 22 independently by formation, cost pass, signal, fill, and target1 outcome before changing the active portfolio",
+    "strategy_selection_rule": "Oct2 explicit user approval enables19 non-opening-window strategies,keeping original six precedence and remaining3 narrow strategies diagnostic; evaluate all22 and deduplicate symbols. Activation is not T1 qualification; costs,stops and evidence unchanged.",
     "availability_rule": "must not depend on a narrow opening or closing time window; validate at multiple access times throughout every active market session",
-    "minimum_actionable_symbols_at_each_access_time": 5,
+    "minimum_actionable_symbols_at_each_access_time": 2,
+    "target_actionable_symbols_at_each_access_time": 3,
+    "default_live_display_symbols": 3,
+    "count_change_authorization": "2026-10-02 user explicitly approved minimum2/target3 instead of5; preserve full discovery,22 strategies,costs,stops,80%/70%,50fills. Prior five-symbol measurements remain historical,not relabeled.",
     "target1_goal": 0.8,
     "target1_floor_only_if_goal_not_reproducible": 0.7,
     "costs_and_slippage_required": true,
@@ -410,12 +433,14 @@
     "official_evidence": "actual KIS one-minute bars with point-in-time candidate universe"
   },
   "next_actions": [
+    "LATEST OCT2 APPROVAL supersedes six-only hold below:19 active,22 classified,1s quotes,per-symbol gate trace.636 safe tests passed; batch today's single push and verify SHA/health/badge before saying deployed. No forced passes or T1 qualification.",
+    "OCT2 USER APPROVAL: implement minimum2/target3 at every access time,default live3; explicitly requested web deployment for feedback. Batch the tested1s UI/count/SQL savings/quota guard in today's single push,verify remoteSHA/health/UIbadge. DB migration and performance qualification remain incomplete.",
     "OCT2 supersedes old login blocker: Turso Starter(Free) verified,no payment method; quotas500M/10M/5GB/3GB. Read october_2_turso_and_live_quotes and quota report. Local1s compact price UI+SQL savings624 safe tests,not deployed. DB adapter/budget feasibility incomplete; do not claim unlimited free operation or1s end-to-end latency.",
     "OCT1 15:41KST: prioritize october_1_cockroach_recovery. Production7d0ba35/0.11.12 verified Live+health200+badge; local fe23f02 quota guard and SQL savings are not deployed. Account console login required; do not assume monthly free credits are available without payment eligibility or treat cached fallback error as current DB probe.",
     "OCT1 RESUMED: follow october_1_resource_guard and october_1_takeover first. Sept29 interactive stop superseded by user; recurring automation remains paused. Local quota guard612 safe regressions passed; authenticate Cockroach separately, verify Render reset and exact deployedSHA/health/badge. Additional daily push exception still awaiting explicit reply.",
     "HISTORICAL USER STOP 2026-09-29: handoff documents delivered; retained for provenance, no longer the current interactive work state. Read user_stop_handoff_2026_09_29 and both reports for background.",
     "2026-09-29 supersedes earlier missing-local-key/data actions: actual KIS auth/quote verified,5x4-day separate dataset available. Advance from sparse formation/cost diagnosis to chronological per-strategy replay and broader permitted-date history; official point-in-time candidate membership and product metadata remain unverified.",
-    "P0 input: obtain separate KIS bars without reserved dates or have user configure KIS credentials in approved runtime secret store, never chat. Original PKLs unopened; frozen 010170 not rerun. Two fixed symbols cannot prove five-symbol access coverage.",
+    "P0 input: preserve permitted-only KIS access. Original PKLs unopened; frozen010170 not rerun. Fixed-symbol diagnostics cannot prove point-in-time2-minimum/3-target access coverage.",
     "P0 after data access: permitted-date point-in-time multi-symbol 22-strategy funnel and exact-minute coverage; distinguish formation/cost/signal/simulated fill/T1. Keep 80%/70%, original costs and market 50-fill minimum; report shortages, never invented performance.",
     "P0 continuity: keep the daemon/UI cycle alive under KIS cooldown, but never claim fresh actionable ENTRY without fresh KIS quote and completed bars; measure cache fallback duration and missed access minutes after service recovery",
     "P0 verify host-level continuity: Render suspension/free-hour/egress caps cannot be bypassed by code; after manual service recovery, measure actual quota use and establish a separate permitted failover plan before claiming uptime",
@@ -427,7 +452,7 @@
     "egress diet IMPLEMENTED locally (diag JSON gated behind checkbox, top-5 blocks always visible, daemon idles off-session; full 541 green); push together after Oct 1 resume",
     "US_DAY live audit: compare raw KIS page timestamps with the 10:00 KST open and expected tradable minutes; local current-session floor is 30 bars, strategy-specific completed-frame requirements gate each setup, and 3000-bar context is optional deep history rather than a universal ENTRY gate",
     "record live US probe: 2 cycles 35 attempted, 31-33 warming provisional, 34 evaluated/published, 0 false officials, VWAP formed-but-blocked 1; provisional gates proven at scale",
-    "verify >=5 entry symbols and T1 reach on real KIS data after scanner completion; record evidence and report",
+    "verify >=2 immediately actionable symbols at every access time,target3,and T1 reach on real KIS data; retain shortages as failures and do not substitute daily totals",
     "1-minute scalping IMPLEMENTED locally (2 profiles, separate SCALP portfolio + frame table, EV-measured, 8 tests green, full 536 green); push after US baseline completes",
     "session work IMPLEMENTED locally: sequence states namespaced per session (ENTRY bleed fixed, proven by isolation test), provisional floor 180->30 all sessions, US_DAY official line unified; full 540 green; push after baseline",
     "persist hypothetical three-bar fills and T1 outcomes for cost-qualified shadow formations without enabling unqualified strategies",

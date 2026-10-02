@@ -7,7 +7,13 @@ retroactively changes a stored backtest result.
 # Qualification targets
 TARGET1_HIT_RATE_GOAL = 0.80
 TARGET1_HIT_RATE_FLOOR = 0.70
-MIN_UNIQUE_ENTRIES_PER_SESSION = 5
+# User-approved Oct 2 contract; never rewrite historical five-symbol metrics.
+MIN_UNIQUE_ENTRIES_PER_SESSION = 2
+TARGET_ACTIONABLE_SYMBOLS = 3
+ACCESS_CRITERIA_VERSION = "2026-10-02-min2-target3"
+LIVE_DISPLAY_MIN_SYMBOLS = 2
+LIVE_DISPLAY_DEFAULT_SYMBOLS = 3
+LIVE_DISPLAY_MAX_SYMBOLS = 10
 MIN_TRADES_PER_MARKET = 50
 BACKTEST_LOOKBACK_DAYS = 60
 BACKTEST_MIN_DAYS = 2
@@ -69,6 +75,8 @@ KIS_RATE_LIMIT_COOLDOWN_SECONDS = 61
 UI_STATUS_POLL_SECONDS = 30
 # Fast quotes are independent of the closed-bar engine and heavy detail cards.
 LIVE_QUOTE_REFRESH_OPTIONS_SECONDS = (1, 3, 5)
+LIVE_REST_QUOTE_REFRESH_SECONDS = 1
+LIVE_REST_QUOTE_MAX_AGE_SECONDS = 5
 LIVE_DETAIL_REFRESH_SECONDS = 30
 # Paper outcomes are resolved from closed one-minute bars, not sampled quotes.
 # Rotate a bounded batch once per minute so many open paper cases cannot fan
@@ -113,7 +121,8 @@ PROBABILITY_FEATURE_FIELDS = (
     "move_capacity_ratio",
 )
 
-# Explicit production allow-list. Implemented strategies not listed stay off.
+# User-approved Oct2 expansion. Existing six retain arbitration precedence.
+# Activation enables detection, not a claim of qualified T1 performance.
 ACTIVE_STRATEGY_VALUES = (
     "박스권 반등",
     "급등 후 눌림",
@@ -121,6 +130,19 @@ ACTIVE_STRATEGY_VALUES = (
     "가격강도 선도주 눌림 재개",
     "유동성 스윕 후 회복",
     "전일 고가 돌파 후 재지지",
+    "상승추세",
+    "눌림목",
+    "거래량 돌파",
+    "VWAP 회복",
+    "변동성 수축 후 확장",
+    "저점 이탈 후 회복",
+    "하락쐐기 상단 돌파",
+    "저거래량 1-2-3 반전",
+    "불플래그 돌파",
+    "VWAP 지지 반등",
+    "시가 회복 반전",
+    "상승갭 재지지",
+    "인사이드바 돌파",
 )
 
 # Strategies with an explicit early-session entry deadline are diagnostic only.

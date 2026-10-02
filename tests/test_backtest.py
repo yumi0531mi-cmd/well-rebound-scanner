@@ -13,21 +13,23 @@ def bars(rows: list[tuple[float, float, float, float]]) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=["open", "high", "low", "close"], index=index).assign(volume=1000)
 
 
-def test_access_time_summary_requires_five_symbols_at_every_exact_minute() -> None:
+def test_access_time_summary_separates_two_minimum_and_three_target() -> None:
     evaluated = {"09:01": {"A", "B", "C", "D", "E"}, "09:02": {"A", "B", "C", "D", "E"}}
-    actionable = {"09:01": {"A", "B", "C", "D", "E"}, "09:02": {"A", "B", "C", "D"}}
+    actionable = {"09:01": {"A", "B", "C"}, "09:02": {"A", "B"}}
     immediate = {"09:01": {"A", "B", "C", "D", "E"}}
 
     result = _access_time_summary(evaluated, actionable, immediate)
 
     assert result["eligible_instants"] == 2
-    assert result["minimum_actionable_symbols"] == 4
-    assert result["actionable_minimum_pass_pct"] == 50
+    assert result["minimum_actionable_symbols"] == 2
+    assert result["minimum_required"] == 2 and result["target_required"] == 3
+    assert result["actionable_minimum_pass_pct"] == 100
+    assert result["actionable_target_pass_pct"] == 50
     assert result["minimum_immediate_entry_symbols"] == 0
     assert result["immediate_entry_minimum_pass_pct"] == 50
 
 
-def test_access_time_summary_does_not_hide_minutes_with_fewer_than_five_evaluations() -> None:
+def test_access_time_summary_does_not_hide_minutes_below_minimum() -> None:
     result = _access_time_summary({"09:01": {"A"}}, {"09:01": {"A"}}, {})
 
     assert result["eligible_instants"] == 1

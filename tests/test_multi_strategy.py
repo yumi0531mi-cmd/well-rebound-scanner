@@ -11,6 +11,7 @@ from wellscan.models import (
     ALL_ENTRY_STRATEGIES,
     ESTABLISHED_ACTIVE_STRATEGIES,
     EXPERIMENTAL_STRATEGIES,
+    NARROW_TIME_STRATEGIES,
     Strategy,
 )
 from wellscan.opportunities import classify, enriched, estimate_minutes, strategy_frames_ready
@@ -22,8 +23,8 @@ def test_momentum_pullback_label_does_not_claim_unproved_first_occurrence() -> N
     assert Strategy("급등 후 첫 눌림") is Strategy.MOMENTUM_PULLBACK
 
 
-def test_active_strategy_registry_contains_only_the_approved_six() -> None:
-    assert ACTIVE_STRATEGY_COUNT == 6
+def test_active_strategy_registry_contains_the_approved_nineteen() -> None:
+    assert ACTIVE_STRATEGY_COUNT == 19
     assert len(ACTIVE_STRATEGIES) == len(set(ACTIVE_STRATEGIES))
     assert ESTABLISHED_ACTIVE_STRATEGIES == (
         Strategy.RANGE_REVERSAL,
@@ -35,7 +36,8 @@ def test_active_strategy_registry_contains_only_the_approved_six() -> None:
         Strategy.LIQUIDITY_SWEEP_RECLAIM,
         Strategy.PRIOR_HIGH_BREAKOUT_RETEST,
     )
-    assert ACTIVE_STRATEGIES == ESTABLISHED_ACTIVE_STRATEGIES + EXPERIMENTAL_STRATEGIES
+    assert ACTIVE_STRATEGIES[:6] == ESTABLISHED_ACTIVE_STRATEGIES + EXPERIMENTAL_STRATEGIES
+    assert set(ACTIVE_STRATEGIES) == set(ALL_ENTRY_STRATEGIES) - NARROW_TIME_STRATEGIES
 
 
 def test_research_registry_covers_all_22_strategies_independently() -> None:
@@ -137,7 +139,7 @@ def rising_bars(count: int = 960) -> pd.DataFrame:
     )
 
 
-def test_plain_rising_chart_is_not_forced_into_an_inactive_trend_strategy() -> None:
+def test_explicit_portfolio_does_not_leak_unselected_trend_strategies() -> None:
     bars = rising_bars()
     items = classify(
         completed_resample(bars, 15),
@@ -145,6 +147,7 @@ def test_plain_rising_chart_is_not_forced_into_an_inactive_trend_strategy() -> N
         completed_resample(bars, 3),
         float(bars.close.iloc[-1]),
         None,
+        active_strategies=ESTABLISHED_ACTIVE_STRATEGIES + EXPERIMENTAL_STRATEGIES,
     )
 
     assert not any(item.strategy in {Strategy.TREND_CONTINUATION, Strategy.TREND_PULLBACK} for item in items)

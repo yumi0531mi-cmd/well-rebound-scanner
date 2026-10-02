@@ -218,6 +218,7 @@ def test_running_daemon_feed_prevents_a_second_browser_heavy_scan(monkeypatch):
         app = AppTest.from_file("app.py").run(timeout=20)
         assert not app.exception
         assert fake_client.candidate_calls == 0
+        assert next(item for item in app.slider if item.label == "표시 후보").value == 3
         assert any("상시 스캐너 실행 중" in item.value for item in app.sidebar.success)
         assert FakeRealtime.instances[0].configured[0][0].symbol == "005930"
         rendered = "\n".join(item.value for item in app.markdown)
@@ -225,7 +226,8 @@ def test_running_daemon_feed_prevents_a_second_browser_heavy_scan(monkeypatch):
             assert label in rendered
         assert "한국" in rendered
         assert "지금 매수 금지" in rendered
-        assert any("6개 활성 매매기법 전체의 실제 ENTRY를 합산" in item.value for item in app.caption)
+        assert any("우선 3종목" in item.value for item in app.subheader)
+        assert any("19개 활성 매매기법 전체의 실제 ENTRY를 합산" in item.value for item in app.caption)
         assert any("아직 기록 없음" in item.value for item in app.info)
     finally:
         st.cache_resource.clear()

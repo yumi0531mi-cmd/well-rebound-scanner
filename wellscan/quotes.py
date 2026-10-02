@@ -1,6 +1,9 @@
 """Non-blocking quote reads. Missing prices are errors, never ranking fallbacks."""
 from datetime import UTC, datetime
 from functools import partial
+from math import isfinite
+
+from config import LIVE_REST_QUOTE_MAX_AGE_SECONDS, LIVE_REST_QUOTE_REFRESH_SECONDS
 
 from .background import SnapshotCoordinator
 from .kis import KISClient, KISError
@@ -22,10 +25,14 @@ class QuoteBook:
             self.client.overseas_current_price, candidate.symbol, session_exchange(candidate.exchange, candidate.session)
         )
         now = datetime.now(UTC)
-        state = self.coordinator.request(candidate.key, int(now.timestamp() // 3), loader)
+        state = self.coordinator.request(
+            candidate.key, int(now.timestamp() // LIVE_REST_QUOTE_REFRESH_SECONDS), loader,
+        )
         if state.snapshot is None:
             raise KISError(state.error or "현재가 조회 대기")
         price, change, received_at = state.snapshot
-        if not 0 <= (now - received_at).total_seconds() <= 5:
+        if not isfinite(price) or price <= 0:
+            raise KISError("현재가 유효성 오류 · 신호 확인 중지")
+        if not 0 <= (now - received_at).total_seconds() <= LIVE_REST_QUOTE_MAX_AGE_SECONDS:
             raise KISError(state.error or "현재가 갱신 지연 · 신호 확인 중지")
         return price, change, received_at, "KIS REST 수신시각 (체결시각 아님)"

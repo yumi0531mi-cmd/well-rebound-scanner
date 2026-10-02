@@ -60,7 +60,7 @@ def test_oversold_oscillator_turn_alone_cannot_create_trade():
     assert item.hard_stop == 97.5
 
 
-def test_inactive_trend_pullback_is_not_emitted_in_any_market():
+def test_unselected_trend_pullback_is_not_emitted_in_any_market():
     from wellscan.models import Strategy, TradingSession
     from wellscan.opportunities import classify
 
@@ -71,7 +71,8 @@ def test_inactive_trend_pullback_is_not_emitted_in_any_market():
     data.loc[data.index[-1], ["ema20", "ema9", "stoch_k"]] = [99.5, 100., 42.]
 
     def selected(session):
-        items = classify(data, data, data, 100.5, session, prepared=(data, data, data))
+        items = classify(data, data, data, 100.5, session, prepared=(data, data, data),
+                         active_strategies=(Strategy.RANGE_REVERSAL,))
         return next((x for x in items if x.strategy == Strategy.TREND_PULLBACK), None)
 
     assert selected(TradingSession.US_REGULAR) is None

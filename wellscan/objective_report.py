@@ -2,10 +2,12 @@
 import pandas as pd
 
 from config import (
+    ACCESS_CRITERIA_VERSION,
     MIN_TRADES_PER_MARKET,
     MIN_UNIQUE_ENTRIES_PER_SESSION,
     TARGET1_HIT_RATE_FLOOR,
     TARGET1_HIT_RATE_GOAL,
+    TARGET_ACTIONABLE_SYMBOLS,
 )
 
 from .models import ACTIVE_STRATEGIES, TradingSession
@@ -55,15 +57,25 @@ def objective_tables(trades, coverage, session, *, strategies=None, errors=()):
         reached = sum(hit(trade) for trade in values)
         date_rows.append({"날짜": day, "진입 종목 수": count, "진입 건수": len(values), "도달 건수": reached,
                           "도달률": reached / len(values) * 100 if values else None,
-                          "5종목 이상 여부": "PASS" if count >= MIN_UNIQUE_ENTRIES_PER_SESSION else "FAIL"})
-    fraction = sum(row["5종목 이상 여부"] == "PASS" for row in date_rows) / len(date_rows) * 100 if date_rows else None
+                          "최소 종목수 충족": "PASS" if count >= MIN_UNIQUE_ENTRIES_PER_SESSION else "FAIL",
+                          "목표 종목수 충족": "PASS" if count >= TARGET_ACTIONABLE_SYMBOLS else "FAIL",
+                          "5종목 이상 여부": "PASS" if count >= 5 else "FAIL"})
+    fraction = sum(row["최소 종목수 충족"] == "PASS" for row in date_rows) / len(date_rows) * 100 if date_rows else None
+    target_fraction = sum(row["목표 종목수 충족"] == "PASS" for row in date_rows) / len(date_rows) * 100 if date_rows else None
+    legacy_fraction = sum(row["5종목 이상 여부"] == "PASS" for row in date_rows) / len(date_rows) * 100 if date_rows else None
     return {"strategy_target1": strategy_rows, "daily_target1": date_rows,
-            "five_symbols_day_pct": fraction,
+            "criteria_version": ACCESS_CRITERIA_VERSION,
+            "minimum_required": MIN_UNIQUE_ENTRIES_PER_SESSION,
+            "target_required": TARGET_ACTIONABLE_SYMBOLS,
+            "minimum_symbols_day_pct": fraction,
+            "target_symbols_day_pct": target_fraction,
+            "five_symbols_day_pct": legacy_fraction,
             "daily_criterion": "PASS" if fraction == 100 and not errors else "FAIL",
             "sample_at_least_50": len(trades) >= MIN_TRADES_PER_MARKET,
             "deployment_eligible": False,
             "metric_note": (
                 "도달률 분모는 진입 건수, 종목 수는 중복 제거. "
+                "날짜별 종목 합계는 진단용이며 매 접속시각 충족을 대신하지 않음. "
                 "시간은 성공 거래의 1분봉 시각 차이; 시가/보수적 체결봉을 포함한 봉 수. "
                 f"기법별 {MIN_TRADES_PER_MARKET}체결 미만은 판정 불가. "
                 "80% 목표와 70% 하한의 관측 비교이며 독립 검증·운영 활성화 판정을 대신하지 않음."

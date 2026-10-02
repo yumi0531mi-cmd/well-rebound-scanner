@@ -347,7 +347,7 @@ def test_kr_special_delayed_open_does_not_accept_normal_opening_bars():
     assert opening_range_breakout(normal_open, TradingSession.KR_REGULAR) is None
 
 
-def test_disabled_additional_strategy_fixtures_cannot_enter_active_engine():
+def test_approved_additional_strategies_select_but_opening_stays_disabled():
     flag = bull_flag_frame()
     vwap15, vwap3 = vwap_hold_frames()
     opening = opening_breakout_frame()
@@ -370,7 +370,11 @@ def test_disabled_additional_strategy_fixtures_cannot_enter_active_engine():
         assert item is not None
         close = float(frame.close.iloc[-1])
         atr = float(frame.atr.iloc[-1])
-        assert _select_opportunity((item,), policy, close, close, atr) is None
+        selected = _select_opportunity((item,), policy, close, close, atr)
+        if item.strategy is Strategy.OPENING_RANGE_BREAKOUT:
+            assert selected is None
+        else:
+            assert selected is item
 
 
 def test_disabled_opening_breakout_cannot_reach_final_buy_through_public_engine():
