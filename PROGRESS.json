@@ -1,7 +1,18 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
-  "updated_at": "2026-10-01T09:58:00+09:00",
+  "updated_at": "2026-10-02T11:18:00+09:00",
+  "october_2_turso_and_live_quotes": {
+    "status": "FREE_CONFIRMED_QUOTA_RISKS_CALCULATED_FAST_UI_LOCAL_ONLY",
+    "account": "Authenticated Billing: Starter(Free), monthly Oct1-Nov1, no payment method. Analytics:0/500M reads,0/10M writes,0/3GB sync,0/5GB storage,next invoice0USD. No database activity. No account/settings/data changes.",
+    "write_scenario": "Code calendar Oct2026 market-session minutes32880.80 bars+80 sequence writes per minute,300 candidates every5min plus access snapshots =7266480 rows/month before backfill,corrections,retention,signal outcomes,retries.900-candidate scenario11212080 exceeds10M. Not measured use or a bounded upper limit.",
+    "read_risk": "Existing OFFSET31999 retention transplanted hourly with80 full-history keys implies ~1.403B index traversal/month; actual libSQL billed reads unmeasured. Need adapter/retention design, not URL-only migration.",
+    "ui_change": "Default1s compact live table for display_count5-10 priority symbols,read-only live price revalidation,KST receive time,WS/REST path and >1s delay. Heavy cards/history30s,structure60s. Existing REST fallback3s/freshness5s unchanged and disclosed. Not exchange-to-display1s guarantee; not deployed.",
+    "render_scenario": "Five-row synthetic HTML903bytes:0.572GB at8h*22days*1tab;2.419GB at24h*31days. Excludes actual transport,Streamlit control,details,API/DB traffic. Provider egress measurement and delta-only transport still pending.",
+    "verification": "624 safe tests passed,0 failures;12328 warnings;28.45s;seven existing excluded suites.48 targeted passed,Ruff/diff check passed. Synthetic tests and Streamlit AppTest,not live latency or T1 proof. JUnit scanner-safe-regression-20261002-live.xml in workspace.",
+    "report": "TURSO_RENDER_QUOTA_REVIEW_20261002.md",
+    "next": "Implement/test a libSQL adapter with bounded indexed retention and exact point-in-time candidate bundles; measure actual provider read/write/bytes before migration. Batch deploy only after checking daily push/live baseline. Measure1s UI WS latency and full Render egress. Secrets provisioned by user only. Recurring automation stays paused."
+  },
   "current_step": 3,
   "completed_steps": [
     "기존 저장소와 인계 보고서 확인",
@@ -248,6 +259,18 @@
     "approval": "Additional Oct1 push exception requested; no explicit answer yet. No further push or provider settings changes performed. Recurring automation remains paused.",
     "next": "Verify reset service health and actual deployed SHA/badge; await required login/push exception. Commit exact verified files locally, preserve unrelated indicators.py. Wire verified read-only provider metrics only with an approved credential path; measure full-month feasibility before any uptime claim. Continue permitted-data signal/cost/T1 diagnosis separately."
   },
+  "october_1_cockroach_recovery": {
+    "status": "TRIAL_EXPIRY_CONFIRMED_RU_RESET_NOT_SUFFICIENT_SQL_SAVINGS_LOCAL_ONLY",
+    "authenticated_account_check": "2026-10-01 21:45-21:46KST after user login: Basic cluster Disabled; Free Trial expired2026-09-26,0/400USD credits,console warns deletion in25days. Current RU15.01thousand/50million; storage489.33MiB/10GiB. RU reset occurred; continued disablement is accompanied by confirmed trial-expiry restriction, not current exhaustion of50M RU.",
+    "deployed": "Existing remote7d0ba35 manually deployed09:59:06KST, Render succeeded/Live2m21s. Public health200 and UI0.11.12-oct1-batch verified10:02:39KST. No additional remote push. Local fe23f02 monthly guard is NOT deployed.",
+    "database_evidence": "New Render process10:00:57KST received RU-month-limit OperationalError and selected local fallback. At15:39KST UI still shows cached fallback; not a fresh DB connectivity check. Cockroach reload at15:35KST reaches login; current account state unresolved.",
+    "policy_correction": "Official free-trial documentation checkedOct1: one-time400USD trial differs from monthly15USD Basic credit shared across clusters; monthly benefit requires payment method. Expired trial without payment enters grace period and eventual deletion. Do not guarantee Oct1 reset or enter payment information under existing free-only authority.",
+    "local_changes": "bar_store uses250-row parameterized INSERT batches; same32000-bar retention cutoff swept per namespace/symbol on first write or1h/1000writes, not every upsert; load_many uses per-key ORDER BY timestamp DESC LIMIT instead of full-history window ranking. Config centralized. No changes to signal, costs, stop, T1 or live evidence requirements.",
+    "verification": "621 safe tests passed,0 failed/errors/skips,30.31s,12328 deprecation warnings; same seven excluded suites. New9 synthetic SQL/retention tests. Not an actual Cockroach EXPLAIN/RU measurement. JUnit C:/Users/cj123/Documents/Codex/2026-09-14/new-chat/scanner-safe-regression-20261001-dbquota.xml",
+    "live_sample": "15:39KST UI0.11.12; KR closed,US_DAY active; latest cycle48.00s, evaluated80, actionable0; displayed pool80/mode53/analysis53/data_wait29. Not T1 qualification. Local CSV fallback persists.",
+    "blocked": "Login resolved21:46KST and expired trial confirmed. Card registration/payment conversion not authorized by free-only requirement. Need approved free destination account/secret provisioning and allowed-data recovery path; no unfiltered dump of prohibited dates. SQL savings alone cannot restore provider-disabled trial. Local SQL changes remain undeployed.",
+    "plan": "COCKROACH_RECOVERY.md gives conditional restore versus free-eligible destination decision. Supabase500MB not a drop-in10GiB replacement; size hot/cold data and transfer budget before migration. No new accounts, payment, settings mutation, production SQL deletion, prohibited data, or real orders."
+  },
   "files": {
     "config.py": "qualification/risk/cost/data/model and scanner deadline-margin settings centralized; UI status poll 30s and live-price options 30/60/120s locally",
     "FREE_RESOURCE_BUDGET.md": "provider ceilings, internal free-tier targets, measured-vs-unavailable usage, graceful-degradation policy, and recovery checklist; no false claim of automatic quota enforcement",
@@ -298,8 +321,8 @@
     "inactive_16_best_sample_candidate": "D10-failed_breakdown-reclaim KR: 2/2 T1, insufficient sample",
     "inactive_16_official_performance": false,
     "live_access_snapshot_persistence_implemented": true,
-    "live_access_qualification_status": "BLOCKED_SERVICE_UNAVAILABLE_LAST_HEALTH_2026_09_28_2057_KST",
-    "latest_deployed_commit": "ca65d0b",
+    "live_access_qualification_status": "SERVICE_RESTORED_OCT1_LOCAL_FALLBACK_ZERO_ACTIONABLE_IN_LATEST_SAMPLE_CRITERIA_NOT_MET",
+    "latest_deployed_commit": "7d0ba35",
     "strategy_specific_timeframes_implemented": true,
     "same_day_reentry_after_rearm_implemented": true,
     "strategy_22_kis_admin_audit_implemented": true,
@@ -308,7 +331,7 @@
     "non_15m_strategy_downtrend_gate_fixed": true,
     "public_strategy_rejection_diagnostics_added": true,
     "latest_safe_operational_test_count": 528,
-    "latest_local_safe_test_count": 612,
+    "latest_local_safe_test_count": 624,
     "latest_local_safe_test_exclusions": [
       "tests/test_external_history.py",
       "tests/test_controlled_tuning.py",
@@ -330,7 +353,7 @@
       "stale_or_missing_cache": "no official entry; incomplete access snapshot recorded",
       "provider_or_host_suspension_bypass": false
     },
-    "latest_deployed_version": "0.11.8-pipeline-audit",
+    "latest_deployed_version": "0.11.12-oct1-batch",
     "latest_local_verified_version": "0.11.11-call-cadence",
     "render_status_recheck_2026_09_28": "2026-09-28 20:57:21 KST: public health HTTP 503; no deployment performed",
     "post_04fc8ab_targeted_tests": 49,
@@ -387,6 +410,8 @@
     "official_evidence": "actual KIS one-minute bars with point-in-time candidate universe"
   },
   "next_actions": [
+    "OCT2 supersedes old login blocker: Turso Starter(Free) verified,no payment method; quotas500M/10M/5GB/3GB. Read october_2_turso_and_live_quotes and quota report. Local1s compact price UI+SQL savings624 safe tests,not deployed. DB adapter/budget feasibility incomplete; do not claim unlimited free operation or1s end-to-end latency.",
+    "OCT1 15:41KST: prioritize october_1_cockroach_recovery. Production7d0ba35/0.11.12 verified Live+health200+badge; local fe23f02 quota guard and SQL savings are not deployed. Account console login required; do not assume monthly free credits are available without payment eligibility or treat cached fallback error as current DB probe.",
     "OCT1 RESUMED: follow october_1_resource_guard and october_1_takeover first. Sept29 interactive stop superseded by user; recurring automation remains paused. Local quota guard612 safe regressions passed; authenticate Cockroach separately, verify Render reset and exact deployedSHA/health/badge. Additional daily push exception still awaiting explicit reply.",
     "HISTORICAL USER STOP 2026-09-29: handoff documents delivered; retained for provenance, no longer the current interactive work state. Read user_stop_handoff_2026_09_29 and both reports for background.",
     "2026-09-29 supersedes earlier missing-local-key/data actions: actual KIS auth/quote verified,5x4-day separate dataset available. Advance from sparse formation/cost diagnosis to chronological per-strategy replay and broader permitted-date history; official point-in-time candidate membership and product metadata remain unverified.",

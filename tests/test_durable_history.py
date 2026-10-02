@@ -122,7 +122,11 @@ def test_database_load_many_restores_full_windows_in_one_namespace_query() -> No
     restored = store.load_many([(namespace, "005930"), (namespace, "000660")])
 
     assert len(store._connection.value.calls) == 1
-    assert "row_number()" in store._connection.value.calls[0][0]
+    statement, parameters = store._connection.value.calls[0]
+    assert "row_number()" not in statement
+    assert statement.count("ORDER BY timestamp DESC LIMIT %s") == 2
+    assert "UNION ALL" in statement
+    assert parameters == (namespace, "005930", 3000, namespace, "000660", 3000)
     assert all(len(restored[(namespace, symbol)]) == 1 for symbol in ("005930", "000660"))
 
 

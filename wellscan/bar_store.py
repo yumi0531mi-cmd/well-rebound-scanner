@@ -17,6 +17,9 @@ import pandas as pd
 from config import (
     BACKTEST_MAX_STORED_BARS,
     DURABLE_PREFETCH_SYMBOLS_PER_QUERY,
+    DURABLE_RETENTION_INTERVAL_SECONDS,
+    DURABLE_RETENTION_WRITE_ROWS,
+    DURABLE_UPSERT_BATCH_ROWS,
     STRUCTURAL_CONTEXT_SEED_BARS,
     STRUCTURAL_WINDOW_BARS,
 )
@@ -72,6 +75,7 @@ class CockroachBarStore:
         self._last_error = ""
         self._retry_after = 0.0
         self._connection = None
+        self._retention_state: dict[tuple[str, str], tuple[float, int]] = {}
 
     @classmethod
     def from_environment(cls) -> CockroachBarStore | None:
@@ -577,23 +581,23 @@ class CockroachBarStore:
                 for namespace, symbols in grouped.items():
                     for start in range(0, len(symbols), DURABLE_PREFETCH_SYMBOLS_PER_QUERY):
                         batch = symbols[start : start + DURABLE_PREFETCH_SYMBOLS_PER_QUERY]
-                        placeholders = ", ".join("%s" for _ in batch)
+                        # Per-key indexed LIMIT avoids ranking every retained
+                        # historical row just to restore the latest seed.
+                        fields = "symbol, timestamp, open, high, low, close, volume"
+                        branch = (
+                            f"(SELECT {fields} FROM {TABLE_NAME} "
+                            "WHERE namespace = %s AND symbol = %s "
+                            "ORDER BY timestamp DESC LIMIT %s)"
+                        )
+                        branches = " UNION ALL ".join(branch for _ in batch)
+                        parameters = tuple(
+                            value for symbol in batch
+                            for value in (namespace, symbol, min(limit, STRUCTURAL_WINDOW_BARS))
+                        )
                         with connection.cursor() as cursor:
                             cursor.execute(
-                                f"""
-                                SELECT symbol, timestamp, open, high, low, close, volume
-                                FROM (
-                                    SELECT symbol, timestamp, open, high, low, close, volume,
-                                           row_number() OVER (
-                                               PARTITION BY symbol ORDER BY timestamp DESC
-                                           ) AS bar_rank
-                                    FROM {TABLE_NAME}
-                                    WHERE namespace = %s AND symbol IN ({placeholders})
-                                ) AS ranked
-                                WHERE bar_rank <= %s
-                                ORDER BY symbol, timestamp
-                                """,
-                                (namespace, *batch, min(limit, STRUCTURAL_WINDOW_BARS)),
+                                f"SELECT {fields} FROM ({branches}) AS recent ORDER BY symbol, timestamp",
+                                parameters,
                             )
                             rows = cursor.fetchall()
                         row_groups: dict[str, list[tuple[Any, ...]]] = {}
@@ -630,18 +634,41 @@ class CockroachBarStore:
             with self._lock, self._connection_session() as connection:
                 self._ensure_schema(connection)
                 with connection.cursor() as cursor:
-                    cursor.executemany(
-                        f"""
+                    for offset in range(0, len(records), DURABLE_UPSERT_BATCH_ROWS):
+                        batch = records[offset:offset + DURABLE_UPSERT_BATCH_ROWS]
+                        placeholders = ", ".join(["(%s, %s, %s, %s, %s, %s, %s, %s)"] * len(batch))
+                        cursor.execute(
+                            f"""
                         INSERT INTO {TABLE_NAME} (namespace, symbol, timestamp, open, high, low, close, volume)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        VALUES {placeholders}
                         ON CONFLICT (namespace, symbol, timestamp) DO UPDATE SET
                             open = excluded.open, high = excluded.high, low = excluded.low,
                             close = excluded.close, volume = excluded.volume, updated_at = now()
                         """,
-                        records,
-                    )
-                    cursor.execute(
-                        f"""
+                            tuple(value for record in batch for value in record),
+                        )
+                    self._prune_bars_if_due(cursor, namespace, symbol.upper(), len(records))
+            self._available, self._last_error = True, ""
+            return True
+        except Exception as exc:
+            self._record_error(exc)
+            raise StoreUnavailableError(self._last_error or "영구 분봉 저장 실패") from exc
+
+    def _prune_bars_if_due(self, cursor, namespace: str, symbol: str, written_rows: int) -> None:
+        """Called under store lock; same retention cutoff, fewer repeated scans.
+
+        Counts writes conservatively (including corrections). On failure state
+        is not advanced, so retries cannot defer a failed sweep indefinitely.
+        """
+        key = (namespace, symbol)
+        now = monotonic()
+        previous = self._retention_state.get(key)
+        writes = written_rows + (previous[1] if previous else 0)
+        if previous and now - previous[0] < DURABLE_RETENTION_INTERVAL_SECONDS and writes < DURABLE_RETENTION_WRITE_ROWS:
+            self._retention_state[key] = (previous[0], writes)
+            return
+        cursor.execute(
+            f"""
                         DELETE FROM {TABLE_NAME}
                         WHERE namespace = %s AND symbol = %s AND timestamp < (
                             SELECT timestamp FROM {TABLE_NAME}
@@ -649,13 +676,9 @@ class CockroachBarStore:
                             ORDER BY timestamp DESC LIMIT 1 OFFSET %s
                         )
                         """,
-                        (namespace, symbol.upper(), namespace, symbol.upper(), MAX_BARS_PER_SYMBOL - 1),
-                    )
-            self._available, self._last_error = True, ""
-            return True
-        except Exception as exc:
-            self._record_error(exc)
-            raise StoreUnavailableError(self._last_error or "영구 분봉 저장 실패") from exc
+            (namespace, symbol, namespace, symbol, MAX_BARS_PER_SYMBOL - 1),
+        )
+        self._retention_state[key] = (now, 0)
 
     def _record_error(self, exc: Exception) -> None:
         if isinstance(exc, StoreCooldownError):

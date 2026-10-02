@@ -1,5 +1,17 @@
 # Free-resource budget and continuity policy
 
+## October 1 afternoon correction
+
+Read COCKROACH_RECOVERY.md first. Official Cockroach free-trial docs now
+explicitly require a payment method for the shared monthly Basic credit;
+the one-time trial is different. Free-only authority does not permit automatic
+card registration or paid account conversion. This account needs fresh login
+verification. RU/storage targets below do not establish eligibility.
+
+Render reset was observed at09:58KST. Existing7d0ba35 deployed successfully,
+health200 and badge0.11.12 verified by10:02:39KST. Local monthly guard fe23f02
+and later SQL optimizations are not yet on production.
+
 ## October 1 takeover: verified state and next implementation contract
 
 At 2026-10-01 00:23:54 KST, a fresh remote lookup returned main

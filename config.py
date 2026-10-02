@@ -67,9 +67,9 @@ KIS_RATE_LIMIT_COOLDOWN_SECONDS = 61
 # UI status polling is not a market-data clock.  Keep state-only websocket
 # deltas slow enough to avoid turning an idle browser tab into egress load.
 UI_STATUS_POLL_SECONDS = 30
-# UI sampling is slower than the scanner's 60-second engine cycle by design;
-# fast polling does not make the underlying scan more current.
-LIVE_QUOTE_REFRESH_OPTIONS_SECONDS = (30, 60, 120)
+# Fast quotes are independent of the closed-bar engine and heavy detail cards.
+LIVE_QUOTE_REFRESH_OPTIONS_SECONDS = (1, 3, 5)
+LIVE_DETAIL_REFRESH_SECONDS = 30
 # Paper outcomes are resolved from closed one-minute bars, not sampled quotes.
 # Rotate a bounded batch once per minute so many open paper cases cannot fan
 # out into an unbounded burst of REST requests.
@@ -77,6 +77,11 @@ VALIDATION_TRACKING_REFRESH_SECONDS = 60
 VALIDATION_CASES_PER_REFRESH = 12
 BACKTEST_MAX_STORED_BARS = 32000
 DURABLE_PREFETCH_SYMBOLS_PER_QUERY = 20
+# Bound SQL fan-out and repeated 32k-row retention scans. Between successful
+# sweeps, fewer than WRITE_ROWS additional rows can accumulate per symbol.
+DURABLE_UPSERT_BATCH_ROWS = 250
+DURABLE_RETENTION_INTERVAL_SECONDS = 3600
+DURABLE_RETENTION_WRITE_ROWS = 1000
 SCANNER_CYCLE_SECONDS = 60.0
 DAY_FLOW_TIMEFRAME_MINUTES = 30
 SCANNER_REQUEST_DEADLINE_MARGIN_SECONDS = 8.0

@@ -18,6 +18,7 @@ from config import (
     BACKTEST_MAX_TOP_N,
     BACKTEST_MIN_DAYS,
     BACKTEST_MIN_TOP_N,
+    LIVE_DETAIL_REFRESH_SECONDS,
     LIVE_QUOTE_REFRESH_OPTIONS_SECONDS,
     MIN_TRADES_PER_MARKET,
     MIN_UNIQUE_ENTRIES_PER_SESSION,
@@ -39,6 +40,7 @@ from wellscan.engine import evaluate, revalidate_live
 from wellscan.execution import local_time
 from wellscan.history import HistoryCache
 from wellscan.kis import KISClient, KISError
+from wellscan.live_view import live_price_table
 from wellscan.models import (
     ACTIVE_STRATEGY_COUNT,
     ALL_ENTRY_STRATEGIES,
@@ -1447,11 +1449,45 @@ st.session_state["structure_minute"] = minute_bucket
 
 
 @st.fragment(run_every=refresh_seconds)
-def live_cards() -> None:
-    """Update live prices without interrupting history or structure work."""
+def live_prices() -> None:
+    """Only displayed quotes and read-only price revalidation run at 1 second."""
     current_minute = int(datetime.now(UTC).timestamp() // 60)
     if current_minute != st.session_state.get("structure_minute"):
         st.rerun()
+    rows = []
+    for candidate, result in visible[:display_count]:
+        try:
+            price, _, received, source = _live_quote(candidate)
+            now = datetime.now(UTC)
+            if not math.isfinite(price) or price <= 0 or received is None:
+                raise KISError("현재가 미수신")
+            checked = revalidate_live(result, price, now)
+            age = max(0.0, (now - received).total_seconds())
+            route = "WS" if "WebSocket" in source else "REST"
+            stamp = f"{received.astimezone(KST):%H:%M:%S} {route} {age:.1f}s"
+            state_text = _stage_text(checked.stage)
+            if age > 1:
+                stamp += " 지연"
+        except KISError:
+            price, state_text, stamp = math.nan, "지금 매수 금지", "현재가 미수신"
+        levels = result.levels
+        rows.append((
+            f"{candidate.symbol} {candidate.name}", price_text(price, "미수신"),
+            f"{price_text(levels.entry)} / {price_text(levels.target1)}",
+            price_text(levels.hard_stop), state_text, stamp,
+        ))
+    st.markdown(live_price_table(rows), unsafe_allow_html=True)
+
+
+st.subheader(f"실시간 현재가 · 우선 {display_count}종목의 현재 조건")
+st.caption("기본 1초 화면 갱신 · WS 우선 / REST 대체 조회는 3초 주기 · 수신시각은 거래소 체결시각이 아님 · 1초 초과 시 지연 표시")
+live_prices()
+
+
+@st.fragment(run_every=LIVE_DETAIL_REFRESH_SECONDS)
+def live_cards() -> None:
+    """Heavy cards and the full paper history never run on the quote clock."""
+    st.caption("아래 상세 카드는 30초 간격의 참고 스냅샷입니다. 최신 현재가·현재 조건은 위 실시간 표를 확인하세요.")
     buy_names = " · ".join(candidate.name for candidate, _ in final_buy_results) or "없음"
     wait_names = " · ".join(candidate.name for candidate, _ in entry_wait_results) or "없음"
     shadow_names = " · ".join(candidate.name for candidate, _ in shadow_formed_results) or "없음"
