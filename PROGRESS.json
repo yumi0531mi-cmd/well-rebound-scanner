@@ -1,6 +1,15 @@
 {
   "schema_version": 1,
   "status": "IN_PROGRESS_CRITERIA_NOT_MET",
+  "october_3_quote_readiness": {
+    "status": "LOCAL_VERIFIED_DEPLOYMENT_PENDING",
+    "candidate_version": "0.11.14-penny-quote-reasons",
+    "observed": "Oct2 23:49-50KST/10:49-50EDT US regular: instant entries0; RIVN shadow1m pullback formed but cost/fill-band blocked. RIVN/TSM/SMCI quotes alternated between missing and fresh REST,including4.6s age. Levels were not calculated; receiving a quote alone did not form an entry. Exact one-symbol surge view reported by user was not reproduced; browser stayed full mode.",
+    "causes_confirmed": "Deployed surge view still capped gains20%; prior penny fix remains local. Daemon WS configuration used global top40 before UI filter,so a visible surge name could miss a subscription;40 sequential subscriptions include0.5s sleeps and ranking-set changes reconnect. This is a code-level delay path,not proof that it explains every missing live quote. Missing-level text and quote exceptions hid distinct causes.",
+    "changes": "Daemon WS subscriptions restricted/prioritized to displayed symbols after filtering (default3),without restricting discovery or strategy evaluation. REST cadence/freshness/rate limits unchanged. Compact table shows structural/entry block reason,quote delay age/error,observational label for nonactionable levels,and gross/net T1 return using frozen engine costs only. No unknown cost treated as zero. No strategy thresholds or stops relaxed.",
+    "verification": "35 focused tests passed;Oct3 final candidate663 full safe tests passed,0failed,15069 warnings,27.77s. Same seven excluded suites. Ruff and diff-check passed. No historical replay or performance claim. JUnit scanner-safe-regression-20261003-release.xml in workspace. Deployment verification pending.",
+    "remaining": "Verify remote SHA,Render health and exact badge after one Oct3 batch. Verify new penny/surge controls and compact reason rendering. Closed markets cannot establish live1s reception,ENTRY,T1,coverage or quota safety. KIS serialization/WS reconnect behavior and durable storage outage remain separate unfinished work."
+  },
   "october_2_penny_views": {
     "status": "659_SAFE_TESTS_PASSED_LOCAL_ONLY_NOT_DEPLOYED",
     "authorization": "User explicitly reiterates US penny stocks and existing surge view. Discovery/entry risk rules are not relaxed.",
@@ -9,7 +18,7 @@
     "verification": "51 focused synthetic/UI tests passed;659 full safe tests passed,0failed,15069 warnings,27.30s;seven excluded suites unchanged. Ruff and diff-check passed. JUnit scanner-safe-regression-20261002-penny.xml in workspace. No backtest replay or performance claim.",
     "deployment": "LOCAL ONLY. Oct2 push already used by c300eac;no further push/restart to preserve cache. Public0.11.13 still has old price/surge display filters until next approved batch. User-selectable0.1USD already exists in old surge view but does not remove its20%cap."
   },
-  "updated_at": "2026-10-02T23:42:00+09:00",
+  "updated_at": "2026-10-03T21:23:00+09:00",
   "october_2_strategy_expansion": {
     "status": "DEPLOYED_VERIFIED_LIVE_ACCEPTANCE_NOT_MET",
     "authorization": "Latest user explicitly requests one-second prices, expand beyond six without duplicates, trace rejection gates. Supersedes historical six-only hold; does not authorize forcing condition passes or relaxing costs/stops/T1 evidence.",

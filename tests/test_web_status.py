@@ -150,3 +150,12 @@ def test_realtime_candidates_are_bounded_deduplicated_and_actionable_first():
     assert [item.symbol for item in selected] == ["BUY", "WAIT"]
     with pytest.raises(ValueError):
         prioritize_realtime_candidates(results, limit=0)
+
+
+def test_visible_surge_symbol_is_not_lost_behind_other_ranking_quotes():
+    surge = candidate(symbol="SURGE")
+    buy = candidate(symbol="BUY")
+    results = [(buy, SimpleNamespace(stage=Stage.FINAL_BUY, score=100)),
+               (surge, SimpleNamespace(stage=Stage.CANDIDATE, score=1))]
+    assert prioritize_realtime_candidates(results, limit=1, preferred=(surge,)) == [surge]
+    assert prioritize_realtime_candidates(results, limit=3, preferred=(surge, surge)) == [surge, buy]

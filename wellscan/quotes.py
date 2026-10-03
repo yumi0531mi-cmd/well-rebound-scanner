@@ -33,6 +33,8 @@ class QuoteBook:
         price, change, received_at = state.snapshot
         if not isfinite(price) or price <= 0:
             raise KISError("현재가 유효성 오류 · 신호 확인 중지")
-        if not 0 <= (now - received_at).total_seconds() <= LIVE_REST_QUOTE_MAX_AGE_SECONDS:
-            raise KISError(state.error or "현재가 갱신 지연 · 신호 확인 중지")
+        age = (datetime.now(UTC) - received_at).total_seconds()
+        if not 0 <= age <= LIVE_REST_QUOTE_MAX_AGE_SECONDS:
+            progress = "조회 진행 중" if state.running else "조회 실패/대기"
+            raise KISError(state.error or f"현재가 갱신 지연 {age:.1f}초 · {progress} · 신호 확인 중지")
         return price, change, received_at, "KIS REST 수신시각 (체결시각 아님)"

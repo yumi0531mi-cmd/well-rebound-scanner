@@ -48,7 +48,7 @@ from wellscan.execution import local_time
 from wellscan.gate_trace import strategy_gate_rows
 from wellscan.history import HistoryCache
 from wellscan.kis import KISClient, KISError
-from wellscan.live_view import live_price_table
+from wellscan.live_view import entry_readiness_text, live_price_table, target_return_text
 from wellscan.models import (
     ACTIVE_STRATEGY_COUNT,
     ALL_ENTRY_STRATEGIES,
@@ -1248,9 +1248,6 @@ if scan_state.snapshot is None:
 snapshot = scan_state.snapshot
 
 if use_daemon_feed:
-    realtime_candidates = prioritize_realtime_candidates(snapshot.results)
-    if realtime_candidates:
-        realtime().configure(realtime_candidates)
     daemon_feed_marker = daemon_session_updated_at(status.session)
     st.caption(
         "상시 공통엔진 결과 갱신 "
@@ -1341,6 +1338,13 @@ final_buy_results = [item for item in ordered if item[1].stage == Stage.FINAL_BU
 entry_wait_results = [item for item in ordered if item[1].stage == Stage.ENTRY_WAIT]
 watch_results = [item for item in ordered if item[1].stage not in {Stage.FINAL_BUY, Stage.ENTRY_WAIT}][:display_count]
 visible = final_buy_results + entry_wait_results + watch_results
+if use_daemon_feed:
+    # Quote only this compact view, not forty unrelated ranking candidates.
+    # Tracking has its own REST path; filtering the UI never filters the scanner.
+    realtime().configure(prioritize_realtime_candidates(
+        visible, limit=display_count,
+        preferred=tuple(candidate for candidate, _ in visible[:display_count]),
+    ))
 shadow_formed_results = [
     (candidate, result)
     for candidate, result in ordered
@@ -1480,6 +1484,7 @@ def live_prices() -> None:
         st.rerun()
     rows = []
     for candidate, result in visible[:display_count]:
+        checked = None
         try:
             price, _, received, source = _live_quote(candidate)
             now = datetime.now(UTC)
@@ -1489,15 +1494,21 @@ def live_prices() -> None:
             age = max(0.0, (now - received).total_seconds())
             route = "WS" if "WebSocket" in source else "REST"
             stamp = f"{received.astimezone(KST):%H:%M:%S} {route} {age:.1f}s"
-            state_text = _stage_text(checked.stage)
+            state_text = safe_pipeline_message(entry_readiness_text(checked), 150)
             if age > 1:
                 stamp += " 지연"
-        except KISError:
-            price, state_text, stamp = math.nan, "지금 매수 금지", "현재가 미수신"
+        except KISError as exc:
+            price = math.nan
+            state_text = "지금 매수 금지 · " + safe_pipeline_message(entry_readiness_text(result), 120)
+            stamp = "현재가 미수신 · " + safe_pipeline_message(exc, 100)
         levels = result.levels
+        plan = f"{price_text(levels.entry, '구조 미형성')} / {price_text(levels.target1, 'T1 미산출')}"
+        if checked is None or not checked.final_buy:
+            plan = "관찰용 · " + plan
+        plan += " · " + target_return_text(result)
         rows.append((
             f"{candidate.symbol} {candidate.name}", price_text(price, "미수신"),
-            f"{price_text(levels.entry)} / {price_text(levels.target1)}",
+            plan,
             price_text(levels.hard_stop), state_text, stamp,
         ))
     st.markdown(live_price_table(rows), unsafe_allow_html=True)

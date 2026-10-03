@@ -214,8 +214,10 @@ def tracked_candidate_for_case(
 def prioritize_realtime_candidates(
     results: tuple[tuple[Candidate, ScanResult], ...] | list[tuple[Candidate, ScanResult]],
     limit: int = 40,
+    *,
+    preferred: tuple[Candidate, ...] = (),
 ) -> list[Candidate]:
-    """Bound WS subscriptions and put actionable common-engine results first."""
+    """Reserve visible quote slots, then use actionable common-engine results."""
     if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
         raise ValueError("realtime candidate limit must be a positive integer")
     priority = {Stage.FINAL_BUY: 2, Stage.ENTRY_WAIT: 1}
@@ -225,7 +227,7 @@ def prioritize_realtime_candidates(
         reverse=True,
     )
     unique: dict[str, Candidate] = {}
-    for candidate, _ in ordered:
+    for candidate in (*preferred, *(item[0] for item in ordered)):
         unique.setdefault(candidate.key, candidate)
         if len(unique) >= limit:
             break
