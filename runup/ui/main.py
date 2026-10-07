@@ -260,6 +260,27 @@ def _manual_forms(service, profile):
             _submit("상세 기록",apply)
 
 
+def _mapping_forms(service):
+    st.subheader("연결 검토 — 일정 회사와 상장 티커")
+    st.caption("일정에서 종목을 자동 제안합니다. 승인은 사람이 한 건씩 합니다.")
+    try:
+        rows = [dict(r) for r in service.conn.execute(
+            "SELECT review_id, issuer_id, security_id, evidence FROM mapping_reviews "
+            "WHERE status='REVIEW' ORDER BY review_id")]
+    except Exception as exc:
+        st.error("연결 목록 조회 실패: " + type(exc).__name__)
+        return
+    if not rows:
+        st.info("검토할 연결 제안이 없습니다. 수집 버튼을 먼저 누르세요.")
+        return
+    for row in rows:
+        with st.expander(f"{row['issuer_id']} · {row['evidence'][:40]}"):
+            st.write(row["evidence"])
+            if st.button("승인", key=f"runup_map_approve_{row['review_id']}"):
+                _submit("연결 승인",
+                        lambda rid=row["review_id"]: service.approve_mapping(rid))
+
+
 def _allocation_forms(service, profile):
     st.subheader("배분 제안 생성·재검증·승인")
     if profile is None:
@@ -528,14 +549,6 @@ def render(db_path=None):
                     from wellscan.scanner_service import shared_runtime_components
                     with st.spinner("공개 일정과 미국 후보를 수집합니다."):
                         _submit("수집",lambda: service.collect_sources(shared_runtime_components()))
-                with st.expander("관심 티커 등록 — KIS 없이 자료 시작"):
-                    st.caption("티커와 거래소만 적으면 미검증 후보로 등록됩니다.")
-                    watch_ticker = st.text_input("티커 (예: NVAX)",key="runup_watch_ticker")
-                    watch_exchange = st.selectbox(
-                        "거래소",["NASDAQ","NYSE","AMEX","NYSEARCA","BATS"],
-                        key="runup_watch_exchange")
-                    if st.button("등록",key="runup_watch_add"):
-                        _submit("등록",lambda: service.add_watch_ticker(watch_ticker, watch_exchange))
                 if st.button("미국 일봉 수집 — 다음 묶음",key="runup_collect_daily"):
                     with st.spinner("무료 일봉을 수집합니다. 전체 범위는 여러 묶음으로 처리합니다."):
                         _submit("일봉",service.collect_daily)
@@ -543,6 +556,7 @@ def render(db_path=None):
                     _submit("계산",service.scan)
                 _schema_form(service,profile)
                 _manual_forms(service,profile)
+                _mapping_forms(service)
                 _allocation_forms(service,profile)
         finally:
             writable.close()

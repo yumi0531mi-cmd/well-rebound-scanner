@@ -42,8 +42,12 @@ def prepare_clinical(at, cursor='', transport=None):
     body = bodies[0]
     digest = hashlib.sha256(body).hexdigest()
     doc_id = 'clinicaltrials-' + digest[:16]
-    result, _ = clinical_trials.collect_from_body(body, at, document_id=doc_id)
+    result, details = clinical_trials.collect_from_body(body, at, document_id=doc_id)
     status = result.status.value
+    sponsors = {}
+    for item, detail in zip(result.items, details, strict=False):
+        if isinstance(detail, dict) and detail.get("sponsor"):
+            sponsors[item.candidate_id] = str(detail["sponsor"])
     def commit(db):
         document = {'document_id': doc_id, 'source_id': 'clinicaltrials', 'url': url,
                     'fetched_at': at.isoformat(), 'first_seen_at': at.isoformat(),
@@ -55,6 +59,7 @@ def prepare_clinical(at, cursor='', transport=None):
             data = to_dict(item)
             data['document_id'] = saved_id
             data['candidate_id'] = item.candidate_id + ':' + digest[:16]
+            data['sponsor_text'] = sponsors.get(item.candidate_id)
             if not db.execute('SELECT 1 FROM event_candidates WHERE candidate_id=?',
                               (data['candidate_id'],)).fetchone():
                 insert_candidate(db, data)
@@ -79,6 +84,102 @@ def rotate_securities(securities, after=""):
 
 
 SEC_TICKER_MAP_URL = "https://www.sec.gov/files/company_tickers.json"
+
+
+def fetch_company_map(user_agent, transport=None):
+    """SEC 공식 목록. {TICKER: {"title": ..., "cik": cik10}}. 실패 시 예외."""
+    from runup.data.http import HttpRequest, fetch_document
+    from runup.data.source_registry import resolve_effective_policy
+
+    ua = str(user_agent or "").strip()
+    if not ua:
+        raise ValueError("SEC user agent required")
+    bodies = []
+    outcome = fetch_document(
+        HttpRequest(method="GET", url=SEC_TICKER_MAP_URL,
+                    headers=(("User-Agent", ua),)),
+        resolve_effective_policy("sec"), transport=transport, body_sink=bodies)
+    if outcome.outcome != "OK" or not bodies:
+        raise ValueError("cik map fetch failed: " + str(outcome.outcome))
+    import json as _json
+    raw = _json.loads(bodies[0].decode("utf-8"))
+    companies = {}
+    for entry in (raw.values() if isinstance(raw, dict) else []):
+        if isinstance(entry, dict) and entry.get("ticker") and entry.get("cik_str"):
+            companies[str(entry["ticker"]).upper()] = {
+                "title": str(entry.get("title") or ""),
+                "cik": str(entry["cik_str"]).zfill(10)}
+    if not companies:
+        raise ValueError("empty cik map")
+    return companies
+
+
+def fetch_cik_map(user_agent, transport=None):
+    """{TICKER: cik10} 간편형."""
+    return {t: v["cik"] for t, v in fetch_company_map(user_agent, transport).items()}
+
+
+def prepare_suggest(conn, at, user_agent="", transport=None):
+    """임상 sponsor → 상장 ticker 연결 제안을 자동 생성한다.
+
+    정확·별칭 일치만 REVIEW 제안으로 남기고, 승인은 사람이 한다.
+    병원·기관명·불일치는 제안하지 않는다. 반환: (commit, summary).
+    """
+    from runup.catalyst import sponsor_match
+
+    if not (isinstance(user_agent, str) and user_agent.strip()):
+        def skipped(db):
+            health(db, "sec_map", "NEEDS_INPUT", at, "RUNUP_SEC_USER_AGENT unconfigured")
+        return skipped, {"exact": 0, "alias": 0, "unmapped": 0, "skipped": "SEC UA unconfigured"}
+    try:
+        company_map = fetch_company_map(user_agent, transport)
+    except Exception as exc:
+        exc_name = type(exc).__name__
+
+        def map_failed(db):
+            health(db, "sec_map", "FAILED", at, exc_name)
+        return map_failed, {"exact": 0, "alias": 0, "unmapped": 0, "error": "cik map fetch failed"}
+    companies = sorted((ticker, info["title"]) for ticker, info in company_map.items())
+    pending = [dict(r) for r in conn.execute(
+        "SELECT candidate_id, evidence_span, sponsor_text FROM event_candidates "
+        "WHERE review_status='PENDING' AND sponsor_text IS NOT NULL AND sponsor_text<>''")]
+    matches = []
+    for cand in pending:
+        hit = sponsor_match.match_sponsor(cand["sponsor_text"], companies)
+        if hit is None:
+            continue
+        kind, ticker, _ = hit
+        matches.append((cand, kind, ticker, company_map[ticker]["cik"]))
+
+    def commit(db):
+        exact = alias = 0
+        for cand, kind, ticker, cik in matches:
+            issuer_id = "SEC:" + ticker
+            db.execute("INSERT OR IGNORE INTO issuers VALUES (?,?,?,?,?,?)",
+                       (issuer_id, cik, ticker, "[]", "UNVERIFIED", at.isoformat()))
+            db.execute("INSERT OR IGNORE INTO securities VALUES (?,?,?,?,?,?,?,?,?)",
+                       (issuer_id, issuer_id, ticker, "", "USD", "UNKNOWN",
+                        "UNVERIFIED", at.isoformat(), None))
+            exists = db.execute("SELECT 1 FROM mapping_reviews WHERE issuer_id=? "
+                                "AND security_id=? AND status IN ('REVIEW','APPROVED')",
+                                (issuer_id, issuer_id)).fetchone()
+            if exists:
+                continue
+            evidence = (f"sponsor '{cand['sponsor_text']}' ↔ 상장 '{ticker}' "
+                        f"({kind}). 자동 제안이므로 사람 승인이 필요하다.")
+            db.execute("INSERT INTO mapping_reviews(issuer_id, security_id, status, "
+                       "evidence, reviewed_by, reviewed_at) VALUES (?,?,?,?,?,?)",
+                       (issuer_id, issuer_id, "REVIEW", evidence, "matcher",
+                        at.isoformat()))
+            if kind == "exact":
+                exact += 1
+            else:
+                alias += 1
+        health(db, "sec_map", "OK" if matches else "EMPTY_CONFIRMED", at,
+               f"exact={exact} alias={alias}")
+    return commit, {"exact": sum(1 for _, k, _, _ in matches if k == "exact"),
+                    "alias": sum(1 for _, k, _, _ in matches if k == "alias"),
+                    "unmapped": len(pending) - len(matches)}
 
 
 def prepare_sec(conn, at, user_agent="", after="", transport=None, budget_seconds=None):
@@ -108,21 +209,7 @@ def prepare_sec(conn, at, user_agent="", after="", transport=None, budget_second
     budget = float(budget_seconds if budget_seconds is not None else 30)
     ua = user_agent.strip()
     try:
-        from runup.data.http import HttpRequest, fetch_document
-        bodies = []
-        outcome = fetch_document(
-            HttpRequest(method="GET", url=SEC_TICKER_MAP_URL,
-                        headers=(("User-Agent", ua),)),
-            policy, transport=transport, body_sink=bodies)
-        cik_map = {}
-        if outcome.outcome == "OK" and bodies:
-            import json as _json
-            raw = _json.loads(bodies[0].decode("utf-8"))
-            for entry in (raw.values() if isinstance(raw, dict) else []):
-                if isinstance(entry, dict) and entry.get("ticker") and entry.get("cik_str"):
-                    cik_map[str(entry["ticker"]).upper()] = str(entry["cik_str"]).zfill(10)
-        if not cik_map:
-            raise ValueError("empty cik map")
+        cik_map = fetch_cik_map(user_agent, transport)
     except Exception as exc:
         exc_name = type(exc).__name__
 

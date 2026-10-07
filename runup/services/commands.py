@@ -53,6 +53,25 @@ class Commands:
         moment = as_of.isoformat() if isinstance(as_of, datetime) else str(as_of)
         return rollover.approve(proposal_id, command_id, context, self.conn, moment)
 
+    def approve_mapping(self, review_id):
+        """매핑 제안을 사람이 승인한다. 근거 없는 승인은 거부한다."""
+        self.require_writer()
+        from datetime import UTC as _UTC
+        from datetime import datetime as _now
+        with transaction(self.conn):
+            row = self.conn.execute(
+                "SELECT * FROM mapping_reviews WHERE review_id=?", (review_id,)).fetchone()
+            if row is None:
+                raise ValueError("제안 없음")
+            if row["status"] != "REVIEW":
+                raise ValueError("이미 처리된 제안")
+            if not (row["evidence"] or "").strip():
+                raise ValueError("근거 없는 승인 금지")
+            self.conn.execute("UPDATE mapping_reviews SET status='APPROVED', reviewed_by=?, "
+                              "reviewed_at=? WHERE review_id=?",
+                              (self.grant.actor, _now.now(_UTC).isoformat(), review_id))
+        return "APPROVED"
+
     def cancel_allocation(self, proposal_id, command_id, as_of=None):
         """대기 제안을 공개 명령 경로로 취소한다. 직접 SQL 우회 금지."""
         self.require_writer()
@@ -117,7 +136,21 @@ class Commands:
                         f"성공 {len(sec_summary['succeeded'])}, "
                         f"실패 {len(sec_summary['failed'])}, "
                         f"미처리 {len(sec_summary['unprocessed'])}")
-        return '수집 결과 저장 완료 — 출처 상태를 확인하세요 / ' + sec_text
+        from runup.services.collection import prepare_suggest
+        ua2 = os.environ.get("RUNUP_SEC_USER_AGENT", "")
+        suggest_commit, suggest_summary = prepare_suggest(self.conn, at, ua2)
+        with transaction(self.conn):
+            suggest_commit(self.conn)
+        if suggest_summary.get("skipped"):
+            suggest_text = "연결 제안 보류(연락용 UA 미입력)"
+        elif suggest_summary.get("error"):
+            suggest_text = "연결 제안 실패"
+        else:
+            suggest_text = (f"연결 제안 정확 {suggest_summary['exact']}건, "
+                            f"별칭 {suggest_summary['alias']}건, "
+                            f"미연결 {suggest_summary['unmapped']}건")
+        return ('수집 결과 저장 완료 — 출처 상태를 확인하세요 / ' + sec_text
+                + " / " + suggest_text)
 
     def add_watch_ticker(self, ticker, exchange):
         """관심 티커를 미검증 후보로 등록한다. KIS 없이 자료 흐름 시작점."""

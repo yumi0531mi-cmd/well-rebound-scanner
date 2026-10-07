@@ -135,13 +135,13 @@ def insert_candidate(conn, candidate) -> None:
     conn.execute(
         "INSERT INTO event_candidates(candidate_id, document_id, "
         "evidence_span, event_type, raw_date_text, date_precision, "
-        "review_status, available_at) VALUES (?,?,?,?,?,?,?,?)",
+        "review_status, available_at, sponsor_text) VALUES (?,?,?,?,?,?,?,?,?)",
         (candidate["candidate_id"], candidate["document_id"],
          candidate.get("evidence_span", ""), candidate.get("event_type", ""),
          candidate.get("raw_date_text", ""),
          candidate.get("date_precision", "UNKNOWN"),
          candidate.get("review_status", "PENDING"),
-         candidate["available_at"]))
+         candidate["available_at"], candidate.get("sponsor_text")))
 
 
 def append_revision(conn, revision) -> None:

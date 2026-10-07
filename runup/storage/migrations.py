@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import UTC
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 _MIGRATION_002 = """
 CREATE TABLE IF NOT EXISTS reservations (
@@ -433,10 +433,15 @@ CREATE TABLE IF NOT EXISTS source_health (
 );
 """
 
+_MIGRATION_009 = """
+ALTER TABLE event_candidates ADD COLUMN sponsor_text TEXT;
+"""
+
+
 MIGRATIONS = [(1, _MIGRATION_001), (2, _MIGRATION_002),
               (3, _MIGRATION_003), (4, _MIGRATION_004), (5, _MIGRATION_005),
               (6, _MIGRATION_006), (7, _migration_007_positions_recorded_at),
-              (8, _MIGRATION_008)]
+              (8, _MIGRATION_008), (9, _MIGRATION_009)]
 
 
 def current_version(conn) -> int:
