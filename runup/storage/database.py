@@ -58,28 +58,15 @@ def connect(db_path=None, busy_timeout_ms=5000):
 def transaction(conn):
     """BEGIN IMMEDIATE/commit/rollback. HTTP·sleep은 호출자가 밖에서 한다.
 
-    원격 연결은 Hrana 대화형 transaction을 쓴다(원자성 동일 보장).
+    libsql 원격 연결도 raw 문장이 그대로 동작하므로 분기 없다.
     """
-    begin = getattr(conn, "_remote_begin", None)
-    if begin is None:
-        conn.execute("BEGIN IMMEDIATE")
-        try:
-            yield conn
-            conn.execute("COMMIT")
-        except BaseException:
-            try:
-                conn.execute("ROLLBACK")
-            except sqlite3.Error:
-                pass
-            raise
-        return
-    conn._remote_begin()
+    conn.execute("BEGIN IMMEDIATE")
     try:
         yield conn
-        conn._remote_commit()
+        conn.execute("COMMIT")
     except BaseException:
         try:
-            conn._remote_rollback()
+            conn.execute("ROLLBACK")
         except Exception:
             pass
         raise

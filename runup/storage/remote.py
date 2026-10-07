@@ -1,7 +1,8 @@
-"""Turso/libSQL remote backend (cloud). SQLite-dialect SQL passes through.
+"""Turso/libSQL remote backend (cloud). libsql 공식 패키지 사용.
 
 URL·토큰은 절대 로그에 남기지 않는다. 로컬 경로는 그대로 SQLite를 쓴다.
-Cursor는 기존 코드가 쓰는 mapping+sequence 접근을 모두 지원한다.
+libsql 커서는 row_factory가 없어 mapping+sequence 겸용 Row로 감싼다.
+트랜잭션은 raw BEGIN/COMMIT/ROLLBACK 그대로 동작한다.
 """
 REMOTE_SCHEMES = ("libsql://", "https://", "http://", "wss://", "ws://")
 
@@ -12,7 +13,7 @@ def is_remote_target(target) -> bool:
 
 
 class RemoteRow:
-    """sqlite3.Row 대체. row[0]/row['col']/dict(row)/row.keys() 지원."""
+    """libsql tuple 행 감싸기. row[0]/row['col']/dict(row)/row.keys() 지원."""
 
     __slots__ = ("_columns", "_values", "_map")
 
@@ -59,71 +60,40 @@ class RemoteCursor:
 
 
 class RemoteConnection:
-    """libsql Hrana 클라이언트 래퍼. transaction()과 함께 쓴다."""
+    """libsql 연결 래퍼. libsql:// 그대로 전달한다."""
 
-    def __init__(self, client):
-        self._client = client
-        self._active = None
+    def __init__(self, inner):
+        self._inner = inner
         self.row_factory = None
 
-    def _executor(self):
-        return self._active if self._active is not None else self._client
-
     def execute(self, sql, params=()):
-        result = self._executor().execute(str(sql), tuple(params or ()))
-        rows = [r.astuple() for r in result.rows]
-        return RemoteCursor(tuple(result.columns), rows,
-                            result.rows_affected, result.last_insert_rowid)
+        cursor = self._inner.execute(str(sql), tuple(params or ()))
+        columns = tuple(d[0] for d in (cursor.description or ()))
+        rows = [tuple(r) for r in cursor.fetchall()]
+        return RemoteCursor(columns, rows, cursor.rowcount, cursor.lastrowid)
 
-    def _remote_begin(self):
-        if self._active is not None:
-            raise ValueError("remote transaction already active")
-        self._active = self._client.transaction()
+    def commit(self):
+        self._inner.commit()
 
-    def _remote_commit(self):
-        try:
-            self._active.commit()
-        finally:
-            self._active = None
-
-    def _remote_rollback(self):
-        try:
-            self._active.rollback()
-        finally:
-            self._active = None
+    def rollback(self):
+        self._inner.rollback()
 
     def close(self):
-        try:
-            if self._active is not None:
-                self._remote_rollback()
-        finally:
-            self._client.close()
+        self._inner.close()
 
 
-def _normalize_url(url: str) -> str:
-    """Hrana 대화형 transaction은 WebSocket 연결이 필요하다.
-
-    libsql://는 wss://로 변환한다(https://는 transaction 미지원).
-    """
-    text = str(url).strip()
-    if text.lower().startswith("libsql://"):
-        return "wss://" + text[len("libsql://"):]
-    return text
-
-
-def connect_remote(url, auth_token=None, client_factory=None):
+def connect_remote(url, auth_token=None, connector=None):
     """원격 연결. 값 검증만 하고 값 자체는 절대 기록하지 않는다."""
     if not (isinstance(url, str) and is_remote_target(url)):
         raise ValueError("remote database URL required (libsql://…)")
-    url = _normalize_url(url)
-    if client_factory is None:
-        from libsql_client import create_client_sync as _create
-        client_factory = _create
+    if connector is None:
+        import libsql as _libsql
+        connector = _libsql.connect
     if auth_token:
-        client = client_factory(url, auth_token=auth_token)
+        inner = connector(str(url).strip(), auth_token=auth_token)
     else:
-        client = client_factory(url)
-    return RemoteConnection(client)
+        inner = connector(str(url).strip())
+    return RemoteConnection(inner)
 
 
 def backend_of(db_path) -> str:
