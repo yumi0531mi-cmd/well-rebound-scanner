@@ -44,12 +44,16 @@ def _seed_event(conn):
                  ("doc-1", "clinicaltrials", "https://example.test/study/NCT001",
                   T0.isoformat(), None, T0.isoformat(), T0.isoformat(),
                   "hash1", "application/json", "", "ct-v2", "FIRST_OBSERVED", 200))
-    conn.execute("INSERT OR IGNORE INTO event_candidates VALUES (?,?,?,?,?,?,?,?)",
+    conn.execute("INSERT OR IGNORE INTO event_candidates(candidate_id, document_id, evidence_span,"
+                 " event_type, raw_date_text, date_precision, review_status, available_at,"
+                 " sponsor_text) VALUES (?,?,?,?,?,?,?,?,?)",
                  ("NCT001", "doc-1", "Nova Bio trial", "TRIAL_COMPLETION_MARKER",
-                  "2024-03-01", "EXACT_DATE", "PENDING", T0.isoformat()))
-    conn.execute("INSERT OR IGNORE INTO event_candidates VALUES (?,?,?,?,?,?,?,?)",
+                  "2024-03-01", "EXACT_DATE", "PENDING", T0.isoformat(), "Nova Bio"))
+    conn.execute("INSERT OR IGNORE INTO event_candidates(candidate_id, document_id, evidence_span,"
+                 " event_type, raw_date_text, date_precision, review_status, available_at,"
+                 " sponsor_text) VALUES (?,?,?,?,?,?,?,?,?)",
                  ("NCT002", "doc-1", "Second trial readout", "TRIAL_COMPLETION_MARKER",
-                  "2024-04", "MONTH", "PENDING", T0.isoformat()))
+                  "2024-04", "MONTH", "PENDING", T0.isoformat(), "Second Bio"))
     conn.execute("INSERT OR IGNORE INTO catalyst_revisions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                  ("ev1:0", "ev1", 0, '["i1"]', '["KIS:NAS:NVX"]', None,
                   "TRIAL_COMPLETION_MARKER", None, "EXACT_DATE", "2024-03-01T00:00:00",
