@@ -69,7 +69,8 @@ class RemoteConnection:
     def execute(self, sql, params=()):
         cursor = self._inner.execute(str(sql), tuple(params or ()))
         columns = tuple(d[0] for d in (cursor.description or ()))
-        rows = [tuple(r) for r in cursor.fetchall()]
+        fetched = cursor.fetchall()
+        rows = [tuple(r) for r in (fetched or ())]
         return RemoteCursor(columns, rows, cursor.rowcount, cursor.lastrowid)
 
     def commit(self):

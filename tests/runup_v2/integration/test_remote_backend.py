@@ -11,13 +11,16 @@ from runup.storage import remote as R
 
 
 class _StubCursor:
-    def __init__(self, columns, rows, rowcount=0, lastrowid=None):
+    def __init__(self, columns, rows, rowcount=0, lastrowid=None, fetch_none=False):
         self.description = tuple((c, None, None, None, None, None, None) for c in columns)
         self._rows = [tuple(r) for r in rows]
+        self._fetch_none = fetch_none
         self.rowcount = rowcount
         self.lastrowid = lastrowid
 
     def fetchall(self):
+        if self._fetch_none:
+            return None
         return list(self._rows)
 
     def fetchone(self):
@@ -46,6 +49,24 @@ class _StubInner:
 
     def close(self):
         self.closed = True
+
+
+def test_none_fetchall_treated_as_empty():
+    class _Inner:
+        def execute(self, sql, params=()):
+            return _StubCursor((), [], fetch_none=True)
+
+        def commit(self):
+            pass
+
+        def rollback(self):
+            pass
+
+        def close(self):
+            pass
+
+    cur = R.RemoteConnection(_Inner()).execute("CREATE TABLE t(a TEXT)")
+    assert cur.fetchall() == [] and cur.fetchone() is None
 
 
 def test_row_mapping_and_sequence():
