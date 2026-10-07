@@ -101,10 +101,13 @@ class RemoteConnection:
 
 
 def _normalize_url(url: str) -> str:
-    """Hrana 클라이언트는 https://를 받는다. libsql://는 변환한다."""
+    """Hrana 대화형 transaction은 WebSocket 연결이 필요하다.
+
+    libsql://는 wss://로 변환한다(https://는 transaction 미지원).
+    """
     text = str(url).strip()
     if text.lower().startswith("libsql://"):
-        return "https://" + text[len("libsql://"):]
+        return "wss://" + text[len("libsql://"):]
     return text
 
 
