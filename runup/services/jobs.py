@@ -173,11 +173,11 @@ class Worker:
 _worker = None
 
 
-def start(runtime):
+def start(runtime, db_path=None):
     global _worker
     import config
     if _worker is None:
-        _worker = Worker(runtime, dict(config.RUNUP_CONFIG))
+        _worker = Worker(runtime, dict(config.RUNUP_CONFIG), db_path=db_path)
     return _worker.start()
 
 
