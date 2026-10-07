@@ -17,10 +17,14 @@ from runup.portfolio.positions import (
 from runup.portfolio.rollover import approve, propose, save_proposal
 from runup.portfolio.withdrawal import (
     collect_state,
-    confirm as confirm_withdrawal,
     finalize_proposal,
-    propose as propose_withdrawal,
     snapshot_inputs,
+)
+from runup.portfolio.withdrawal import (
+    confirm as confirm_withdrawal,
+)
+from runup.portfolio.withdrawal import (
+    propose as propose_withdrawal,
 )
 
 __all__ = ["approve", "apply_split", "cancel_reservation",

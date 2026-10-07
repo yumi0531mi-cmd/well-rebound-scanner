@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import dataclasses
-from contextlib import nullcontext
 import json
+from contextlib import nullcontext
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
