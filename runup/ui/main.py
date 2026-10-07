@@ -91,6 +91,10 @@ def _schema_form(service, profile):
             st.info("먼저 초기 설정을 준비하세요.")
             return
         values = config.export_snapshot_values({"values":profile.values})
+        saved = {k: values.get(k) for k in ESSENTIAL_KEYS if k != "runup_worker_enabled"}
+        st.caption("현재 저장값: " + ", ".join(
+            f"{k}={saved[k]}" for k in
+            ("fee_estimate_rate", "fee_minimum", "slippage_estimate", "tax_reserve")))
         name = st.text_input("설정 이름",profile.profile_name,key="runup_profile_name")
         with st.form("runup_profile"):
             _schema_fields(values, ESSENTIAL_KEYS, "")
