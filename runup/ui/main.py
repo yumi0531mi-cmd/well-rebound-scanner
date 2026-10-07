@@ -436,7 +436,7 @@ def render(db_path=None):
         try:
             if profile is None:
                 if st.button("런업 초기 설정 준비",key="runup_prepare"):
-                    _submit("준비",service.prepare)
+                    _submit("준비",lambda: "프로필 준비됨: "+service.prepare().profile_id)
             else:
                 if st.button("미국 후보·임상 일정 수집",key="runup_collect_sources"):
                     from wellscan.scanner_service import shared_runtime_components
