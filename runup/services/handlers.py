@@ -17,14 +17,19 @@ def _source_handler(runtime, at, cursor):
     from runup.services import collection
     now_at = at.astimezone(UTC)
     clinical_commit, next_cursor = collection.prepare_clinical(now_at, cursor or '')
-    candidates, status, error = [], 'CONFIG_REQUIRED', None
+    candidates, status, error = [], 'CONFIG_REQUIRED', 'KIS client missing'
     client = getattr(runtime, 'client', None)
     if client is not None and client.configured:
         try:
             candidates = client.overseas_candidate_union(TradingSession.US_REGULAR, 100)
             status = 'OK' if candidates else 'EMPTY_CONFIRMED'
+            error = None
         except Exception as exc:
-            status, error = 'FAILED', type(exc).__name__
+            from wellscan.kis import KISError
+            if isinstance(exc, KISError):
+                status, error = 'FAILED', 'kis:' + str(exc)[:120]
+            else:
+                status, error = 'FAILED', type(exc).__name__
     def commit(db):
         clinical_commit(db)
         collection.persist_us_candidates(db, candidates, now_at)

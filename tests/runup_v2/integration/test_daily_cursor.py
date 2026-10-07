@@ -3,6 +3,8 @@ import json
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
+import pytest
+
 import config
 import runup.domain as D
 from runup.data import universe as U
@@ -186,8 +188,51 @@ def _bar(sid, session, at, close="10"):
                       close=Decimal(close), volume=100)
 
 
-def test_revision_dedup_and_no_backdate(tmp_path):
+def test_watch_ticker_manual_entry(tmp_path, monkeypatch):
+    grant = _grant(monkeypatch)
     conn, _ = _db(tmp_path)
+    svc = Commands(conn, grant)
+    sid = svc.add_watch_ticker("nvax", "nasdaq")
+    assert sid == "MANUAL:NASDAQ:NVAX"
+    row = conn.execute("SELECT * FROM securities WHERE security_id=?", (sid,)).fetchone()
+    assert row["equity_type"] == "UNKNOWN" and row["listing_status"] == "UNVERIFIED"
+    svc.add_watch_ticker("NVAX", "NASDAQ")
+    assert conn.execute("SELECT COUNT(*) FROM securities").fetchone()[0] == 1
+    with pytest.raises(ValueError):
+        svc.add_watch_ticker("!!!", "NASDAQ")
+    with pytest.raises(ValueError):
+        svc.add_watch_ticker("NVAX", "KRX")
+    bad = Commands(conn, {"verified": True})
+    with pytest.raises(PermissionError):
+        bad.add_watch_ticker("NVAX", "NASDAQ")
+    conn.close()
+
+
+def test_kis_failure_classified_not_silent(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    import wellscan.kis as _kis
+    from runup.services import handlers
+
+    class _Boom:
+        configured = True
+
+        def overseas_candidate_union(self, session, limit):
+            raise _kis.KISError("해외 현재가 미수신")
+
+    commit, _ = handlers._source_handler(
+        SimpleNamespace(client=_Boom()), T0, "")
+    conn, _ = _db(tmp_path)
+    from runup.storage.database import transaction as _tx
+    with _tx(conn):
+        commit(conn)
+    row = conn.execute("SELECT status, last_error FROM source_health WHERE source_id='kis_daily'").fetchone()
+    assert row["status"] == "FAILED" and row["last_error"].startswith("kis:")
+    conn.close()
+
+
+def test_revision_dedup_and_no_backdate(tmp_path):
+    conn, _ = _db(tmp_path, name="rev.sqlite3")
     _seed(conn, sids=("AAA",))
     from datetime import date
     day = date(2024, 6, 27)

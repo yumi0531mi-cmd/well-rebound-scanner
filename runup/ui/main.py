@@ -528,6 +528,14 @@ def render(db_path=None):
                     from wellscan.scanner_service import shared_runtime_components
                     with st.spinner("공개 일정과 미국 후보를 수집합니다."):
                         _submit("수집",lambda: service.collect_sources(shared_runtime_components()))
+                with st.expander("관심 티커 등록 — KIS 없이 자료 시작"):
+                    st.caption("티커와 거래소만 적으면 미검증 후보로 등록됩니다.")
+                    watch_ticker = st.text_input("티커 (예: NVAX)",key="runup_watch_ticker")
+                    watch_exchange = st.selectbox(
+                        "거래소",["NASDAQ","NYSE","AMEX","NYSEARCA","BATS"],
+                        key="runup_watch_exchange")
+                    if st.button("등록",key="runup_watch_add"):
+                        _submit("등록",lambda: service.add_watch_ticker(watch_ticker, watch_exchange))
                 if st.button("미국 일봉 수집 — 다음 묶음",key="runup_collect_daily"):
                     with st.spinner("무료 일봉을 수집합니다. 전체 범위는 여러 묶음으로 처리합니다."):
                         _submit("일봉",service.collect_daily)

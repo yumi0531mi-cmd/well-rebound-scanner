@@ -199,6 +199,44 @@ def prepare_sec(conn, at, user_agent="", after="", transport=None, budget_second
         "last_success": ok[-1] if ok else None}
 
 
+WATCH_EXCHANGES = ("NASDAQ", "NYSE", "AMEX", "NYSEARCA", "BATS")
+
+
+def add_watch_ticker(db, ticker, exchange, at):
+    """사용자 지정 티커를 미검증 후보로 등록한다.
+
+    섹터·시총·스폰서는 확정하지 않는다(UNVERIFIED/UNKNOWN/PENDING 유지).
+    KIS 없이도 Yahoo 일봉·SEC 수집이 도는 최소 진입점이다.
+    """
+    import re
+    symbol = str(ticker or "").strip().upper()
+    market = str(exchange or "").strip().upper()
+    if not re.fullmatch(r"[A-Z][A-Z0-9.\-]{0,9}", symbol):
+        raise ValueError("ticker 형식이 아니다")
+    if market not in WATCH_EXCHANGES:
+        raise ValueError("미국 거래소(NASDAQ/NYSE/AMEX/NYSEARCA/BATS)만 된다")
+    issuer_id = "MANUAL:" + market + ":" + symbol
+    stamp = at.isoformat()
+    db.execute("INSERT OR IGNORE INTO issuers VALUES (?,?,?,?,?,?)",
+               (issuer_id, None, symbol, "[]", "UNVERIFIED", stamp))
+    db.execute("INSERT OR IGNORE INTO securities VALUES (?,?,?,?,?,?,?,?,?)",
+               (issuer_id, issuer_id, symbol, market, "USD", "UNKNOWN",
+                "UNVERIFIED", stamp, None))
+    evidence = json.dumps({"source": "MANUAL", "name": symbol, "sector": "UNKNOWN",
+                           "provider_exchange": market,
+                           "standard_exchange": market})
+    exists = db.execute("SELECT 1 FROM universe_observations WHERE security_id=? "
+                        "AND available_at=? AND source_id=?",
+                        (issuer_id, stamp, "MANUAL")).fetchone()
+    if not exists:
+        db.execute("INSERT INTO universe_observations "
+                   "(security_id,market_cap,as_of,available_at,source_id,"
+                   "classification_evidence,status) "
+                   "VALUES (?,?,?,?,?,?,?)",
+                   (issuer_id, None, stamp, stamp, "MANUAL", evidence, "PENDING"))
+    return issuer_id
+
+
 def persist_us_candidates(db, candidates, at):
     """Discovery does not establish sector, market cap, or sponsor mapping."""
     from runup.data.universe import to_standard_exchange

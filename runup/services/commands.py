@@ -119,6 +119,14 @@ class Commands:
                         f"미처리 {len(sec_summary['unprocessed'])}")
         return '수집 결과 저장 완료 — 출처 상태를 확인하세요 / ' + sec_text
 
+    def add_watch_ticker(self, ticker, exchange):
+        """관심 티커를 미검증 후보로 등록한다. KIS 없이 자료 흐름 시작점."""
+        self.require_writer()
+        from runup.services.collection import add_watch_ticker as _add
+        with transaction(self.conn):
+            sid = _add(self.conn, ticker, exchange, datetime.now(UTC))
+        return sid
+
     def collect_daily(self, collector=None):
         """일봉 다음 묶음을 수집한다. 성공·미처리·실패·마지막 성공을 구분한다.
 
