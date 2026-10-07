@@ -210,3 +210,20 @@ def test_render_mobile_titles_and_cash_labels(tmp_path):
         labels.append(getattr(exp, "label", getattr(exp, "value", "")))
     pending_labels = [label for label in labels if "NCT" in str(label)]
     assert len(pending_labels) == 2 and len(set(pending_labels)) == 2
+
+
+def test_status_summary_first_screen(tmp_path):
+    from streamlit.testing.v1 import AppTest
+    conn, profile = _db(tmp_path)
+    _seed_company(conn)
+    _seed_event(conn)
+    _seed_scan(conn, profile)
+    path = tmp_path / "screen.sqlite3"
+    conn.close()
+    app = AppTest.from_string(
+        "from runup.ui.main import render\nrender(" + repr(str(path)) + ")").run(timeout=30)
+    assert not app.exception
+    assert any("지금 상태" in s.value for s in app.subheader)
+    texts = [str(w.value) for w in
+             list(app.info) + list(app.success) + list(app.warning) + list(app.markdown)]
+    assert any("진입 가능" in text and "검토 대기" in text for text in texts)

@@ -317,7 +317,38 @@ def render(db_path=None):
                 conn.row_factory = sqlite3.Row
             model = read_models.load(conn)
             profile = config_service.load(conn) if model.profile_hash else None
-            st.caption("설정 "+model.profile_hash+" | 화면 revision "+model.revision)
+            with st.expander("설정·화면 정보"):
+                st.caption("설정 "+model.profile_hash+" | 화면 revision "+model.revision)
+            st.subheader("지금 상태")
+            try:
+                costs_missing = profile is None or any(
+                    profile.values.get(k) is None for k in
+                    ("fee_estimate_rate", "fee_minimum", "slippage_estimate", "tax_reserve"))
+            except Exception:
+                costs_missing = True
+            try:
+                pending_count = len(model.pending)
+            except Exception:
+                pending_count = 0
+            try:
+                decisions = list((model.latest or {}).get("decisions", ()))
+                eligible = sum(1 for r in decisions if dict(r["decision"]).get("entry_eligible"))
+            except Exception:
+                decisions, eligible = [], 0
+            try:
+                approved_count = len(model.events)
+            except Exception:
+                approved_count = 0
+            st.write(f"진입 가능 {eligible}개 · 후보 {len(decisions)}개 · "
+                     f"승인 일정 {approved_count}건 · 검토 대기 {pending_count}건")
+            if costs_missing:
+                st.warning("비용 4개가 비어 있어 배분·정산이 멈춰 있습니다. 설정에서 입력하세요.")
+            elif not decisions:
+                st.info("계산 버튼을 눌러 후보를 만드세요.")
+            elif eligible == 0:
+                st.info("진입 가능 후보가 없습니다. 차단 사유를 후보 표에서 확인하세요.")
+            else:
+                st.success("들어갈 후보가 있습니다. 아래 후보 표를 보세요.")
             if model.latest:
                 times = read_models.display_times(model.latest["as_of"])
                 st.write("최근 계산:", times["kst"] + " / " + times["et"], model.latest["status"])
