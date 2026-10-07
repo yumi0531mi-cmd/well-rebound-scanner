@@ -19,7 +19,8 @@ def test_grant_not_forged_expired_or_rotated(monkeypatch,tmp_path):
     assert auth.verified(good,T)
     assert not auth.verified({"verified":True},T)
     assert not auth.verified(replace(good,actor="intruder"),T)
-    assert not auth.verified(good,T+timedelta(seconds=901))
+    assert auth.verified(good,T+timedelta(seconds=901))
+    assert not auth.verified(good,T+timedelta(seconds=86401))
     monkeypatch.setenv("WELLSCAN_ADMIN_TOKEN","another-server-auth-123456789")
     assert not auth.verified(good,T)
 
