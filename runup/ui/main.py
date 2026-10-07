@@ -294,13 +294,18 @@ def render(db_path=None):
     st.caption("미국 BIO · PHARMA · SPACE | 이벤트 전 기대감 관찰 | 전략 성과 미검증")
     mobile = st.checkbox("모바일 카드 보기",key="runup_mobile")
     mode = st.selectbox("분야",["전체","BIO","PHARMA","SPACE"],key="runup_sector")
-    path = Path(db_path or config.RUNUP_CONFIG["runup_db_path"])
+    from runup.storage import database as _database
+    use_remote = db_path is None and _database._env_db_target() is not None
+    path = Path(db_path) if db_path else None
     conn = None
     profile = None
     try:
-        if path.is_file():
-            conn = sqlite3.connect(path.resolve().as_uri()+"?mode=ro",uri=True)
-            conn.row_factory = sqlite3.Row
+        if use_remote or (path is not None and path.is_file()):
+            if use_remote:
+                conn = _database.connect()
+            else:
+                conn = sqlite3.connect(path.resolve().as_uri()+"?mode=ro",uri=True)
+                conn.row_factory = sqlite3.Row
             model = read_models.load(conn)
             profile = config_service.load(conn) if model.profile_hash else None
             st.caption("설정 "+model.profile_hash+" | 화면 revision "+model.revision)
@@ -406,11 +411,14 @@ def render(db_path=None):
             st.info("런업 저장소 미준비. 자료 없음은 검색 결과 0개와 다릅니다.")
         st.caption(_worker_caption())
         st.warning("실제 시세·전체 일정 범위 미확인. 화면 갱신은 거래 시세의 실시간성을 보증하지 않습니다.")
-    except (sqlite3.Error,ValueError,TypeError) as exc:
+    except Exception as exc:
         st.error("런업 기록 조회 실패: "+type(exc).__name__)
     finally:
         if conn:
-            conn.close()
+            try:
+                conn.close()
+            except Exception:
+                pass
     with st.expander("기록 수정 권한"):
         with st.form("runup_login"):
             supplied = st.text_input("관리자 인증",type="password",key="runup_login_value")
@@ -423,7 +431,7 @@ def render(db_path=None):
                     st.error("인증 실패 또는 서버 인증 미설정")
     grant = st.session_state.get("runup_writer_grant")
     if auth.verified(grant):
-        writable = connect(path)
+        writable = connect(db_path)
         service = Commands(writable,grant)
         try:
             if profile is None:

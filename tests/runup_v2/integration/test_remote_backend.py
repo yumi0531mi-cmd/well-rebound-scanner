@@ -104,13 +104,34 @@ def test_connect_routing_and_token_gate(tmp_path, monkeypatch):
     conn.close()
 
 
+def test_env_routing_to_remote_factory(monkeypatch):
+    made = {}
+
+    def fake_factory(url, token=None):
+        made["url"], made["token"] = url, token
+        return _StubClient([])
+
+    import runup.storage.remote as _remote
+    monkeypatch.setattr(_remote, "connect_remote",
+                        lambda url, token=None: made.setdefault(
+                            "conn", R.RemoteConnection(fake_factory(url, token))))
+    monkeypatch.setenv("RUNUP_DB_URL", "libsql://db.turso.io")
+    monkeypatch.setenv("RUNUP_DB_AUTH_TOKEN", "tok")
+    conn = database.connect()
+    assert isinstance(conn, R.RemoteConnection)
+    assert made["url"] == "libsql://db.turso.io" and made["token"] == "tok"
+    monkeypatch.delenv("RUNUP_DB_URL", raising=False)
+    monkeypatch.delenv("RUNUP_DB_AUTH_TOKEN", raising=False)
+
+
 def test_connect_remote_factory_and_migrate_statements():
+    made = {}
+
     class _FactoryClient(_StubClient):
         def __init__(self, url, token=None):
             super().__init__([_rs((), [], 0, None) for _ in range(500)])
             self.url, self.token = url, token
 
-    made = {}
     conn = R.connect_remote("libsql://x.turso.io", "tok",
                             client_factory=lambda u, t=None: made.setdefault(
                                 "c", _FactoryClient(u, t)))
