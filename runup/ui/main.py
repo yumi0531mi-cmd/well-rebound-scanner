@@ -81,6 +81,10 @@ def _submit(label, fn):
         st.error(label+" 실패: "+type(exc).__name__+((": "+detail[:200]) if detail else ""))
 
 
+ESSENTIAL_KEYS = ("fee_estimate_rate", "fee_minimum", "slippage_estimate",
+                  "tax_reserve", "runup_worker_enabled")
+
+
 def _schema_form(service, profile):
     with st.expander("설정 미세조정 — 검증 전 전략 값"):
         if profile is None:
@@ -89,24 +93,11 @@ def _schema_form(service, profile):
         values = config.export_snapshot_values({"values":profile.values})
         name = st.text_input("설정 이름",profile.profile_name,key="runup_profile_name")
         with st.form("runup_profile"):
-            from runup.ui.i18n import ko_config
-            for key,rule in config.RUNUP_SCHEMA.items():
-                current = values[key]
-                kind = rule["kind"]
-                label = ko_config(key)+" ("+key+")"
-                if rule.get("nullable"):
-                    missing = st.checkbox(label+" 미입력",value=current is None,key="runup_none_"+key)
-                    raw = st.text_input(label,value="" if current is None else str(current),key="runup_value_"+key)
-                    values[key] = None if missing else raw
-                elif kind == "boolean":
-                    values[key] = st.checkbox(label,value=bool(current),key="runup_value_"+key)
-                elif kind == "enum":
-                    choices = rule["values"]
-                    values[key] = st.selectbox(label,choices,index=choices.index(current),key="runup_value_"+key)
-                elif "tuple" in kind or kind == "weight_map":
-                    values[key] = st.text_input(label,value=json.dumps(current),key="runup_value_"+key)
-                else:
-                    values[key] = st.text_input(label,value=str(current),key="runup_value_"+key)
+            _schema_fields(values, ESSENTIAL_KEYS, "")
+            st.divider()
+            st.markdown("고급 설정 (기본값 유지 권장)")
+            _schema_fields(values, [k for k in config.RUNUP_SCHEMA if k not in ESSENTIAL_KEYS],
+                           "advanced_")
             if st.form_submit_button("새 설정 저장"):
                 def save():
                     parsed = {}
@@ -124,6 +115,34 @@ def _schema_form(service, profile):
                             parsed[key] = float(v)
                     return service.profile(parsed,name,profile.profile_id).profile_id
                 _submit("설정",save)
+
+
+def _schema_fields(values, keys, prefix):
+    from runup.ui.i18n import ko_config
+    for key in keys:
+        rule = config.RUNUP_SCHEMA[key]
+        current = values[key]
+        kind = rule["kind"]
+        label = ko_config(key)+" ("+key+")"
+        if rule.get("nullable"):
+            missing = st.checkbox(label+" 미입력",value=current is None,
+                                  key="runup_"+prefix+"none_"+key)
+            raw = st.text_input(label,value="" if current is None else str(current),
+                                key="runup_"+prefix+"value_"+key)
+            values[key] = None if missing else raw
+        elif kind == "boolean":
+            values[key] = st.checkbox(label,value=bool(current),
+                                      key="runup_"+prefix+"value_"+key)
+        elif kind == "enum":
+            choices = rule["values"]
+            values[key] = st.selectbox(label,choices,index=choices.index(current),
+                                       key="runup_"+prefix+"value_"+key)
+        elif "tuple" in kind or kind == "weight_map":
+            values[key] = st.text_input(label,value=json.dumps(current),
+                                        key="runup_"+prefix+"value_"+key)
+        else:
+            values[key] = st.text_input(label,value=str(current),
+                                        key="runup_"+prefix+"value_"+key)
 
 
 def _manual_forms(service, profile):
