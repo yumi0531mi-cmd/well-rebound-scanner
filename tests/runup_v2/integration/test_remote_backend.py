@@ -131,6 +131,19 @@ def test_env_routing_to_remote_factory(monkeypatch):
     monkeypatch.delenv("RUNUP_DB_AUTH_TOKEN", raising=False)
 
 
+def test_libsql_scheme_normalized_to_https():
+    seen = {}
+
+    def factory(url, auth_token=None):
+        seen["url"] = url
+        return _StubClient([])
+
+    R.connect_remote("libsql://db.turso.io", "tok", client_factory=factory)
+    assert seen["url"] == "https://db.turso.io"
+    R.connect_remote("https://db.turso.io", "tok", client_factory=factory)
+    assert seen["url"] == "https://db.turso.io"
+
+
 def test_connect_remote_factory_and_migrate_statements():
     made = {}
 
@@ -144,7 +157,7 @@ def test_connect_remote_factory_and_migrate_statements():
                                 "c", _FactoryClient(u, auth_token)))
     from runup.storage import migrate
     migrate(conn)
-    assert made["c"].url == "libsql://x.turso.io" and made["c"].token == "tok"
+    assert made["c"].url == "https://x.turso.io" and made["c"].token == "tok"
     assert any("CREATE TABLE" in s for s, _ in made["c"].seen)
     with pytest.raises(ValueError, match="remote database URL"):
         R.connect_remote("not-a-url", "tok")

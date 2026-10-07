@@ -71,9 +71,9 @@ def _submit(label, fn):
             st.warning(str(reasons))
         else:
             st.success(label+" 처리 결과: "+str(getattr(result,"status",result)))
-    except (ValueError,TypeError,PermissionError,sqlite3.Error) as exc:
+    except Exception as exc:
         detail = str(exc).strip()
-        st.error(label+" 실패: "+type(exc).__name__+((": "+detail) if detail else ""))
+        st.error(label+" 실패: "+type(exc).__name__+((": "+detail[:200]) if detail else ""))
 
 
 def _schema_form(service, profile):

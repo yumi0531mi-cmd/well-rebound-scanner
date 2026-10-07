@@ -100,10 +100,19 @@ class RemoteConnection:
             self._client.close()
 
 
+def _normalize_url(url: str) -> str:
+    """Hrana 클라이언트는 https://를 받는다. libsql://는 변환한다."""
+    text = str(url).strip()
+    if text.lower().startswith("libsql://"):
+        return "https://" + text[len("libsql://"):]
+    return text
+
+
 def connect_remote(url, auth_token=None, client_factory=None):
     """원격 연결. 값 검증만 하고 값 자체는 절대 기록하지 않는다."""
     if not (isinstance(url, str) and is_remote_target(url)):
         raise ValueError("remote database URL required (libsql://…)")
+    url = _normalize_url(url)
     if client_factory is None:
         from libsql_client import create_client_sync as _create
         client_factory = _create
