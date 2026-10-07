@@ -30,20 +30,22 @@ def _id(name):
 
 
 def _rows(title, rows, mobile, name=None):
+    from runup.ui.i18n import ko_row
     st.subheader(title)
-    data = [dict(r) for r in rows]
+    raw = [dict(r) for r in rows]
+    data = [ko_row(r) for r in raw]
     if not data:
         st.info("아직 기록된 자료가 없습니다.")
     elif mobile:
-        for row in data:
+        for original, row in zip(raw, data, strict=False):
             if name:
                 try:
-                    label = name(row)
+                    label = name(original)
                 except Exception:
                     label = title
             else:
-                label = str(row.get("security_id", row.get("event_id",
-                              row.get("candidate_id", row.get("ticker", title)))))
+                label = str(original.get("security_id", original.get("event_id",
+                              original.get("candidate_id", original.get("ticker", title)))))
             with st.expander(label):
                 for k,v in row.items():
                     st.write(k+": "+str(v))
@@ -64,13 +66,16 @@ def _worker_caption():
 
 
 def _submit(label, fn):
+    from runup.ui.i18n import ko_status
     try:
         result = fn()
         reasons = getattr(result,"issues",())
         if reasons:
             st.warning(str(reasons))
         else:
-            st.success(label+" 처리 결과: "+str(getattr(result,"status",result)))
+            status = getattr(result,"status",result)
+            status = getattr(status,"value",status)
+            st.success(label+" 처리 결과: "+ko_status(status))
     except Exception as exc:
         detail = str(exc).strip()
         st.error(label+" 실패: "+type(exc).__name__+((": "+detail[:200]) if detail else ""))
@@ -84,22 +89,24 @@ def _schema_form(service, profile):
         values = config.export_snapshot_values({"values":profile.values})
         name = st.text_input("설정 이름",profile.profile_name,key="runup_profile_name")
         with st.form("runup_profile"):
+            from runup.ui.i18n import ko_config
             for key,rule in config.RUNUP_SCHEMA.items():
                 current = values[key]
                 kind = rule["kind"]
+                label = ko_config(key)+" ("+key+")"
                 if rule.get("nullable"):
-                    missing = st.checkbox(key+" 미입력",value=current is None,key="runup_none_"+key)
-                    raw = st.text_input(key,value="" if current is None else str(current),key="runup_value_"+key)
+                    missing = st.checkbox(label+" 미입력",value=current is None,key="runup_none_"+key)
+                    raw = st.text_input(label,value="" if current is None else str(current),key="runup_value_"+key)
                     values[key] = None if missing else raw
                 elif kind == "boolean":
-                    values[key] = st.checkbox(key,value=bool(current),key="runup_value_"+key)
+                    values[key] = st.checkbox(label,value=bool(current),key="runup_value_"+key)
                 elif kind == "enum":
                     choices = rule["values"]
-                    values[key] = st.selectbox(key,choices,index=choices.index(current),key="runup_value_"+key)
+                    values[key] = st.selectbox(label,choices,index=choices.index(current),key="runup_value_"+key)
                 elif "tuple" in kind or kind == "weight_map":
-                    values[key] = st.text_input(key,value=json.dumps(current),key="runup_value_"+key)
+                    values[key] = st.text_input(label,value=json.dumps(current),key="runup_value_"+key)
                 else:
-                    values[key] = st.text_input(key,value=str(current),key="runup_value_"+key)
+                    values[key] = st.text_input(label,value=str(current),key="runup_value_"+key)
             if st.form_submit_button("새 설정 저장"):
                 def save():
                     parsed = {}
@@ -122,11 +129,12 @@ def _schema_form(service, profile):
 def _manual_forms(service, profile):
     st.caption("수동 확인 기록입니다. 주문·송금·계좌 연결을 실행하지 않습니다.")
     with st.expander("수동 체결 기록"):
+        from runup.ui.i18n import FLOW_KO, SIDE_KO, from_ko
         cid = _id("fill")
         with st.form("runup_fill"):
             security = st.text_input("종목 식별자",key="runup_fill_security")
             position = st.text_input("보유 식별자",key="runup_fill_position")
-            side = st.selectbox("매수/매도",["BUY","SELL"],key="runup_fill_side")
+            side = st.selectbox("매수/매도",["매수","매도"],key="runup_fill_side")
             qty = st.text_input("실제 체결 수량",key="runup_fill_qty")
             price = st.text_input("실제 체결 가격 USD",key="runup_fill_price")
             fee = st.text_input("실제 수수료 USD (없으면 명시적으로 0)",key="runup_fill_fee")
@@ -134,7 +142,7 @@ def _manual_forms(service, profile):
             evidence = st.text_input("체결 확인 근거",key="runup_fill_evidence")
             if st.form_submit_button("체결 사실 기록"):
                 _submit("체결",lambda:service.fill(D.Fill(fill_id=cid,command_id=cid,
-                    position_id=position,security_id=security,side=D.FillSide(side),
+                    position_id=position,security_id=security,side=D.FillSide(from_ko(SIDE_KO,side)),
                     qty=Decimal(qty),price=Decimal(price),fee=Decimal(fee),currency="USD",
                     executed_at=datetime.fromisoformat(executed),recorded_at=datetime.now(UTC),evidence=evidence)))
         if st.button("새 체결 입력 시작",key="runup_new_fill"):
@@ -143,12 +151,12 @@ def _manual_forms(service, profile):
     with st.expander("입금·실제 출금 확인"):
         cid = _id("capital")
         with st.form("runup_capital"):
-            kind = st.selectbox("자금 종류",[e.value for e in D.CapitalFlowType],key="runup_capital_kind")
+            kind = st.selectbox("자금 종류",[FLOW_KO[e.value] for e in D.CapitalFlowType],key="runup_capital_kind")
             amount = st.text_input("실제 금액 USD",key="runup_capital_amount")
             evidence = st.text_input("은행/증권사 확인 근거",key="runup_capital_evidence")
             if st.form_submit_button("자금 이동 사실 기록"):
                 _submit("자금",lambda:service.capital_flow(D.CapitalFlowCommand(command_id=cid,
-                    flow_type=D.CapitalFlowType(kind),amount=Decimal(amount),
+                    flow_type=D.CapitalFlowType(from_ko(FLOW_KO,kind)),amount=Decimal(amount),
                     flow_date=datetime.now(UTC).date(),evidence=evidence)))
     with st.expander("매도대금 결제 확인"):
         cid = _id("settle")
@@ -244,6 +252,7 @@ def _allocation_forms(service, profile):
         _submit("제안 생성", propose)
 
     # Display pending proposals with real DB columns.
+    from runup.ui.i18n import ko_row
     try:
         proposals = service.get_allocation_proposals()
     except (ValueError, TypeError, PermissionError, sqlite3.Error) as exc:
@@ -252,7 +261,7 @@ def _allocation_forms(service, profile):
     if proposals:
         for p in proposals:
             with st.expander(f"배분 제안: {p['security_id']} · {p['qty']}주 · {p['reservation_usd']} USD"):
-                st.json(p)
+                st.json(ko_row(p))
                 # Revalidate with latest real conditions (content·revision·시세·원장).
                 if st.button("최신 조건 재검증", key=f"runup_alloc_revalidate_{p['allocation_id']}"):
                     def revalidate(pid=p["allocation_id"]):
@@ -328,8 +337,12 @@ def render(db_path=None):
                     decisions = [r for r in decisions if dict(r["decision"])["security_id"] in ids]
                 cards = read_models.candidate_cards(conn, model, results=decisions)
                 st.subheader("후보 — 점수는 승률이 아닙니다")
-                summary = [{k: c[k] for k in ("ticker","company","exchange","sector","events",
-                                             "nearest_event","dday","status")} for c in cards]
+                from runup.ui.i18n import ko_table
+                summary = ko_table(
+                    [{**c, "block": "; ".join(c["block_reasons"])} for c in cards],
+                    {"ticker": "티커", "company": "기업", "exchange": "거래소",
+                     "sector": "분야", "events": "이벤트 수", "nearest_event": "가까운 일정",
+                     "dday": "디데이", "status": "상태", "block": "차단 사유"})
                 if not summary:
                     st.info("표시할 후보가 없습니다. 진입 가능 판정·업종 연결을 확인하세요.")
                 elif mobile:
@@ -342,9 +355,7 @@ def render(db_path=None):
                                 st.write("차단 사유: "+"; ".join(c["block_reasons"]))
                             st.json(c["detail"])
                 else:
-                    st.dataframe([{**s, "차단 사유": "; ".join(
-                        next(c["block_reasons"] for c in cards if c["ticker"]==s["ticker"]))}
-                        for s in summary], use_container_width=True)
+                    st.dataframe(summary, use_container_width=True)
                     with st.expander("후보 상세 식별자(decision·run·hash)"):
                         for c in cards:
                             st.json(c["detail"])
@@ -362,7 +373,12 @@ def render(db_path=None):
                         for url in e["document_urls"]:
                             st.write("문서: "+url)
             else:
-                st.dataframe(calendar["approved"], use_container_width=True)
+                st.dataframe(ko_table(calendar["approved"], {
+                    "event_id": "이벤트", "event_type": "유형",
+                    "date_precision": "날짜 정밀도", "start": "시작",
+                    "status": "상태", "tickers": "티커들",
+                    "document_urls": "문서", "revisions": "변경 횟수",
+                    "reviewed_by": "검토자"}), use_container_width=True)
             risks = read_models.position_risk(conn, model)
             st.subheader("실제 보유·위험 — 수동 기록, 자동 감시 아님")
             if not risks:
@@ -374,9 +390,20 @@ def render(db_path=None):
                         st.write("당일: "+str(r["daily_exit"])+" | "+r["risk_note"])
                         st.caption("UTC: "+r["received"]["utc"])
             else:
-                st.dataframe([{k: (v["kst"] if isinstance(v, dict) else v)
-                               for k, v in r.items() if k != "daily_target"}
-                              for r in risks], use_container_width=True)
+                from runup.ui.i18n import EXIT_KO
+                shown = []
+                for r in risks:
+                    row = dict(r)
+                    row["received"] = r["received"]["kst"]
+                    row["trade"] = r["trade"]["kst"]
+                    action = row.get("daily_exit")
+                    row["daily_exit"] = EXIT_KO.get(action, action)
+                    shown.append(row)
+                st.dataframe(ko_table(shown, {
+                    "ticker": "티커", "qty": "수량", "overlay_price": "최근 시세",
+                    "received": "수신 시각", "trade": "체결 시각",
+                    "daily_exit": "당일 판단", "risk_note": "위험 안내"}),
+                    use_container_width=True)
             st.subheader("현금·실현손익 — 수동 원장")
             st.caption("실제 계좌 미연결. 0 USD는 빈 수동 원장의 값이며 잔액 조회가 아닙니다.")
             st.write({"결제 현금 USD":str(model.ledger.settled_cash),
@@ -398,7 +425,11 @@ def render(db_path=None):
                             st.write("문서: "+p["source_url"])
                         st.caption("UTC: "+p["available"]["utc"])
             else:
-                st.dataframe(calendar["pending"], use_container_width=True)
+                st.dataframe(ko_table(calendar["pending"], {
+                    "candidate_id": "후보", "title": "제목", "source": "출처",
+                    "source_url": "출처 주소", "event_type": "유형",
+                    "date": "날짜", "date_precision": "날짜 정밀도",
+                    "ticker": "티커"}), use_container_width=True)
             observed = [dict(r) for r in conn.execute(
                 "SELECT ticker,exchange,listing_status FROM securities ORDER BY ticker")]
             for row in observed:
