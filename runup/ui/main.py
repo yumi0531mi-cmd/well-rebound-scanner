@@ -493,6 +493,8 @@ def render(db_path=None):
         st.caption(_worker_caption())
         st.warning("실제 시세·전체 일정 범위 미확인. 화면 갱신은 거래 시세의 실시간성을 보증하지 않습니다.")
     except Exception as exc:
+        import traceback
+        traceback.print_exc()
         st.error("런업 기록 조회 실패: "+type(exc).__name__)
     finally:
         if conn:
