@@ -90,10 +90,13 @@ def connect_remote(url, auth_token=None, connector=None):
     if connector is None:
         import libsql as _libsql
         connector = _libsql.connect
+    # isolation_level=None: sqlite3와 같은 autocommit. 지정 안 하면
+    # stray INSERT가 hanging transaction을 열어 다음 BEGIN이 죽는다.
     if auth_token:
-        inner = connector(str(url).strip(), auth_token=auth_token)
+        inner = connector(str(url).strip(), auth_token=auth_token,
+                          isolation_level=None)
     else:
-        inner = connector(str(url).strip())
+        inner = connector(str(url).strip(), isolation_level=None)
     return RemoteConnection(inner)
 
 
