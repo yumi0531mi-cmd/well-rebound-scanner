@@ -107,19 +107,26 @@ def test_connect_routing_and_token_gate(tmp_path, monkeypatch):
 def test_env_routing_to_remote_factory(monkeypatch):
     made = {}
 
-    def fake_factory(url, token=None):
-        made["url"], made["token"] = url, token
+    def fake_factory(url, auth_token=None):
+        made["url"], made["token"] = url, auth_token
         return _StubClient([])
 
+    def strict_factory(url, *, auth_token=None):
+        return fake_factory(url, auth_token)
+
     import runup.storage.remote as _remote
+    real_connect = _remote.connect_remote
     monkeypatch.setattr(_remote, "connect_remote",
-                        lambda url, token=None: made.setdefault(
-                            "conn", R.RemoteConnection(fake_factory(url, token))))
+                        lambda url, auth_token=None, **kw: made.setdefault(
+                            "conn", R.RemoteConnection(fake_factory(url, auth_token))))
     monkeypatch.setenv("RUNUP_DB_URL", "libsql://db.turso.io")
     monkeypatch.setenv("RUNUP_DB_AUTH_TOKEN", "tok")
     conn = database.connect()
     assert isinstance(conn, R.RemoteConnection)
     assert made["url"] == "libsql://db.turso.io" and made["token"] == "tok"
+    # 실제 클라이언트는 토큰을 키워드로만 받는다(위치 인자 거부 회귀 방지).
+    direct = real_connect("libsql://x.turso.io", "tok", client_factory=strict_factory)
+    assert isinstance(direct, R.RemoteConnection)
     monkeypatch.delenv("RUNUP_DB_URL", raising=False)
     monkeypatch.delenv("RUNUP_DB_AUTH_TOKEN", raising=False)
 
@@ -128,13 +135,13 @@ def test_connect_remote_factory_and_migrate_statements():
     made = {}
 
     class _FactoryClient(_StubClient):
-        def __init__(self, url, token=None):
+        def __init__(self, url, auth_token=None):
             super().__init__([_rs((), [], 0, None) for _ in range(500)])
-            self.url, self.token = url, token
+            self.url, self.token = url, auth_token
 
     conn = R.connect_remote("libsql://x.turso.io", "tok",
-                            client_factory=lambda u, t=None: made.setdefault(
-                                "c", _FactoryClient(u, t)))
+                            client_factory=lambda u, auth_token=None: made.setdefault(
+                                "c", _FactoryClient(u, auth_token)))
     from runup.storage import migrate
     migrate(conn)
     assert made["c"].url == "libsql://x.turso.io" and made["c"].token == "tok"

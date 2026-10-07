@@ -107,7 +107,10 @@ def connect_remote(url, auth_token=None, client_factory=None):
     if client_factory is None:
         from libsql_client import create_client_sync as _create
         client_factory = _create
-    client = client_factory(url, auth_token) if auth_token else client_factory(url)
+    if auth_token:
+        client = client_factory(url, auth_token=auth_token)
+    else:
+        client = client_factory(url)
     return RemoteConnection(client)
 
 
