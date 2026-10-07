@@ -1,0 +1,1246 @@
+{
+  "design_version": "2.0",
+  "schema_version": 3,
+  "profile_name": "DESIGN_V1_UNVALIDATED",
+  "application": "EXISTING_STREAMLIT_RUNUP_TAB",
+  "defaults_are_unvalidated": true,
+  "implementation_owner": "Muse",
+  "rules": {
+    "adv_period": {
+      "required": true,
+      "nullable": false,
+      "unit": "bars",
+      "default": 20,
+      "kind": "integer",
+      "minimum": 1,
+      "finite": true
+    },
+    "alerts_dry_run": {
+      "required": true,
+      "nullable": false,
+      "unit": "flag",
+      "default": true,
+      "kind": "boolean"
+    },
+    "allocation_expiry": {
+      "required": true,
+      "nullable": false,
+      "unit": "session",
+      "default": "next_session_close",
+      "kind": "enum",
+      "values": [
+        "next_session_close"
+      ]
+    },
+    "atr_period": {
+      "required": true,
+      "nullable": false,
+      "unit": "bars",
+      "default": 14,
+      "kind": "integer",
+      "minimum": 1,
+      "finite": true
+    },
+    "atr_stop_auto_expand_v1": {
+      "required": true,
+      "nullable": false,
+      "unit": "flag",
+      "default": false,
+      "kind": "boolean"
+    },
+    "base_currency": {
+      "required": true,
+      "nullable": false,
+      "unit": "currency",
+      "default": "USD",
+      "kind": "enum",
+      "values": [
+        "USD"
+      ]
+    },
+    "benchmark": {
+      "required": true,
+      "nullable": false,
+      "unit": "symbol",
+      "default": "SPY",
+      "kind": "string",
+      "nonempty": true,
+      "format": "us_security_symbol"
+    },
+    "bio_pharma_mcap_usd": {
+      "required": true,
+      "nullable": false,
+      "unit": "USD",
+      "default": [
+        300000000,
+        5000000000
+      ],
+      "kind": "bounds_tuple",
+      "length": 2,
+      "exclusive_minimum": 0,
+      "upper_nullable": false,
+      "ordered": true,
+      "finite": true
+    },
+    "daily_finality_grace_minutes": {
+      "required": true,
+      "nullable": false,
+      "unit": "minutes",
+      "default": 15,
+      "kind": "integer",
+      "minimum": 1,
+      "finite": true
+    },
+    "display_timezone": {
+      "required": true,
+      "nullable": false,
+      "unit": "tz",
+      "default": "Asia/Seoul",
+      "kind": "string",
+      "nonempty": true,
+      "format": "iana_timezone"
+    },
+    "entry_min_sessions_to_risk": {
+      "required": true,
+      "nullable": false,
+      "unit": "sessions",
+      "default": 3,
+      "kind": "integer",
+      "minimum": 1,
+      "finite": true
+    },
+    "equity_floor_basis": {
+      "required": true,
+      "nullable": false,
+      "unit": "basis",
+      "default": "net capital contributions",
+      "kind": "enum",
+      "values": [
+        "net capital contributions"
+      ]
+    },
+    "evaluation_mode": {
+      "required": true,
+      "nullable": false,
+      "unit": "mode",
+      "default": "DAILY_CLOSED",
+      "kind": "enum",
+      "values": [
+        "DAILY_CLOSED"
+      ]
+    },
+    "event_review_ttl_hours": {
+      "required": true,
+      "nullable": false,
+      "unit": "hours",
+      "default": 24,
+      "kind": "integer",
+      "minimum": 1,
+      "finite": true
+    },
+    "event_worker_minutes": {
+      "required": true,
+      "nullable": false,
+      "unit": "minutes",
+      "default": 30,
+      "kind": "integer",
+      "minimum": 1,
+      "finite": true
+    },
+    "exhaustion_climax_rvol": {
+      "required": true,
+      "nullable": false,
+      "unit": "ratio",
+      "default": 3,
+      "kind": "number",
+      "finite": true,
+      "exclusive_minimum": 0
+    },
+    "exhaustion_close_location_max": {
+      "required": true,
+      "nullable": false,
+      "unit": "ratio",
+      "default": 0.5,
+      "kind": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "finite": true
+    },
+    "exhaustion_cumulative_targets": {
+      "required": true,
+      "nullable": false,
+      "unit": "fractions",
+      "default": [
+        0.25,
+        0.5,
+        1
+      ],
+      "kind": "number_tuple",
+      "length": 3,
+      "exclusive_minimum": 0,
+      "maximum": 1,
+      "strict_ascending": true,
+      "last_equals": 1,
+      "finite": true
+    },
+    "exhaustion_large_wick_min": {
+      "required": true,
+      "nullable": false,
+      "unit": "ratio",
+      "default": 0.4,
+      "kind": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "finite": true
+    },
+    "exhaustion_momentum_min": {
+      "required": true,
+      "nullable": false,
+      "unit": "return",
+      "default": 0.2,
+      "kind": "number",
+      "finite": true,
+      "exclusive_minimum": 0
+    },
+    "exhaustion_momentum_period": {
+      "required": true,
+      "nullable": false,
+      "unit": "sessions",
+      "default": 5,
+      "kind": "integer",
+      "minimum": 1,
+      "finite": true
+    },
+    "exhaustion_poor_efficiency_max": {
+      "required": true,
+      "nullable": false,
+      "unit": "ATR-multiple",
+      "default": 0.2,
+      "kind": "number",
+      "finite": true,
+      "exclusive_minimum": 0
+    },
+    "exhaustion_poor_rvol": {
+      "required": true,
+      "nullable": false,
+      "unit": "ratio",
+      "default": 2.5,
+      "kind": "number",
+      "finite": true,
+      "exclusive_minimum": 0
+    },
+    "exhaustion_thresholds": {
+      "required": true,
+      "nullable": false,
+      "unit": "scores",
+      "default": [
+        35,
+        55,
+        75
+      ],
+      "kind": "number_tuple",
+      "length": 3,
+      "minimum": 0,
+      "maximum": 100,
+      "strict_ascending": true,
+      "finite": true
+    },
+    "exhaustion_weights": {
+      "required": true,
+      "nullable": false,
+      "unit": "points",
+      "default": {
+        "climax_volume": 12.5,
+        "failed_breakout": 12.5,
+        "large_upper_wick": 12.5,
+        "poor_efficiency_with_high_rvol": 12.5,
+        "rapid_gain_then_deceleration": 12.5,
+        "short_ma_loss": 12.5,
+        "structure_break": 12.5,
+        "weakening_rs": 12.5
+      },
+      "kind": "weight_map",
+      "components": [
+        "climax_volume",
+        "failed_breakout",
+        "large_upper_wick",
+        "poor_efficiency_with_high_rvol",
+        "rapid_gain_then_deceleration",
+        "short_ma_loss",
+        "structure_break",
+        "weakening_rs"
+      ],
+      "finite": true,
+      "minimum": 0,
+      "finite_sum": true,
+      "positive_sum": true,
+      "exact_components": true
+    },
+    "fee_estimate_rate": {
+      "required": true,
+      "nullable": true,
+      "unit": "ratio",
+      "default": null,
+      "kind": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "finite": true
+    },
+    "fee_minimum": {
+      "required": true,
+      "nullable": true,
+      "unit": "currency",
+      "default": null,
+      "kind": "number",
+      "finite": true,
+      "minimum": 0
+    },
+    "fill_mode": {
+      "required": true,
+      "nullable": false,
+      "unit": "mode",
+      "default": "MANUAL_FILLS",
+      "kind": "enum",
+      "values": [
+        "MANUAL_FILLS"
+      ]
+    },
+    "forced_exit_buffer_sessions": {
+      "required": true,
+      "nullable": false,
+      "unit": "sessions",
+      "default": 1,
+      "kind": "integer",
+      "minimum": 1,
+      "finite": true
+    },
+    "fractional_lot_shares": {
+      "required": true,
+      "nullable": false,
+      "unit": "shares",
+      "default": 1,
+      "kind": "integer",
+      "minimum": 1,
+      "finite": true
+    },
+    "hard_stop_fraction": {
+      "required": true,
+      "nullable": false,
+      "unit": "ratio",
+      "default": 0.08,
+      "kind": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "finite": true,
+      "exclusive_minimum": 0,
+      "exclusive_maximum": 1
+    },
+    "hl_buffer": {
+      "required": true,
+      "nullable": false,
+      "unit": "ratio",
+      "default": 0.005,
+      "kind": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "finite": true
+    },
+    "http_max_attempts": {
+      "required": true,
+      "nullable": false,
+      "unit": "count",
+      "default": 3,
+      "kind": "integer",
+      "minimum": 1,
+      "finite": true
+    },
+    "http_retry_base_seconds": {
+      "required": true,
+      "nullable": false,
+      "unit": "seconds",
+      "default": 1,
+      "kind": "number",
+      "finite": true,
+      "exclusive_minimum": 0
+    },
+    "http_timeout_seconds": {
+      "required": true,
+      "nullable": false,
+      "unit": "seconds",
+      "default": 20,
+      "kind": "integer",
+      "minimum": 1,
+      "finite": true
+    },
+    "importance_confirmed": {
+      "required": true,
+      "nullable": false,
+      "unit": "points",
+      "default": 75,
+      "kind": "number",
+      "minimum": 0,
+      "maximum": 100,
+      "finite": true
+    },
+    "importance_first_key_pivotal_major": {
+      "required": true,
+      "nullable": false,
+      "unit": "points",
+      "default": 100,
+      "kind": "number",
+      "minimum": 0,
+      "maximum": 100,
+      "finite": true
+    },
+    "importance_routine": {
+      "required": true,
+      "nullable": false,
+      "unit": "points",
+      "default": 25,
+      "kind": "number",
+      "minimum": 0,
+      "maximum": 100,
+      "finite": true
+    },
+    "intraday_monitor": {
+      "required": true,
+      "nullable": false,
+      "unit": "mode",
+      "default": "INTRADAY_RISK_MONITOR",
+      "kind": "enum",
+      "values": [
+        "INTRADAY_RISK_MONITOR"
+      ]
+    },
+    "ma20_recovery_lookback_sessions": {
+      "required": true,
+      "nullable": false,
+      "unit": "sessions",
+      "default": 10,
+      "kind": "integer",
+      "minimum": 1,
+      "finite": true
+    },
+    "ma_periods": {
+      "required": true,
+      "nullable": false,
+      "unit": "bars",
+      "default": [
+        20,
+        60
+      ],
+      "kind": "integer_tuple",
+      "length": 2,
+      "item_minimum": 1,
+      "strict_ascending": true
+    },
+    "market_timezone": {
+      "required": true,
+      "nullable": false,
+      "unit": "tz",
+      "default": "America/New_York",
+      "kind": "enum",
+      "values": [
+        "America/New_York"
+      ]
+    },
+    "max_issuer_fraction": {
+      "required": true,
+      "nullable": false,
+      "unit": "NAV",
+      "default": 0.2,
+      "kind": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "finite": true
+    },
+    "max_position_nav_fraction": {
+      "required": true,
+      "nullable": false,
+      "unit": "NAV",
+      "default": 0.2,
+      "kind": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "finite": true
+    },
+    "max_positions": {
+      "required": true,
+      "nullable": false,
+      "unit": "slots",
+      "default": 5,
+      "kind": "integer",
+      "minimum": 1,
+      "finite": true
+    },
+    "max_sector_fraction": {
+      "required": true,
+      "nullable": false,
+      "unit": "NAV",
+      "default": 0.6,
+      "kind": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "finite": true
+    },
+    "maximum_breakout_extension_atr": {
+      "required": true,
+      "nullable": false,
+      "unit": "ATR",
+      "default": 1,
+      "kind": "number",
+      "finite": true,
+      "exclusive_minimum": 0
+    },
+    "min_adv20_usd": {
+      "required": true,
+      "nullable": false,
+      "unit": "USD",
+      "default": 1000000,
+      "kind": "number",
+      "finite": true,
+      "exclusive_minimum": 0
+    },
+    "min_cash_buffer_fraction": {
+      "required": true,
+      "nullable": false,
+      "unit": "NAV",
+      "default": 0.1,
+      "kind": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "finite": true
+    },
+    "min_importance": {
+      "required": true,
+      "nullable": false,
+      "unit": "points",
+      "default": 50,
+      "kind": "number",
+      "minimum": 0,
+      "maximum": 100,
+      "finite": true
+    },
+    "min_price_usd": {
+      "required": true,
+      "nullable": false,
+      "unit": "USD",
+      "default": 1,
+      "kind": "number",
+      "finite": true,
+      "exclusive_minimum": 0
+    },
+    "min_volume20": {
+      "required": true,
+      "nullable": false,
+      "unit": "shares",
+      "default": 300000,
+      "kind": "integer",
+      "minimum": 1,
+      "finite": true
+    },
+    "other_source_requests_per_second": {
+      "required": true,
+      "nullable": false,
+      "unit": "req/s",
+      "default": 1,
+      "kind": "number",
+      "finite": true,
+      "exclusive_minimum": 0
+    },
+    "pivot_left": {
+      "required": true,
+      "nullable": false,
+      "unit": "bars",
+      "default": 3,
+      "kind": "integer",
+      "minimum": 1,
+      "finite": true
+    },
+    "pivot_right": {
+      "required": true,
+      "nullable": false,
+      "unit": "bars",
+      "default": 2,
+      "kind": "integer",
+      "minimum": 1,
+      "finite": true
+    },
+    "quote_max_age_seconds": {
+      "required": true,
+      "nullable": false,
+      "unit": "seconds",
+      "default": 120,
+      "kind": "integer",
+      "minimum": 1,
+      "finite": true
+    },
+    "quote_poll_seconds": {
+      "required": true,
+      "nullable": false,
+      "unit": "seconds",
+      "default": 60,
+      "kind": "integer",
+      "minimum": 1,
+      "finite": true
+    },
+    "rank_weights": {
+      "required": true,
+      "nullable": false,
+      "unit": "weight",
+      "default": {
+        "importance": 0.2,
+        "setup": 0.3,
+        "strength": 0.5
+      },
+      "kind": "weight_map",
+      "components": [
+        "importance",
+        "setup",
+        "strength"
+      ],
+      "finite": true,
+      "minimum": 0,
+      "finite_sum": true,
+      "positive_sum": true,
+      "exact_components": true
+    },
+    "risk_notice_poll_minutes": {
+      "required": true,
+      "nullable": false,
+      "unit": "minutes",
+      "default": 5,
+      "kind": "integer",
+      "minimum": 1,
+      "finite": true
+    },
+    "risk_per_position_fraction": {
+      "required": true,
+      "nullable": false,
+      "unit": "NAV",
+      "default": 0.005,
+      "kind": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "finite": true
+    },
+    "rs_period": {
+      "required": true,
+      "nullable": false,
+      "unit": "bars",
+      "default": 20,
+      "kind": "integer",
+      "minimum": 1,
+      "finite": true
+    },
+    "runup_db_path": {
+      "required": true,
+      "nullable": false,
+      "unit": "path",
+      "default": ".scanner_data/runup/runup.sqlite3",
+      "kind": "string",
+      "nonempty": true,
+      "format": "workspace_relative_nonsecret_path"
+    },
+    "rvol_period": {
+      "required": true,
+      "nullable": false,
+      "unit": "bars",
+      "default": 20,
+      "kind": "integer",
+      "minimum": 1,
+      "finite": true
+    },
+    "sec_requests_per_second": {
+      "required": true,
+      "nullable": false,
+      "unit": "req/s",
+      "default": 2,
+      "kind": "number",
+      "finite": true,
+      "exclusive_minimum": 0,
+      "maximum": 10
+    },
+    "settlement_cadence": {
+      "required": true,
+      "nullable": false,
+      "unit": "cadence",
+      "default": "monthly",
+      "kind": "enum",
+      "values": [
+        "monthly"
+      ]
+    },
+    "settlement_policy": {
+      "required": true,
+      "nullable": false,
+      "unit": "policy",
+      "default": "MANUAL_CONFIRMED",
+      "kind": "enum",
+      "values": [
+        "MANUAL_CONFIRMED"
+      ]
+    },
+    "setup_dryup_max": {
+      "required": true,
+      "nullable": false,
+      "unit": "ratio",
+      "default": 0.5,
+      "kind": "number",
+      "finite": true,
+      "minimum": 0
+    },
+    "setup_ma_spread_max": {
+      "required": true,
+      "nullable": false,
+      "unit": "ratio",
+      "default": 0.05,
+      "kind": "number",
+      "finite": true,
+      "minimum": 0
+    },
+    "setup_score_threshold": {
+      "required": true,
+      "nullable": false,
+      "unit": "points",
+      "default": 70,
+      "kind": "number",
+      "minimum": 0,
+      "maximum": 100,
+      "finite": true
+    },
+    "setup_slope_min": {
+      "required": true,
+      "nullable": false,
+      "unit": "ratio/session",
+      "default": 0,
+      "kind": "number",
+      "finite": true
+    },
+    "setup_validity_sessions": {
+      "required": true,
+      "nullable": false,
+      "unit": "sessions",
+      "default": 10,
+      "kind": "integer",
+      "minimum": 1,
+      "finite": true
+    },
+    "setup_weights": {
+      "required": true,
+      "nullable": false,
+      "unit": "points",
+      "default": {
+        "dryup": 25,
+        "higher_low": 20,
+        "ma20_recovery": 20,
+        "positive_slope": 10,
+        "squeeze": 20,
+        "stoch_turn": 5
+      },
+      "kind": "weight_map",
+      "components": [
+        "dryup",
+        "higher_low",
+        "ma20_recovery",
+        "positive_slope",
+        "squeeze",
+        "stoch_turn"
+      ],
+      "finite": true,
+      "minimum": 0,
+      "finite_sum": true,
+      "positive_sum": true,
+      "exact_components": true
+    },
+    "short_ma_period": {
+      "required": true,
+      "nullable": false,
+      "unit": "bars",
+      "default": 10,
+      "kind": "integer",
+      "minimum": 1,
+      "finite": true
+    },
+    "slippage_estimate": {
+      "required": true,
+      "nullable": true,
+      "unit": "ratio",
+      "default": null,
+      "kind": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "finite": true
+    },
+    "slope_lookback": {
+      "required": true,
+      "nullable": false,
+      "unit": "sessions",
+      "default": 5,
+      "kind": "integer",
+      "minimum": 1,
+      "finite": true
+    },
+    "space_mcap_usd": {
+      "required": true,
+      "nullable": false,
+      "unit": "USD",
+      "default": [
+        300000000,
+        null
+      ],
+      "kind": "bounds_tuple",
+      "length": 2,
+      "exclusive_minimum": 0,
+      "upper_nullable": true,
+      "ordered": true,
+      "finite": true
+    },
+    "stoch_oversold": {
+      "required": true,
+      "nullable": false,
+      "unit": "points",
+      "default": 25,
+      "kind": "number",
+      "minimum": 0,
+      "maximum": 100,
+      "finite": true
+    },
+    "stoch_periods": {
+      "required": true,
+      "nullable": false,
+      "unit": "bars",
+      "default": [
+        14,
+        3,
+        3
+      ],
+      "kind": "integer_tuple",
+      "length": 3,
+      "item_minimum": 1,
+      "strict_ascending": false
+    },
+    "strength_rs_norm": {
+      "required": true,
+      "nullable": false,
+      "unit": "return",
+      "default": 0.1,
+      "kind": "number",
+      "finite": true,
+      "exclusive_minimum": 0
+    },
+    "strength_rvol_norm": {
+      "required": true,
+      "nullable": false,
+      "unit": "ratio",
+      "default": 3,
+      "kind": "number",
+      "finite": true,
+      "exclusive_minimum": 0
+    },
+    "strength_trend_norm": {
+      "required": true,
+      "nullable": false,
+      "unit": "slope",
+      "default": 0.005,
+      "kind": "number",
+      "finite": true,
+      "exclusive_minimum": 0
+    },
+    "strength_weights": {
+      "required": true,
+      "nullable": false,
+      "unit": "points",
+      "default": {
+        "relative_strength": 25,
+        "structure": 25,
+        "trend": 30,
+        "volume_efficiency": 20
+      },
+      "kind": "weight_map",
+      "components": [
+        "relative_strength",
+        "structure",
+        "trend",
+        "volume_efficiency"
+      ],
+      "finite": true,
+      "minimum": 0,
+      "finite_sum": true,
+      "positive_sum": true,
+      "exact_components": true
+    },
+    "tax_reserve": {
+      "required": true,
+      "nullable": true,
+      "unit": "ratio",
+      "default": null,
+      "kind": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "finite": true
+    },
+    "trigger_close_location_min": {
+      "required": true,
+      "nullable": false,
+      "unit": "ratio",
+      "default": 0.7,
+      "kind": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "finite": true
+    },
+    "trigger_rvol_min": {
+      "required": true,
+      "nullable": false,
+      "unit": "ratio",
+      "default": 1.5,
+      "kind": "number",
+      "finite": true,
+      "exclusive_minimum": 0
+    },
+    "ui_refresh_seconds": {
+      "required": true,
+      "nullable": false,
+      "unit": "seconds",
+      "default": 60,
+      "kind": "integer",
+      "minimum": 1,
+      "finite": true
+    },
+    "warmup_margin_sessions": {
+      "required": true,
+      "nullable": false,
+      "unit": "sessions",
+      "default": 20,
+      "kind": "integer",
+      "minimum": 1,
+      "finite": true
+    },
+    "watch_horizon_calendar_days": {
+      "required": true,
+      "nullable": false,
+      "unit": "calendar-days",
+      "default": 120,
+      "kind": "integer",
+      "minimum": 1,
+      "finite": true
+    },
+    "withdraw_fraction": {
+      "required": true,
+      "nullable": false,
+      "unit": "profit",
+      "default": 0.5,
+      "kind": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "finite": true
+    },
+    "withdrawal_mode": {
+      "required": true,
+      "nullable": false,
+      "unit": "mode",
+      "default": "realized-carryforward",
+      "kind": "enum",
+      "values": [
+        "realized-carryforward"
+      ]
+    },
+    "withdrawal_requires_positive_monthly_net": {
+      "required": true,
+      "nullable": false,
+      "unit": "flag",
+      "default": true,
+      "kind": "boolean"
+    },
+    "vol_dryup_short_period": {
+      "required": true,
+      "nullable": false,
+      "unit": "bars",
+      "default": 5,
+      "kind": "integer",
+      "minimum": 1,
+      "finite": true
+    },
+    "vol_dryup_long_period": {
+      "required": true,
+      "nullable": false,
+      "unit": "bars",
+      "default": 20,
+      "kind": "integer",
+      "minimum": 1,
+      "finite": true
+    },
+    "entry_signal_validity_sessions": {
+      "required": true,
+      "nullable": false,
+      "unit": "sessions",
+      "default": 1,
+      "kind": "integer",
+      "minimum": 1,
+      "finite": true
+    },
+    "reentry_policy": {
+      "required": true,
+      "nullable": false,
+      "unit": "policy",
+      "default": "NEW_SETUP_AND_NEW_BREAKOUT_ONLY",
+      "kind": "enum",
+      "values": [
+        "NEW_SETUP_AND_NEW_BREAKOUT_ONLY"
+      ]
+    },
+    "price_provider_policy": {
+      "required": true,
+      "nullable": false,
+      "unit": "policy",
+      "default": "KIS_PRIMARY_EXPLICIT_FALLBACK",
+      "kind": "enum",
+      "values": [
+        "KIS_PRIMARY_EXPLICIT_FALLBACK"
+      ]
+    },
+    "history_source_mix_policy": {
+      "required": true,
+      "nullable": false,
+      "unit": "policy",
+      "default": "NO_MIX",
+      "kind": "enum",
+      "values": [
+        "NO_MIX"
+      ]
+    },
+    "quote_time_unknown_policy": {
+      "required": true,
+      "nullable": false,
+      "unit": "policy",
+      "default": "WARN_AND_BLOCK_ALLOCATION",
+      "kind": "enum",
+      "values": [
+        "WARN_AND_BLOCK_ALLOCATION"
+      ]
+    },
+    "quote_future_tolerance_seconds": {
+      "required": true,
+      "nullable": false,
+      "unit": "seconds",
+      "default": 5,
+      "kind": "integer",
+      "minimum": 0,
+      "finite": true
+    },
+    "price_stale_sessions": {
+      "required": true,
+      "nullable": false,
+      "unit": "sessions",
+      "default": 0,
+      "kind": "integer",
+      "minimum": 0,
+      "finite": true
+    },
+    "http_retry_max_seconds": {
+      "required": true,
+      "nullable": false,
+      "unit": "seconds",
+      "default": 30,
+      "kind": "number",
+      "finite": true,
+      "exclusive_minimum": 0
+    },
+    "http_max_response_bytes": {
+      "required": true,
+      "nullable": false,
+      "unit": "bytes",
+      "default": 10485760,
+      "kind": "integer",
+      "minimum": 1,
+      "finite": true
+    },
+    "http_max_redirects": {
+      "required": true,
+      "nullable": false,
+      "unit": "count",
+      "default": 3,
+      "kind": "integer",
+      "minimum": 1,
+      "finite": true
+    },
+    "decimal_precision": {
+      "required": true,
+      "nullable": false,
+      "unit": "digits",
+      "default": 34,
+      "kind": "integer",
+      "minimum": 28,
+      "finite": true
+    },
+    "partial_sell_rounding": {
+      "required": true,
+      "nullable": false,
+      "unit": "policy",
+      "default": "FLOOR_TO_LOT",
+      "kind": "enum",
+      "values": [
+        "FLOOR_TO_LOT"
+      ]
+    },
+    "feature_version": {
+      "required": true,
+      "nullable": false,
+      "unit": "version",
+      "default": "runup-features-v2",
+      "kind": "string",
+      "nonempty": true
+    },
+    "strategy_version": {
+      "required": true,
+      "nullable": false,
+      "unit": "version",
+      "default": "runup-strategy-v2",
+      "kind": "string",
+      "nonempty": true
+    },
+    "runup_worker_enabled": {
+      "required": true,
+      "nullable": false,
+      "unit": "flag",
+      "default": false,
+      "kind": "boolean"
+    },
+    "sqlite_busy_timeout_ms": {
+      "required": true,
+      "nullable": false,
+      "unit": "milliseconds",
+      "default": 5000,
+      "kind": "integer",
+      "minimum": 1,
+      "finite": true
+    },
+    "sqlite_max_attempts": {
+      "required": true,
+      "nullable": false,
+      "unit": "count",
+      "default": 3,
+      "kind": "integer",
+      "minimum": 1,
+      "finite": true
+    },
+    "worker_lease_seconds": {
+      "required": true,
+      "nullable": false,
+      "unit": "seconds",
+      "default": 120,
+      "kind": "integer",
+      "minimum": 1,
+      "finite": true
+    },
+    "worker_heartbeat_seconds": {
+      "required": true,
+      "nullable": false,
+      "unit": "seconds",
+      "default": 30,
+      "kind": "integer",
+      "minimum": 1,
+      "finite": true
+    },
+    "source_health_max_age_hours": {
+      "required": true,
+      "nullable": false,
+      "unit": "hours",
+      "default": 24,
+      "kind": "integer",
+      "minimum": 1,
+      "finite": true
+    },
+    "alert_max_attempts": {
+      "required": true,
+      "nullable": false,
+      "unit": "count",
+      "default": 3,
+      "kind": "integer",
+      "minimum": 1,
+      "finite": true
+    },
+    "alert_retry_base_seconds": {
+      "required": true,
+      "nullable": false,
+      "unit": "seconds",
+      "default": 5,
+      "kind": "number",
+      "finite": true,
+      "exclusive_minimum": 0
+    },
+    "source_batch_size": {
+      "required": true,
+      "nullable": false,
+      "unit": "records",
+      "default": 100,
+      "kind": "integer",
+      "minimum": 1,
+      "finite": true
+    },
+    "job_budget_seconds": {
+      "required": true,
+      "nullable": false,
+      "unit": "seconds",
+      "default": 30,
+      "kind": "integer",
+      "minimum": 1,
+      "finite": true
+    },
+    "source_poll_seconds": {
+      "type": "integer",
+      "description": "Poll interval for source discovery job in seconds. Default 300 (5 min).",
+      "default": 300,
+      "minimum": 1
+    },
+    "daily_poll_seconds": {
+      "type": "integer",
+      "description": "Poll interval for daily evaluation job in seconds. Default 86400 (24 hours).",
+      "default": 86400,
+      "minimum": 1
+    },
+    "scan_poll_seconds": {
+      "type": "integer",
+      "description": "Poll interval for scan orchestration job in seconds. Default 86400 (24 hours).",
+      "default": 86400,
+      "minimum": 1
+    },
+    "settlement_cadence_seconds": {
+      "type": "integer",
+      "description": "Cadence for settlement/withdrawal processing job in seconds. Default 86400 (24 hours).",
+      "default": 86400,
+      "minimum": 1
+    }
+  },
+  "unknown_keys": "ERROR",
+  "missing_keys": "ERROR_INCLUDING_NULLABLE",
+  "bool_is_not_number": true,
+  "validator_does_not_mutate": true,
+  "canonical_hash": {
+    "payload": [
+      "schema_version",
+      "profile_name",
+      "config"
+    ],
+    "sort_keys": true,
+    "allow_nan": false,
+    "unsupported_objects": "ERROR",
+    "semantic_invalid": "ERROR",
+    "nullable_costs": "CONFIG_REQUIRED_NOT_ERROR"
+  },
+  "constraints": [
+    "set(RUNUP_CONFIG)==set(RUNUP_SCHEMA)==set(contract.rules)",
+    "All weight maps have exactly the listed component keys, finite nonnegative values and a finite positive sum.",
+    "ma_periods[0]<ma_periods[1]; vol_dryup_short_period<=vol_dryup_long_period.",
+    "worker_heartbeat_seconds<worker_lease_seconds; http_retry_base_seconds<=http_retry_max_seconds.",
+    "entry_signal_validity_sessions==1 in v2; no approved rule change is implied by an arbitrary larger value.",
+    "forced_exit_buffer_sessions>=1; usable allocation time must be strictly earlier than forced_exit_deadline.",
+    "Alerts sending and actual trading/transfer remain off; atr_stop_auto_expand_v1 is false in v2.",
+    "Profile names must be nonempty strings ending UNVALIDATED; no VALIDATED profile claim.",
+    "Tax/fees are not guessed; allocation requires the four cost fields explicitly configured as per preserved v1 gate.",
+    "withdraw_fraction+tax_reserve may exceed 1 only as an explicit provisional policy; earmark limits still enforce available cash and equity headroom. No legal tax rate is implied.",
+    "importance_first_key_pivotal_major>=importance_confirmed>=importance_routine (preserve existing validator rule)."
+  ],
+  "rules_version": "2026-10-07-worker-poll-intervals"
+}

@@ -1,0 +1,13 @@
+{
+  "items": [
+    "NEEDS_INPUT: fee_estimate_rate 미입력(신규 배분·정산 보류)",
+    "NEEDS_INPUT: fee_minimum 미입력(신규 배분·정산 보류)",
+    "NEEDS_INPUT: slippage_estimate 미입력(신규 배분·정산 보류)",
+    "NEEDS_INPUT: tax_reserve 미입력(신규 배분·정산 보류)",
+    "NEEDS_INPUT: 승인 이벤트 0건(검토 대기 처리 필요)",
+    "NEEDS_INPUT: issuer 매핑 검토 0건",
+    "NEEDS_INPUT: 375px 실기기 확인(조작은 AppTest로만 검증)",
+    "LIVE_UNVERIFIED: 무료 출처 실제 연결·전체 커버리지 미확인",
+    "LOCAL_ONLY: 원격 배포·실전 검증·수익성 검증 아님"
+  ]
+}

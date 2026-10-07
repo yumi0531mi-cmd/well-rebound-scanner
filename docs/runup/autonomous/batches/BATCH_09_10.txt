@@ -1,0 +1,43 @@
+실행 묶음:09·10. 이묶음만완료하고 STOP.
+실제repo:C:\Users\cj123\Documents\Codex\2026-08-27\e\work\strategy-filter-reentry
+AGENTS/PROGRESS/dirty를먼저읽는다. EXECUTION_POLICY.md를우선적용한다.
+현재단계기구현이면코드/검사/evidence에서이어간다. 새프로젝트/새엔진으로다시시작하지않는다.
+reference의원문설계·117schema·API_BLUEPRINT와repo의최신API_CONTRACT를읽는다.
+docs/runup/v2/prompts/STEP_09.txt와STEP_10.txt의필수기능/검사/기본허용범위를모두수행한다.
+중간 ACCEPTED선행조건은이전IMPLEMENTED+관련검사통과로갈음한다. Muse는ACCEPTED를기록하지않는다.
+선행:08까지구현과필수검사통과,알려진blocking 오류없음.
+첫단계실패를수정하지않고둘째단계완료를선언하지않는다.첫단계뒤STOP은내부checkpoint다.
+
+첫 작업:학회·초록·데이터 공개 캘린더.
+A1. AACR/ASCO/ESMO/ASH source registry와 generic annual calendar를 만든다.
+A2. title/abstract/LBA/poster/oral/data release 날짜를 별도로 보존한다.
+A3. 기업/프로그램 발표 근거와 연결된 일정만 issuer catalyst로 승격한다.
+A4. 자동 접근 불가능한 페이지는 출처있는 manual review로 처리한다.
+입출력:EventCandidate type별 evidence; earliest actual data release 보존.
+필수 검사:generic conference만 있는 회사는 ENTRY 불가. abstract가 본 발표보다 빠른 risk boundary; title만 공개면 data와 구분. timezone/DST/embargo 변경/두 프로그램 동일날짜/원문정밀도.
+
+둘째 작업:SPACE mission·FAA 캘린더.
+B1. NASA/공식 mission/issuer IR의 일정과 mission identity를 보존한다.
+B2. FAA license와 launch를 분리한다. 수혜 ticker는 검토된 계약/사업 근거가 필요하다.
+B3. NET/월/분기/미정·날씨 연기·scrub을 원문 정밀도로 저장한다.
+B4. unsupported live 일정은 manual update 경로와 health를 제공한다.
+입출력:SPACE EventCandidate·RiskNotice 후보; 회사 관련성 근거 필수.
+필수 검사:FAA license validity≠launch date; NASA mission≠근거없는ticker. NET unbounded WATCH_ONLY; bounded window earliest date; scrub revision. 동명mission/재발사/연기/취소/실제응답실패.
+
+기본수정허용:runup/catalyst/conferences.py; runup/catalyst/space.py.
+추가:해당단계tests/fixtures/evidence/plan_v2 기록.
+기존runup DTO/codec/CRUD/서비스연결/source중앙policy가필요하면EXECUTION_POLICY의최소adapter권한으로보완한다.
+scope 안팎·이유·수정전후hash·interface·관련검사결과를정확히기록한다.계약/임계값변경허용아님.
+요구사항별검사명/결과를trace에매핑한다. 검사누락을전량통과라고말하지않는다. review_kind=SELF_REVIEW를명시한다.
+새기능변경범위/영향회귀/ruff만검사한다. 이전전체suite는변경/실패가정당화할때만재실행한다.
+source fixture와live smoke를구분하고HTTP0이면LIVE_UNVERIFIED를보존한다.
+비용None4개/원금/접근정보미입력은해당동작만NEEDS_INPUT. 정상0/안전이라고오표시금지.
+기존단타/dirty/secret/금지자료/legacy signature/무료필수source/기준을보존한다.
+backtest/최적화/실제주문/송금/외부발송/push/배포는이진행권한에포함되지않는다.
+구현후REVIEW_PROTOCOL.md로검토pass를수행하고findings를보완·관련검사한다.
+필수검사+자체review PASS면각단계IMPLEMENTED,실패BLOCKED. evidence/artifacts/unresolved를갱신한다.
+독립검토가없으면pending이라고명시한다. 다른reviewer 이름으로ACCEPTED를꾸미지않는다.
+보고:묶음/단계별상태/변경파일/검사/실제APIvsfixture/잔여/다음묶음. STOP.
+다음11·12는사용자의'다음'지시후수행한다.
+
+원문 STEP 파일이 설치되지 않았으면 패키지 stage_prompts/의 같은 파일을 읽는다.

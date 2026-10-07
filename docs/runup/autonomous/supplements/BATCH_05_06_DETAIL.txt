@@ -1,0 +1,66 @@
+# 05·06 추가 세부 요구사항
+이 파일의 기능·데이터 검사는 유지한다. 진행·승인·STOP·검토 규칙 충돌에는 EXECUTION_POLICY.md가 우선한다.
+
+이번 묶음: V2 Step05·06 구현 후 STOP.
+실제repo: C:\Users\cj123\Documents\Codex\2026-08-27\e\work\strategy-filter-reentry
+시작전AGENTS/PROGRESS/dirty를읽고현재03·04 결과와기존코드를재사용한다.
+C:\Users\cj123\Documents\Codex\2026-10-05\new-chat\outputs\RUNUP_NEXT_BATCH\REVIEW_POLICY.md를읽는다.
+docs/runup/v2/prompts/STEP_05.txt와STEP_06.txt,DESIGN §5·7·8·12,API_CONTRACT를읽는다.
+이번묶음·checkpoint정책이개별prompt의중간ACCEPTED/STOP 대기조건에우선한다.
+선행:03·04 IMPLEMENTED+해당검사통과. Codex 전수승인을기다리지않는다.
+05 검사통과뒤같은묶음06으로진행한다. 각각IMPLEMENTED만기록하고ACCEPTED를직접선언하지않는다.
+
+Step05 — 미국Universe·issuer·mapping:
+1. 기존KIS MasterCatalog는목록후보자료일뿐sector/sponsor 확인완료로가정하지않는다.
+   실제지원범위를확인한무료adapter와근거있는manual등록경로를구현한다.
+2. 미국상장equity 여부,issuer/CIK/security 유효기간,sector 태그의근거를보존한다.
+   회사국적과미국상장여부를혼동하지않고ETF/펀드/비대상상품을구분한다.
+3. ticker rename/delisting/다중share class는시간이력으로처리한다.
+   현재ticker/marketcap을과거사실로소급하지않는다.
+4. sponsor/약물/프로그램과issuer 관계는candidate mapping으로만만들고근거/검토후확정한다.
+   부분문자열일치/이름유사성/임상참여병원만으로상장기업을확정하지않는다.
+5. BIO/PHARMA/SPACE와BIOPHARMA노출bucket을일관되게표현한다.
+   sector 근거가부족하면REVIEW,임의classification/인공confidence 점수금지.
+6. marketcap은source/as_of/available_at와함께보존한다. None/오래됨은0으로대체하지않는다.
+   무료공급자가없거나조회불가면typedunavailable/manual근거와coverage를표시한다.
+7. curated목록만지원하면그범위를표시한다. 미국전체종목수집완료라고쓰지않는다.
+8. 원문STEP_05의mapping/유효기간/경계/결측/coverage검사를모두수행한다.
+
+Step06 — ClinicalTrials.gov:
+1. 공식문서와소량readonly응답으로실제endpoint/query/필드를확인하고source fixture를저장한다.
+   문서내용/실제응답미확인endpoint를추측하지않는다. 접속실패는LIVE_UNVERIFIED 원인을남긴다.
+2. study ID/phase/status/sponsor/drug/Primary Completion Date와원문위치·정밀도를보존한다.
+   pagination/cursor/수집한관측시각/document hash를연결한다.
+3. PCD는TRIAL_COMPLETION_MARKER다. 발표/readout 날짜를만들거나ENTRY 신호로승격하지않는다.
+   estimated/actual/월정밀도/미정/변경을구분하며monthly date를임의day로채우지않는다.
+4. sponsor가비상장/병원/다중후보이면mapping REVIEW다. 검토되지않은ticker 생성금지.
+5. 중단/종료는근거있는risk notice 후보로만전달한다.
+   과거의종료상태를새임상중단속보나회사전체CRITICAL로자동승격하지않는다.
+6. parser가확인한정상empty studies만EMPTY_CONFIRMED다.
+   HTTP200빈본문/잘못된JSON/필수구조누락은FAILED/PARTIAL로처리하고0건정상으로숨기지않는다.
+7. 중간pagination실패는PARTIAL과원인/기존유효자료를보존한다.
+   cursor는문서/관측/후보가성공적으로commit된뒤만진전한다.
+8. source available_at는first_seen기준이다. publication/last-update 날짜만으로과거관측을조작하지않는다.
+9. source/HTTP/repository는03·04공통계층을재사용한다. 중복HTTP/DB 엔진금지.
+10. 원문STEP_06의PCD/시간정밀도/pagination/변경/mapping검사를수행한다.
+
+수정허용:
+- runup/data/universe.py,runup/catalyst/mapping.py,clinical_trials.py와필요한package __init__.
+- tests/runup_v2의Step05·06 검사와synthetic/실제source fixture.
+- 원문설계의기존테이블용작은DTO CRUD adapter가필요한경우에만
+  runup/storage/repositories.py를확장한다. migration/schema/기존동작은임의변경금지.
+- config.py는검증된새sourcepolicy/allowlist를중앙등록할때만허용한다.
+  RUNUP_CONFIG117개·기본전략수치·schema/hash 규격변경금지.
+- work/evidence/runup_v2/step_05.md,step_06.md와plan_v2 해당기록.
+다른기존파일변경이필요하면정확한파일/작은diff/의존원인을보고한다. 전체재작성금지.
+SEC 접근정보미입력은SEC경로에만적용한다. CT 등독립경로까지BLOCKED로전파하지않는다.
+
+검사·완료:
+- 요구항목별검사명/결과를evidence에매핑한다. 미검사항목을전량통과라고쓰지않는다.
+- 05·06 변경범위검사와관련회귀/ruff만실행한다. 이유없는기존113개반복금지.
+- fixture와실제API의source/time/coverage를분리한다. actual요청수도보고한다.
+- 비용None4건유지,단타/dirty/legacysignature/비밀정보/금지자료보존.
+- 백테스트/최적화/실제주문/송금/외부알림/push/배포금지. secret/.env파일읽기금지.
+- 각단계IMPLEMENTED/BLOCKED,변경파일,검사,API/fixture,잔여를간결히보고한다.
+STOP. 07·08은별도지시전시작하지않는다. 다음Codex집중검토는12단계다.
+

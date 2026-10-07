@@ -1,0 +1,42 @@
+실행할 단계: V2 Step 12. 이 단계 하나만 수행하고 STOP.
+실제 프로젝트: C:\Users\cj123\Documents\Codex\2026-08-27\e\work\strategy-filter-reentry
+시작 전 AGENTS.md,PROGRESS.json,현재 dirty,docs/runup/integration_map.md를 읽는다.
+docs/runup/v2/DESIGN_V2.md,CONFIG_CONTRACT_V2.json,API_CONTRACT_BLUEPRINT.md,VERIFICATION_MATRIX.md를 읽는다.
+특히 설계 §9를 따라야 한다. 관련 전체 문서를 읽기 전 구현하지 않는다.
+선행: runup_scanner.plan_v2.stages.stage_11 ACCEPTED. 아니면 구현 없이 BLOCKED 보고.
+원본·기존 dirty·단타 기준·금지자료·secret·기존 state signature를 보존한다.
+허용 범위 밖 기존 파일 수정이 필요하면 작은 diff와 이유를 보고하고 그 부분은 보류한다.
+수익성 백테스트/최적화/자동주문/송금/실제알림/push/배포 금지. 기능·합성·회귀 검사만 한다.
+
+목표: 일봉·시세 bridge·basis·finality
+수정 허용: runup/data/prices.py; runup/data/quote_bridge.py; runup/data/calendar.py.
+추가 허용: tests/runup_v2/*/test_step_12*.py 및 해당 synthetic/source fixtures.
+공통 증거만 갱신: work/evidence/runup_v2/step_12.md,PROGRESS.json의 plan_v2 namespace.
+문서 API_CONTRACT.md의 해당 signature를 준수한다. Step02 전에는 blueprint를 따른다.
+
+구현 작업:
+1. 기존 shared KIS client/limiter로 검증된 일봉 adapter를 만든다. 기존 client 변경 필요시 이유와 diff만 제시.
+2. 명시 선택 fallback은 전체 batch source/basis를 보존하며 원장용 raw와 계산용 split-only를 구분한다.
+3. expected sessions/finality/revision/action evidence를 검사한다.
+4. KIS 수신시각과 trade_at을 분리한다. unknown latency quote는 allocation 차단한다.
+
+입출력: prices.fetch(...)->CollectionResult[PriceBar]; quote_bridge.observe(runtime,...)->QuoteObservation.
+필요 동작을 가짜 정상/빈값/0으로 바꾸지 않는다. 알려지지 않은 사실은 typed missing/NEEDS_INPUT이다.
+
+필수 검사:
+1. OHLC invariant/NaN/volume0/missing session/중복/휴장/진행봉/close+grace 경계.
+2. raw/split-adjusted/unknown/이미조정된split/미래action소급 차단.
+3. received-only≠freshtrade/stale/future quote/장외/unknown basis.
+4. 작은 실제readonlysmoke; 기존 KIS·quote 정책 회귀.
+본 단계에 필요한 기존 회귀검사와 ruff를 실행한다. 실행 불가/환경 실패를 PASS로 쓰지 않는다.
+테스트 expected는 명세/손계산/공식 response에서 정한다. 구현 출력 복사/테스트삭제/기준완화 금지.
+
+완료 조건:
+허용 구현+해당 검사 통과+입력/출력/실패 계약 일치. 미확인 live/비용 입력은 별도로 표시.
+evidence에 실제 명령/exit code/검사결과/파일before-after hash/인터페이스/합성·실제/잔여를 기록한다.
+PROGRESS.runup_scanner.plan_v2.stages.stage_12={status:IMPLEMENTED,evidence,artifacts,unresolved,updated_at_utc}.
+ACCEPTED는 독립 검토 후에만 기록한다. 필수 기능 미완성인데 IMPLEMENTED로 선언하지 않는다.
+명세충돌/기능실패는 BLOCKED,운영 사실 입력부족은 NEEDS_INPUT이다. 원인과 필요한 항목을 정확히 남긴다.
+보고는 [단계/상태,변경파일,계약변경,검사,실제APIvsfixture,잔여문제]만 간결하게.
+STOP. 다음 Step 13를 시작하지 않는다.
+

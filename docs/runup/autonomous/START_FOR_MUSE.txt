@@ -1,0 +1,28 @@
+전체 설계 준비만 수행한다. Python 구현은 아직 시작하지 않는다.
+패키지: C:\Users\cj123\Documents\Codex\2026-10-05\new-chat\outputs\RUNUP_FULL_PLAN
+실제 repo: C:\Users\cj123\Documents\Codex\2026-08-27\e\work\strategy-filter-reentry
+1. 실제 repo의 AGENTS.md, PROGRESS.json, 현재 변경 파일부터 읽는다.
+2. 패키지의 00_READ_ME.md, EXECUTION_POLICY.md, REVIEW_PROTOCOL.md를 읽는다.
+3. CHECKPOINTS.md, FINAL_WEB_CHECKLIST.md, BATCH_INDEX.md를 읽는다.
+4. reference의 원문 설계·설정 계약·API 계약·검사 기준·출처 문서를 읽는다.
+5. 현재 repo의 API_CONTRACT.md와 구현 코드를 별도로 대조한다.
+6. requirements/TRACE_TEMPLATE.json과 REVIEW_REPORT_TEMPLATE.md를 검토한다.
+7. docs/runup/autonomous/에 본 패키지 전체를 원문 그대로 설치하고 파일별 해시를 대조한다.
+8. stage_prompts는 원문 V2 지시서다. 기존 docs/runup/v2 원문을 덮어쓰지 않는다.
+9. 기존 V2 파일이 없으면 reference와 stage_prompts를 해당 위치에 복사한다.
+10. 기존 원문이 다르면 차이를 기록하고 원문 계약을 확인한다. 조용히 교체하지 않는다.
+11. 이후 문서 경로는 docs/runup/autonomous/를 기준으로 해석한다.
+각 묶음에서는 원문 STEP과 BATCH를 함께 읽고 EXECUTION_POLICY를 우선 적용한다.
+12. stage 05·06에는 supplements/BATCH_05_06_DETAIL.txt도 읽는다.
+13. 현재 진행 상태를 보존하고 완료한 단계를 다시 구현하지 않는다.
+14. plan_v2.execution_mode='USER_DRIVEN_TWO_STAGE_AUTONOMOUS'와 정책 경로를 기록한다.
+15. 문서 설치 후 SHA256을 대조하고 준비 결과와 실제 다음 묶음만 보고한다.
+STOP. 아직 구현하지 않는다.
+이후 사용자가 '다음'이라고 하면 PROGRESS 기준 다음 묶음 하나만 구현한다.
+각 묶음은 구현 → 별도 검토 pass → 발견 오류 수정 → 관련 검사 → 증거 기록 순서다.
+두 단계 완료 후 STOP하고 다음 사용자 지시를 기다린다. 마지막은 31 단독이다.
+사용자 '검토'는 마지막 묶음만 검토하며 다음 기능을 시작하지 않는 명령이다.
+Muse 자체 검토 PASS와 Codex 독립 검토 ACCEPTED를 구분한다.
+Codex 부재만으로 멈추지 않는다. 실제 오류·보호 규칙·미입력 상태는 정직하게 기록한다.
+최종 31에서 검토자료를 내보내고 READY_FOR_CODEX_REVIEW로 보고한다.
+실제 주문·송금·외부 메시지·백테스트·push·배포는 이 지시에 포함되지 않는다.

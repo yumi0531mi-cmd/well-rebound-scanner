@@ -1,0 +1,43 @@
+실행 묶음:15·16. 이묶음만완료하고 STOP.
+실제repo:C:\Users\cj123\Documents\Codex\2026-08-27\e\work\strategy-filter-reentry
+AGENTS/PROGRESS/dirty를먼저읽는다. EXECUTION_POLICY.md를우선적용한다.
+현재단계기구현이면코드/검사/evidence에서이어간다. 새프로젝트/새엔진으로다시시작하지않는다.
+reference의원문설계·117schema·API_BLUEPRINT와repo의최신API_CONTRACT를읽는다.
+docs/runup/v2/prompts/STEP_15.txt와STEP_16.txt의필수기능/검사/기본허용범위를모두수행한다.
+중간 ACCEPTED선행조건은이전IMPLEMENTED+관련검사통과로갈음한다. Muse는ACCEPTED를기록하지않는다.
+선행:14까지구현과필수검사통과,알려진blocking 오류없음.
+첫단계실패를수정하지않고둘째단계완료를선언하지않는다.첫단계뒤STOP은내부checkpoint다.
+
+첫 작업:SETUP 점수·latch·generation.
+A1. hardgate와6개 setup flags/가중score를 구현한다.
+A2. threshold crossing에서 latch/generation을 만들고 동일상태 재평가로 expiry 연장하지 않는다.
+A3. 정확한session expiry·구조붕괴·취소·event/profile 변경 invalidation을 처리한다.
+A4. dryup setup 증거를 보존하여 후속 거래량 돌파와 분리한다.
+입출력:setup.evaluate(context)->SetupResult; 이전 snapshot을 명시 입력.
+필수 검사:flags[1,1,1,0,1,0]→85; threshold equal/outside; weight0 허용. feature missing≠false/no reweight; 관련health failure. latch10 정확경계/같은입력generation/새eventrevision/미래자료.
+
+둘째 작업:TRIGGER·신호 소비·재진입.
+B1. MA위/HL/frozen cross/RVOL/CLV/extension/남은 위험session hardgate 구현.
+B2. 다음 regular close 또는 forced deadline 중 이른 expiry를 기록한다.
+B3. ENTRY_ELIGIBLE와 allocation/실제fill을 분리하고 trigger ID를 결정적으로 만든다.
+B4. 소비generation 재사용·옛신호 재매수 금지; 새 setup+새cross만 재진입.
+입출력:trigger.evaluate(context)->TriggerResult; signal validity=1 session.
+필수 검사:RVOL/CLV/extension equal/outside; 이전C=ref/currentC=ref의 cross 경계. 새pivot만으로false cross 금지/3future sessions/휴일/이미deadline. 동일신호중복/expiry close/consumed/reentry/newgeneration. future prefix/unknown price/event review.
+
+기본수정허용:runup/engine/setup.py; runup/engine/trigger.py.
+추가:해당단계tests/fixtures/evidence/plan_v2 기록.
+기존runup DTO/codec/CRUD/서비스연결/source중앙policy가필요하면EXECUTION_POLICY의최소adapter권한으로보완한다.
+scope 안팎·이유·수정전후hash·interface·관련검사결과를정확히기록한다.계약/임계값변경허용아님.
+요구사항별검사명/결과를trace에매핑한다. 검사누락을전량통과라고말하지않는다. review_kind=SELF_REVIEW를명시한다.
+새기능변경범위/영향회귀/ruff만검사한다. 이전전체suite는변경/실패가정당화할때만재실행한다.
+source fixture와live smoke를구분하고HTTP0이면LIVE_UNVERIFIED를보존한다.
+비용None4개/원금/접근정보미입력은해당동작만NEEDS_INPUT. 정상0/안전이라고오표시금지.
+기존단타/dirty/secret/금지자료/legacy signature/무료필수source/기준을보존한다.
+backtest/최적화/실제주문/송금/외부발송/push/배포는이진행권한에포함되지않는다.
+구현후REVIEW_PROTOCOL.md로검토pass를수행하고findings를보완·관련검사한다.
+필수검사+자체review PASS면각단계IMPLEMENTED,실패BLOCKED. evidence/artifacts/unresolved를갱신한다.
+독립검토가없으면pending이라고명시한다. 다른reviewer 이름으로ACCEPTED를꾸미지않는다.
+보고:묶음/단계별상태/변경파일/검사/실제APIvsfixture/잔여/다음묶음. STOP.
+다음17·18는사용자의'다음'지시후수행한다.
+
+원문 STEP 파일이 설치되지 않았으면 패키지 stage_prompts/의 같은 파일을 읽는다.

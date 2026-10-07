@@ -1,0 +1,43 @@
+실행 묶음:25·26. 이묶음만완료하고 STOP.
+실제repo:C:\Users\cj123\Documents\Codex\2026-08-27\e\work\strategy-filter-reentry
+AGENTS/PROGRESS/dirty를먼저읽는다. EXECUTION_POLICY.md를우선적용한다.
+현재단계기구현이면코드/검사/evidence에서이어간다. 새프로젝트/새엔진으로다시시작하지않는다.
+reference의원문설계·117schema·API_BLUEPRINT와repo의최신API_CONTRACT를읽는다.
+docs/runup/v2/prompts/STEP_25.txt와STEP_26.txt의필수기능/검사/기본허용범위를모두수행한다.
+중간 ACCEPTED선행조건은이전IMPLEMENTED+관련검사통과로갈음한다. Muse는ACCEPTED를기록하지않는다.
+선행:24까지구현과필수검사통과,알려진blocking 오류없음.
+첫단계실패를수정하지않고둘째단계완료를선언하지않는다.첫단계뒤STOP은내부checkpoint다.
+
+첫 작업:공통 scan·profile service·read model.
+A1. source/revision/bar/profile 고정 input snapshot으로 엔진·원장 read model을 조립한다.
+A2. config.py schema/hash를 이용해completeimmutableDBprofile/activeid를 관리한다.
+A3. daily scan과intraday risk overlay를분리하고critical/eventrevision즉시반영handler연결.
+A4. lastgood/partial/blockedreason/health/source capability를공통결과로제공한다.
+입출력:scan.run(as_of,config_profile_id)->run_id; immutable typed read models.
+필수 검사:sameasof+inputs 재실행동일결과/중간실패partial vs zero-match. profilevalidation/hash/cache/schema migration required; API/엔진UI중복계산없음. event조기공개일봉전FULL/quoteunknown/dailytrigger장중재계산금지. 기존runtimeKIS재사용/worker handler정상종료/미래snapshot제외.
+
+둘째 작업:Outbox·알림 dry-run.
+B1. 의미있는 상태전환·누적target증가에만uniqueoutbox를 생성한다.
+B2. dry-run transport/retry/receipt/deadletter를 구현한다.
+B3. payload는source/asof/reasons/profile 포함하고비밀정보·승률표현금지.
+B4. 실제Telegram발송·수신자메시지전송은실행하지않는다.
+입출력:alerts.enqueue(decision,event); alerts.dry_run(queued)->TransportResult.
+필수 검사:같은결정rerun1개/target증가새1개/날짜만변경중복금지. retry중복receipt/실패deadletter/workerrestart. 알림실패원장불변/credentialredact/dryrun외부송신0.
+
+기본수정허용:runup/services/scan.py; runup/services/config_service.py; runup/services/read_models.py; runup/services/jobs.py; runup/services/alerts.py.
+추가:해당단계tests/fixtures/evidence/plan_v2 기록.
+기존runup DTO/codec/CRUD/서비스연결/source중앙policy가필요하면EXECUTION_POLICY의최소adapter권한으로보완한다.
+scope 안팎·이유·수정전후hash·interface·관련검사결과를정확히기록한다.계약/임계값변경허용아님.
+요구사항별검사명/결과를trace에매핑한다. 검사누락을전량통과라고말하지않는다. review_kind=SELF_REVIEW를명시한다.
+새기능변경범위/영향회귀/ruff만검사한다. 이전전체suite는변경/실패가정당화할때만재실행한다.
+source fixture와live smoke를구분하고HTTP0이면LIVE_UNVERIFIED를보존한다.
+비용None4개/원금/접근정보미입력은해당동작만NEEDS_INPUT. 정상0/안전이라고오표시금지.
+기존단타/dirty/secret/금지자료/legacy signature/무료필수source/기준을보존한다.
+backtest/최적화/실제주문/송금/외부발송/push/배포는이진행권한에포함되지않는다.
+구현후REVIEW_PROTOCOL.md로검토pass를수행하고findings를보완·관련검사한다.
+필수검사+자체review PASS면각단계IMPLEMENTED,실패BLOCKED. evidence/artifacts/unresolved를갱신한다.
+독립검토가없으면pending이라고명시한다. 다른reviewer 이름으로ACCEPTED를꾸미지않는다.
+보고:묶음/단계별상태/변경파일/검사/실제APIvsfixture/잔여/다음묶음. STOP.
+다음27·28는사용자의'다음'지시후수행한다.
+
+원문 STEP 파일이 설치되지 않았으면 패키지 stage_prompts/의 같은 파일을 읽는다.

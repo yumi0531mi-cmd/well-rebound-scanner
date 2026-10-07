@@ -1,0 +1,43 @@
+실행 묶음:29·30. 이묶음만완료하고 STOP.
+실제repo:C:\Users\cj123\Documents\Codex\2026-08-27\e\work\strategy-filter-reentry
+AGENTS/PROGRESS/dirty를먼저읽는다. EXECUTION_POLICY.md를우선적용한다.
+현재단계기구현이면코드/검사/evidence에서이어간다. 새프로젝트/새엔진으로다시시작하지않는다.
+reference의원문설계·117schema·API_BLUEPRINT와repo의최신API_CONTRACT를읽는다.
+docs/runup/v2/prompts/STEP_29.txt와STEP_30.txt의필수기능/검사/기본허용범위를모두수행한다.
+중간 ACCEPTED선행조건은이전IMPLEMENTED+관련검사통과로갈음한다. Muse는ACCEPTED를기록하지않는다.
+선행:28까지구현과필수검사통과,알려진blocking 오류없음.
+첫단계실패를수정하지않고둘째단계완료를선언하지않는다.첫단계뒤STOP은내부checkpoint다.
+
+첫 작업:운영·backup·복구·의존성 문서.
+A1. worker활성화/수집capability/비용·원금입력/수동매매·결제/정산 절차를문서화한다.
+A2. consistentDBbackup/restore검증/projectionrebuild/lease복구/healthreport 명령구현.
+A3. 실제dependency누락일때만manifest에추가하고버전호환을검증한다.
+A4. 클라우드임시disk/영구volume/secret설정/quote지원/공개읽기와쓰기인증을분리표시한다.
+입출력:운영상미충족은기능완료와별도; 미배포앱을배포완료로표시금지.
+필수 검사:corruptDB/backup실패/restore샌드박스/rebuild일치/프로필불일치. worker재시작/중단job/cursor/lease/DBlock/디스크없음typedfailure. production원본overwrite금지/비밀없는healthlog/기존start회귀.
+
+둘째 작업:전체 기능 통합·기존 단타 회귀.
+B1. 아래승인matrix의전체scenario를sourcefixture→event→price→setup→trigger→position→exit→settlement→rollover→withdrawal로검사한다.
+B2. critical/변경일정/unknownquote/DBfailure/동시승인/restart/replay를같은scenario에포함한다.
+B3. 기존필수테스트·현재변경범위ruff·import·StreamlitPC/mobile검사를수행한다.
+B4. 실패시원인을보고하고테스트/기준완화금지;implementationfix는해당이전단계로반환한다.
+입출력:VERIFICATION_MATRIX.md 항목 전부 PASS/미확인명시; 임의xfailed불가.
+필수 검사:합성cycle의cash/qty/cost/P/H/reserve/earmark불변식을단계마다손계산대조. futureappend/prefix/cancellationasof/sourceavailabletime/별도sourcebasis. 소스실제smoke와fixture 결과분리/LIVE_UNVERIFIED 목록. 성능검사가아닌기능통합이며백테스트0/주문0/송금0/실제알림0.
+
+기본수정허용:runup/services/operations.py; docs/runup/v2/OPERATIONS.md; dependency manifest 필요시만; tests/runup_v2/integration/*.py; tests/runup_v2/ui/*.py; docs/runup/v2/VERIFICATION_RESULTS.md.
+추가:해당단계tests/fixtures/evidence/plan_v2 기록.
+기존runup DTO/codec/CRUD/서비스연결/source중앙policy가필요하면EXECUTION_POLICY의최소adapter권한으로보완한다.
+scope 안팎·이유·수정전후hash·interface·관련검사결과를정확히기록한다.계약/임계값변경허용아님.
+요구사항별검사명/결과를trace에매핑한다. 검사누락을전량통과라고말하지않는다. review_kind=SELF_REVIEW를명시한다.
+새기능변경범위/영향회귀/ruff만검사한다. 이전전체suite는변경/실패가정당화할때만재실행한다.
+source fixture와live smoke를구분하고HTTP0이면LIVE_UNVERIFIED를보존한다.
+비용None4개/원금/접근정보미입력은해당동작만NEEDS_INPUT. 정상0/안전이라고오표시금지.
+기존단타/dirty/secret/금지자료/legacy signature/무료필수source/기준을보존한다.
+backtest/최적화/실제주문/송금/외부발송/push/배포는이진행권한에포함되지않는다.
+구현후REVIEW_PROTOCOL.md로검토pass를수행하고findings를보완·관련검사한다.
+필수검사+자체review PASS면각단계IMPLEMENTED,실패BLOCKED. evidence/artifacts/unresolved를갱신한다.
+독립검토가없으면pending이라고명시한다. 다른reviewer 이름으로ACCEPTED를꾸미지않는다.
+보고:묶음/단계별상태/변경파일/검사/실제APIvsfixture/잔여/다음묶음. STOP.
+다음31·31는사용자의'다음'지시후수행한다.
+
+원문 STEP 파일이 설치되지 않았으면 패키지 stage_prompts/의 같은 파일을 읽는다.

@@ -1,0 +1,45 @@
+실행 묶음:05·06. 이묶음만완료하고 STOP.
+실제repo:C:\Users\cj123\Documents\Codex\2026-08-27\e\work\strategy-filter-reentry
+AGENTS/PROGRESS/dirty를먼저읽는다. EXECUTION_POLICY.md를우선적용한다.
+현재단계기구현이면코드/검사/evidence에서이어간다. 새프로젝트/새엔진으로다시시작하지않는다.
+reference의원문설계·117schema·API_BLUEPRINT와repo의최신API_CONTRACT를읽는다.
+docs/runup/v2/prompts/STEP_05.txt와STEP_06.txt의필수기능/검사/기본허용범위를모두수행한다.
+중간 ACCEPTED선행조건은이전IMPLEMENTED+관련검사통과로갈음한다. Muse는ACCEPTED를기록하지않는다.
+선행:04까지구현과필수검사통과,알려진blocking 오류없음.
+첫단계실패를수정하지않고둘째단계완료를선언하지않는다.첫단계뒤STOP은내부checkpoint다.
+
+supplements/BATCH_05_06_DETAIL.txt의 추가 요구사항도 수행한다. 진행 정책은 EXECUTION_POLICY 우선이다.
+
+첫 작업:미국 Universe·issuer·ticker mapping.
+A1. 미국 equity universe adapter와 manual 근거 경로를 구현한다. 전체 커버리지 확인 전 완전하다고 표기 금지.
+A2. CIK/issuer/security 유효기간·sponsor/약물 관계와 검토를 보존한다.
+A3. BIO/PHARMA/SPACE classification 및 BIOPHARMA 노출 bucket을 구분한다.
+A4. timestamp 있는 market cap 관측을 저장하고 결측을 0으로 바꾸지 않는다.
+입출력:UniverseObservation/Issuer/Security; unresolved mapping은 후보만.
+필수 검사:issuer 다중ticker/이름 유사회사/CIK leading zero/rename/delisting 시점. ETF/비미국/미검토 sector 제외; ambiguous mapping REVIEW. 시총 boundary/None/stale/현재값 과거소급 차단; coverage 실패≠universe0.
+
+둘째 작업:ClinicalTrials.gov 수집기.
+B1. 공식 API 실제 문서/소량 응답으로 endpoint·필드를 검증한 후 parser를 작성한다.
+B2. pagination·cursor·trial phase/status/sponsor/drug/PCD evidence를 수집한다.
+B3. PCD를 TRIAL_COMPLETION_MARKER로만 저장하며 readout/ENTRY 일정으로 바꾸지 않는다.
+B4. 종료/중단 사실은 근거있는 RiskNotice 후보로 전달한다.
+입출력:collect(cursor,observed_at,source_policy)->CollectionResult[EventCandidate]; LIVE 상태 분리.
+필수 검사:실제 raw snapshot parser/estimated vs actual date/분기·결측/중복trial. PCD-only는 WATCH_ONLY; cancelled trial과 active trial 분리. pagination 중간실패/cursor rollback/변경 revision/미확인 sponsor.
+
+기본수정허용:runup/data/universe.py; runup/catalyst/mapping.py; runup/catalyst/clinical_trials.py.
+추가:해당단계tests/fixtures/evidence/plan_v2 기록.
+기존runup DTO/codec/CRUD/서비스연결/source중앙policy가필요하면EXECUTION_POLICY의최소adapter권한으로보완한다.
+scope 안팎·이유·수정전후hash·interface·관련검사결과를정확히기록한다.계약/임계값변경허용아님.
+요구사항별검사명/결과를trace에매핑한다. 검사누락을전량통과라고말하지않는다. review_kind=SELF_REVIEW를명시한다.
+새기능변경범위/영향회귀/ruff만검사한다. 이전전체suite는변경/실패가정당화할때만재실행한다.
+source fixture와live smoke를구분하고HTTP0이면LIVE_UNVERIFIED를보존한다.
+비용None4개/원금/접근정보미입력은해당동작만NEEDS_INPUT. 정상0/안전이라고오표시금지.
+기존단타/dirty/secret/금지자료/legacy signature/무료필수source/기준을보존한다.
+backtest/최적화/실제주문/송금/외부발송/push/배포는이진행권한에포함되지않는다.
+구현후REVIEW_PROTOCOL.md로검토pass를수행하고findings를보완·관련검사한다.
+필수검사+자체review PASS면각단계IMPLEMENTED,실패BLOCKED. evidence/artifacts/unresolved를갱신한다.
+독립검토가없으면pending이라고명시한다. 다른reviewer 이름으로ACCEPTED를꾸미지않는다.
+보고:묶음/단계별상태/변경파일/검사/실제APIvsfixture/잔여/다음묶음. STOP.
+다음07·08는사용자의'다음'지시후수행한다.
+
+원문 STEP 파일이 설치되지 않았으면 패키지 stage_prompts/의 같은 파일을 읽는다.

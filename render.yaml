@@ -16,3 +16,28 @@ services:
         sync: false
       - key: DATABASE_URL
         sync: false
+      - key: WELLSCAN_DAEMON_ENABLED
+        sync: false
+  - type: web
+    name: runup-scanner
+    runtime: python
+    plan: free
+    autoDeployTrigger: commit
+    buildCommand: pip install -r requirements.txt && ruff check runup runup_app.py
+    startCommand: streamlit run runup_app.py --server.address 0.0.0.0 --server.port $PORT --server.headless true --browser.gatherUsageStats false
+    healthCheckPath: /_stcore/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.8
+      - key: RUNUP_DB_URL
+        sync: false
+      - key: RUNUP_DB_AUTH_TOKEN
+        sync: false
+      - key: WELLSCAN_ADMIN_TOKEN
+        sync: false
+      - key: RUNUP_SEC_USER_AGENT
+        sync: false
+      - key: KIS_APP_KEY
+        sync: false
+      - key: KIS_APP_SECRET
+        sync: false

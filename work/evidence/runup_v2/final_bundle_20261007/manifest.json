@@ -1,0 +1,16 @@
+{
+  "bundle": "final_bundle_20261007",
+  "created_at_utc": "2026-10-07T05:45:34.275379+00:00",
+  "files": {
+    "code_manifest.json": "33b96f1b2d3fb8cf26b0100d7cf044e53f7d4678d3f67519842ccc924a5c4a43",
+    "config_contract.json": "138d5fd72d4372772f5d34a7fbde82a0ba62baa8ee1e5dd6d8256ba229b733cf",
+    "privacy.json": "b1a31ccb72fdef285e1c15bacbfcdb54329939fc0d22c6179b06a0ff03f98b05",
+    "residuals.json": "5570649dc9f477db8df5fb7ea9f83fdf0612c0dde5bd211f4af6606c6084b8ab",
+    "source_status.json": "8b5dd0c37eb85059bba5812d06337e4887836bbaa025740c788319e67f7a1dcc",
+    "test_evidence.json": "8d7a44a0ba7724a2010813d4599a9bb4a88c1ff7dbf1e31abe4b2de6fd0f9dc7"
+  },
+  "privacy": "pass",
+  "profile_hash": "15f4f04f8e252b8074c70a4e1a1e48bdb316af60523134bb9b6b8fba193980e2",
+  "schema_version": 3,
+  "test_command": "pytest tests/runup_v2 tests/test_web_app_boundary.py"
+}

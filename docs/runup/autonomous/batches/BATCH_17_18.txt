@@ -1,0 +1,43 @@
+실행 묶음:17·18. 이묶음만완료하고 STOP.
+실제repo:C:\Users\cj123\Documents\Codex\2026-08-27\e\work\strategy-filter-reentry
+AGENTS/PROGRESS/dirty를먼저읽는다. EXECUTION_POLICY.md를우선적용한다.
+현재단계기구현이면코드/검사/evidence에서이어간다. 새프로젝트/새엔진으로다시시작하지않는다.
+reference의원문설계·117schema·API_BLUEPRINT와repo의최신API_CONTRACT를읽는다.
+docs/runup/v2/prompts/STEP_17.txt와STEP_18.txt의필수기능/검사/기본허용범위를모두수행한다.
+중간 ACCEPTED선행조건은이전IMPLEMENTED+관련검사통과로갈음한다. Muse는ACCEPTED를기록하지않는다.
+선행:16까지구현과필수검사통과,알려진blocking 오류없음.
+첫단계실패를수정하지않고둘째단계완료를선언하지않는다.첫단계뒤STOP은내부checkpoint다.
+
+첫 작업:Strength·Exhaustion 점수.
+A1. 명세4 strength와8 exhaustion components를 정확히 구현한다.
+A2. shortMA/RSprev/Efficiencyprev/frozenref/HL 구조 파괴 입력을 명시한다.
+A3. 점수와 이유·unavailable를 반환하고 probability field를 만들지 않는다.
+A4. 독립score이며 100-strength로 exhaustion을 만들지 않는다.
+입출력:strength.evaluate(context); exhaustion.evaluate(context)->ScoreResult.
+필수 검사:모든component 단독true/false·명세수식·가중normalized 합계. 임계값equal/outside/평탄범위/benchmark missing/ref없음. +65%강한구조가 숫자만으로 매도되지않음/미래append불변.
+
+둘째 작업:Structural Stop·hard stop·장중 위험.
+B1. 진입frozenHL·수수료제외 entry·hard stop/initial/trailing을 구현한다.
+B2. trailing 하향확대 금지,confirmed split 단위변환만 허용한다.
+B3. fresh known trade와 received-only/unknown delay를 구분한다.
+B4. 가격 없음에도 event 위험을 보존할 typed StopResult를 제공한다.
+입출력:stop.evaluate(position,quote,features,config)->StopResult.
+필수 검사:stop>=entry/HL없음/평균원가와tradeprice 구분/하향trail금지. split 전후 위험금액 일치/quote stale/future/unknown latency. knownquote<=stop FULL 신호; unknown은 POSSIBLE_STOP+REVIEW.
+
+기본수정허용:runup/engine/strength.py; runup/engine/exhaustion.py; runup/engine/stop.py.
+추가:해당단계tests/fixtures/evidence/plan_v2 기록.
+기존runup DTO/codec/CRUD/서비스연결/source중앙policy가필요하면EXECUTION_POLICY의최소adapter권한으로보완한다.
+scope 안팎·이유·수정전후hash·interface·관련검사결과를정확히기록한다.계약/임계값변경허용아님.
+요구사항별검사명/결과를trace에매핑한다. 검사누락을전량통과라고말하지않는다. review_kind=SELF_REVIEW를명시한다.
+새기능변경범위/영향회귀/ruff만검사한다. 이전전체suite는변경/실패가정당화할때만재실행한다.
+source fixture와live smoke를구분하고HTTP0이면LIVE_UNVERIFIED를보존한다.
+비용None4개/원금/접근정보미입력은해당동작만NEEDS_INPUT. 정상0/안전이라고오표시금지.
+기존단타/dirty/secret/금지자료/legacy signature/무료필수source/기준을보존한다.
+backtest/최적화/실제주문/송금/외부발송/push/배포는이진행권한에포함되지않는다.
+구현후REVIEW_PROTOCOL.md로검토pass를수행하고findings를보완·관련검사한다.
+필수검사+자체review PASS면각단계IMPLEMENTED,실패BLOCKED. evidence/artifacts/unresolved를갱신한다.
+독립검토가없으면pending이라고명시한다. 다른reviewer 이름으로ACCEPTED를꾸미지않는다.
+보고:묶음/단계별상태/변경파일/검사/실제APIvsfixture/잔여/다음묶음. STOP.
+다음19·20는사용자의'다음'지시후수행한다.
+
+원문 STEP 파일이 설치되지 않았으면 패키지 stage_prompts/의 같은 파일을 읽는다.

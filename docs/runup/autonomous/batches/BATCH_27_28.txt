@@ -1,0 +1,43 @@
+실행 묶음:27·28. 이묶음만완료하고 STOP.
+실제repo:C:\Users\cj123\Documents\Codex\2026-08-27\e\work\strategy-filter-reentry
+AGENTS/PROGRESS/dirty를먼저읽는다. EXECUTION_POLICY.md를우선적용한다.
+현재단계기구현이면코드/검사/evidence에서이어간다. 새프로젝트/새엔진으로다시시작하지않는다.
+reference의원문설계·117schema·API_BLUEPRINT와repo의최신API_CONTRACT를읽는다.
+docs/runup/v2/prompts/STEP_27.txt와STEP_28.txt의필수기능/검사/기본허용범위를모두수행한다.
+중간 ACCEPTED선행조건은이전IMPLEMENTED+관련검사통과로갈음한다. Muse는ACCEPTED를기록하지않는다.
+선행:26까지구현과필수검사통과,알려진blocking 오류없음.
+첫단계실패를수정하지않고둘째단계완료를선언하지않는다.첫단계뒤STOP은내부checkpoint다.
+
+첫 작업:기존 앱 런업 읽기 탭.
+A1. 실제monolithicapp를최소분리하여기존단타와런업st.tabs를연결한다. 신규별도앱금지.
+A2. 런업은공통readmodel만표시하며렌더로source/scan/worker를시작하지않는다.
+A3. 개요/캘린더/후보/보유/현금/health의권고·실제·시각·출처·지연·blockedreason을표시한다.
+A4. 기존pageconfig/adminbranch/sidebar/fragment/globalstop/sessionkey/구독을보존한다.
+입출력:ui.render(read_models,command_services,auth_context); read-only 상태로 먼저완료.
+필수 검사:Streamlit1.41.1 AppTest/smoke,초기emptyDB/partialhealth/unknownprice. 양tab렌더로HTTP0/workerenable불변/기존단타1초refresh/기존인증branch. 전역st.stop경로/네임스페이스충돌/score승률오표시금지.
+
+둘째 작업:쓰기 form·설정·mobile·권한.
+B1. server-sidewritergate와manualreview/fill/reserve/settlement/alloc/withdraw/profile form을연결한다.
+B2. 기존secret검증방식재사용,runup권한분리;secret파일읽기/변경없음.
+B3. 한submit ID 안정·재시도중복방지·schema widgets·profile invalidation 구현.
+B4. 375pxmobilecards와PCtable은같은readmodel을사용한다.
+입출력:auth_context는서버검증; UIdisabled만으로권한보장하지않음.
+필수 검사:read-only사용자의서비스직접command도거부/권한만료/토큰로그금지. doubleclick/rerun/retry1회/invalidformnoledgerchange/Nonecostblocked. profile변경엔진과화면hash일치/기존단타설정불변. PC/mobile가독성·동일수치/원문근거검토/정산권고실제확정분리.
+
+기본수정허용:app.py; runup/ui/overview.py; runup/ui/catalysts.py; runup/ui/positions.py; runup/ui/cash.py; runup/ui/health.py; runup/ui/__init__.py; runup/ui/*.py; runup/services/auth.py; runup/services/commands.py.
+추가:해당단계tests/fixtures/evidence/plan_v2 기록.
+기존runup DTO/codec/CRUD/서비스연결/source중앙policy가필요하면EXECUTION_POLICY의최소adapter권한으로보완한다.
+scope 안팎·이유·수정전후hash·interface·관련검사결과를정확히기록한다.계약/임계값변경허용아님.
+요구사항별검사명/결과를trace에매핑한다. 검사누락을전량통과라고말하지않는다. review_kind=SELF_REVIEW를명시한다.
+새기능변경범위/영향회귀/ruff만검사한다. 이전전체suite는변경/실패가정당화할때만재실행한다.
+source fixture와live smoke를구분하고HTTP0이면LIVE_UNVERIFIED를보존한다.
+비용None4개/원금/접근정보미입력은해당동작만NEEDS_INPUT. 정상0/안전이라고오표시금지.
+기존단타/dirty/secret/금지자료/legacy signature/무료필수source/기준을보존한다.
+backtest/최적화/실제주문/송금/외부발송/push/배포는이진행권한에포함되지않는다.
+구현후REVIEW_PROTOCOL.md로검토pass를수행하고findings를보완·관련검사한다.
+필수검사+자체review PASS면각단계IMPLEMENTED,실패BLOCKED. evidence/artifacts/unresolved를갱신한다.
+독립검토가없으면pending이라고명시한다. 다른reviewer 이름으로ACCEPTED를꾸미지않는다.
+보고:묶음/단계별상태/변경파일/검사/실제APIvsfixture/잔여/다음묶음. STOP.
+다음29·30는사용자의'다음'지시후수행한다.
+
+원문 STEP 파일이 설치되지 않았으면 패키지 stage_prompts/의 같은 파일을 읽는다.

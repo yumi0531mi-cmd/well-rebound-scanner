@@ -1,0 +1,43 @@
+실행 묶음:07·08. 이묶음만완료하고 STOP.
+실제repo:C:\Users\cj123\Documents\Codex\2026-08-27\e\work\strategy-filter-reentry
+AGENTS/PROGRESS/dirty를먼저읽는다. EXECUTION_POLICY.md를우선적용한다.
+현재단계기구현이면코드/검사/evidence에서이어간다. 새프로젝트/새엔진으로다시시작하지않는다.
+reference의원문설계·117schema·API_BLUEPRINT와repo의최신API_CONTRACT를읽는다.
+docs/runup/v2/prompts/STEP_07.txt와STEP_08.txt의필수기능/검사/기본허용범위를모두수행한다.
+중간 ACCEPTED선행조건은이전IMPLEMENTED+관련검사통과로갈음한다. Muse는ACCEPTED를기록하지않는다.
+선행:06까지구현과필수검사통과,알려진blocking 오류없음.
+첫단계실패를수정하지않고둘째단계완료를선언하지않는다.첫단계뒤STOP은내부checkpoint다.
+
+첫 작업:SEC·기업 IR 촉매·악재 수집.
+A1. SEC submissions로 filing을 발견하고 공식 filing/IR 원문에서 날짜·문구 span을 보존한다.
+A2. 확정 readout/PDUFA/임상중단/일정변경 후보만 생성한다. 원문 없는 자동 확정 금지.
+A3. ATM shelf 등록과 실제 중대희석을 구분하고 severity 불명은 REVIEW다.
+A4. 공식 IR 도메인 등록은 allowlist+issuer 검토를 거친다.
+입출력:EventCandidate/RiskNotice 후보; broad NLP 확률·뉴스감성 미구현.
+필수 검사:SEC columnar array 길이오류/추가파일/pagination/CIK10자리/User-Agent·rate. quarter guidance/조기공개/정정 filing/유사약물/ATM 등록만있는경우. raw 문서의 지시문 무시/출처span/관측시점/응답실패 typed status.
+
+둘째 작업:FDA·PDUFA·AdCom 수집.
+B1. 공식 FDA AdCom과 issuer가 확인한 PDUFA 날짜를 별도 event type으로 만든다.
+B2. PDUFA 근거는 SEC/IR 또는 출처있는 manual review와 연결한다.
+B3. 완전한 future PDUFA API/무료 aggregator 제공을 가정하지 않는다.
+B4. 지원 불가 소스는 manual path와 coverage 상태를 남긴다.
+입출력:FDA_REGULATORY/PDUFA/ADCOM 별도 후보; source capability 기록.
+필수 검사:AdCom≠PDUFA/같은drug 두날짜/연기·취소·시간미정. FDA 일정만으로 ticker 추정금지/근거없는 target date 거부. 실제smoke와 fixture 분리/source 장애≠빈목록.
+
+기본수정허용:runup/catalyst/sec_ir.py; runup/catalyst/fda.py.
+추가:해당단계tests/fixtures/evidence/plan_v2 기록.
+기존runup DTO/codec/CRUD/서비스연결/source중앙policy가필요하면EXECUTION_POLICY의최소adapter권한으로보완한다.
+scope 안팎·이유·수정전후hash·interface·관련검사결과를정확히기록한다.계약/임계값변경허용아님.
+요구사항별검사명/결과를trace에매핑한다. 검사누락을전량통과라고말하지않는다. review_kind=SELF_REVIEW를명시한다.
+새기능변경범위/영향회귀/ruff만검사한다. 이전전체suite는변경/실패가정당화할때만재실행한다.
+source fixture와live smoke를구분하고HTTP0이면LIVE_UNVERIFIED를보존한다.
+비용None4개/원금/접근정보미입력은해당동작만NEEDS_INPUT. 정상0/안전이라고오표시금지.
+기존단타/dirty/secret/금지자료/legacy signature/무료필수source/기준을보존한다.
+backtest/최적화/실제주문/송금/외부발송/push/배포는이진행권한에포함되지않는다.
+구현후REVIEW_PROTOCOL.md로검토pass를수행하고findings를보완·관련검사한다.
+필수검사+자체review PASS면각단계IMPLEMENTED,실패BLOCKED. evidence/artifacts/unresolved를갱신한다.
+독립검토가없으면pending이라고명시한다. 다른reviewer 이름으로ACCEPTED를꾸미지않는다.
+보고:묶음/단계별상태/변경파일/검사/실제APIvsfixture/잔여/다음묶음. STOP.
+다음09·10는사용자의'다음'지시후수행한다.
+
+원문 STEP 파일이 설치되지 않았으면 패키지 stage_prompts/의 같은 파일을 읽는다.

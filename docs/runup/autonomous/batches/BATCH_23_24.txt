@@ -1,0 +1,44 @@
+실행 묶음:23·24. 이묶음만완료하고 STOP.
+실제repo:C:\Users\cj123\Documents\Codex\2026-08-27\e\work\strategy-filter-reentry
+AGENTS/PROGRESS/dirty를먼저읽는다. EXECUTION_POLICY.md를우선적용한다.
+현재단계기구현이면코드/검사/evidence에서이어간다. 새프로젝트/새엔진으로다시시작하지않는다.
+reference의원문설계·117schema·API_BLUEPRINT와repo의최신API_CONTRACT를읽는다.
+docs/runup/v2/prompts/STEP_23.txt와STEP_24.txt의필수기능/검사/기본허용범위를모두수행한다.
+중간 ACCEPTED선행조건은이전IMPLEMENTED+관련검사통과로갈음한다. Muse는ACCEPTED를기록하지않는다.
+선행:22까지구현과필수검사통과,알려진blocking 오류없음.
+첫단계실패를수정하지않고둘째단계완료를선언하지않는다.첫단계뒤STOP은내부checkpoint다.
+
+첫 작업:월말 이익·tax earmark·출금.
+A1. P/H/M/new/cashcap/equityfloor로 월말proposal과 승인 정산을 구현한다.
+A2. 미처리이익carryforward/손실회복/동일periodidempotency/명시taxNone 보류.
+A3. 이익·tax 실제출금과원금출금을분리하고earmark/cash/H를 계약대로처리한다.
+A4. 과거체결정정은reconciliation adjustment다. H감소로중복인출금지.
+입출력:withdrawal.propose(period,context); confirm(...)->WithdrawalPeriod.
+필수 검사:명세P100→profit50,H100;P60→new0;P110→new10 fixture. Mnegative/taxNone/f0/withdraw0/withdraw1/headroom0/cashcap/기존예약. period중복/원금flow·profitflow·외부withdraw 구분/손실carryforward. 평가익만있으면정산0/권고만으로실제출금없음.
+
+둘째 작업:Worker lifecycle·lease·job scheduler.
+B1. 기존sharedruntime후runupworker lifecycle만 연결한다. 기존 daemon/client 정책은 보존한다.
+B2. enabledfalse DISABLED·lease/heartbeat/fencing·boundedjobbudget 구현.
+B3. source/daily/quote/event/scan/settlement용 handler registration 계약을 만든다.
+B4. 네트워크는DBtransaction 밖; handler는다음scan단계에서연결한다.
+입출력:jobs.start(runtime)/stop()/status(); register_handlers typed contract.
+필수 검사:disabled상태탭접근무기동/중복worker/leaseexpire/oldfencecommit거부. gracefulstop/restartcursor/partialjob/ratebudget/heartbeat. 기존start/daemon/1초scalp/limiter 회귀; secrets 로그 없음.
+
+기본수정허용:runup/portfolio/withdrawal.py; runup/portfolio/ledger.py; runup/services/jobs.py; start.py.
+추가:해당단계tests/fixtures/evidence/plan_v2 기록.
+기존runup DTO/codec/CRUD/서비스연결/source중앙policy가필요하면EXECUTION_POLICY의최소adapter권한으로보완한다.
+scope 안팎·이유·수정전후hash·interface·관련검사결과를정확히기록한다.계약/임계값변경허용아님.
+요구사항별검사명/결과를trace에매핑한다. 검사누락을전량통과라고말하지않는다. review_kind=SELF_REVIEW를명시한다.
+새기능변경범위/영향회귀/ruff만검사한다. 이전전체suite는변경/실패가정당화할때만재실행한다.
+source fixture와live smoke를구분하고HTTP0이면LIVE_UNVERIFIED를보존한다.
+비용None4개/원금/접근정보미입력은해당동작만NEEDS_INPUT. 정상0/안전이라고오표시금지.
+기존단타/dirty/secret/금지자료/legacy signature/무료필수source/기준을보존한다.
+backtest/최적화/실제주문/송금/외부발송/push/배포는이진행권한에포함되지않는다.
+구현후REVIEW_PROTOCOL.md로검토pass를수행하고findings를보완·관련검사한다.
+필수검사+자체review PASS면각단계IMPLEMENTED,실패BLOCKED. evidence/artifacts/unresolved를갱신한다.
+독립검토가없으면pending이라고명시한다. 다른reviewer 이름으로ACCEPTED를꾸미지않는다.
+이번24checkpoint:CHECKPOINTS.md의전체연결검사와최신manifest를작성한다.내부검사통과후다음묶음진행가능,독립review는pending.
+보고:묶음/단계별상태/변경파일/검사/실제APIvsfixture/잔여/다음묶음. STOP.
+다음25·26는사용자의'다음'지시후수행한다.
+
+원문 STEP 파일이 설치되지 않았으면 패키지 stage_prompts/의 같은 파일을 읽는다.

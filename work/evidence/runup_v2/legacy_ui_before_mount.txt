@@ -1,0 +1,872 @@
+with st.sidebar:
+    st.title("다중전략 스캐너")
+    st.caption("거래 대상: 국내 정규장 · 미국 데이/프리/정규장 (애프터 제외)")
+    market_now = datetime.now(UTC)
+    kr_status = session_status(Market.KR, market_now)
+    us_status = session_status(Market.US, market_now)
+    market_mode = st.radio("시장", ["자동(활성 시장)", "국내주식", "미국주식"], horizontal=True)
+    market = (
+        preferred_market(market_now) if market_mode == "자동(활성 시장)"
+        else Market.KR if market_mode == "국내주식" else Market.US
+    )
+    status = kr_status if market == Market.KR else us_status
+    st.caption(
+        f"현재 시각: 한국 {market_now.astimezone(KST):%m-%d %H:%M KST} · "
+        f"미국 {market_now.astimezone(NEW_YORK):%m-%d %H:%M %Z}"
+    )
+    st.caption(
+        f"전체 장 상태: 국내 {kr_status.label}{' 감시중' if kr_status.active else ''} · "
+        f"미국 {us_status.label}{' 감시중' if us_status.active else ''}"
+    )
+    st.info(f"현재 세션: {status.label}" + (" · 감시 중" if status.active else " · 신규 신호 중지"))
+    modes = ["전체", "일반주", "급등주"] + (["동전주"] if market == Market.US else [])
+    mode = st.radio("후보 모드", modes, horizontal=True)
+    display_count = st.slider("표시 후보", LIVE_DISPLAY_MIN_SYMBOLS, LIVE_DISPLAY_MAX_SYMBOLS, LIVE_DISPLAY_DEFAULT_SYMBOLS)
+    refresh_seconds = int(st.radio(
+        "현재가 화면 갱신",
+        list(LIVE_QUOTE_REFRESH_OPTIONS_SECONDS),
+        index=0,
+        horizontal=True,
+        format_func=lambda value: f"{value}초",
+    ))
+    if market == Market.KR:
+        minimum_price = st.number_input("최소 가격(원)", 100.0, 300000.0, 1000.0, 100.0)
+        maximum_price = st.number_input("최대 가격(원)", 1000.0, 1000000.0, 300000.0, 1000.0)
+    else:
+        minimum_price = st.number_input(
+            "최소 가격(USD)",
+            US_DISPLAY_MIN_PRICE,
+            1000.0,
+            US_DISPLAY_MIN_PRICE,
+            0.01,
+            format="%.4f",
+            key=f"minimum-usd-{mode}",
+        )
+        maximum_price = st.number_input("최대 가격(USD)", 1.0, 10000.0, 500.0, 5.0)
+        st.caption(f"동전주: {US_PENNY_PRICE_CEILING:g}달러 미만 · 급등주: +{DISPLAY_SURGE_MIN_CHANGE_PCT:g}% 초과(상한 없음) · 가격 범위 안의 관측 후보만 표시 · 비용·손절 기준 유지")
+    st.caption("후보 수집: KIS 거래량/거래대금 각 최대 300 요청 · 실제 응답 수 별도 · 전 시장 순위 보장 아님")
+    st.caption("관측 후보에서 거래대금/최근 3봉 상대거래량/20봉 변동성 각 100 합집합 + 데이터 준비 종목")
+    st.caption(
+        f"내부 분석: 모드 통과 종목 최대 {MAX_ANALYSIS_CANDIDATES}개 · "
+        "구조 계산: 새 완료봉 60초 · 현재가: WebSocket 우선"
+    )
+
+st.markdown('<div class="hero"><h1>다중 매매기법 실전 스캐너</h1><p>차트 유형 분류 → 구조 진입가·손절가·목표가 → 도달 예상시간</p></div>', unsafe_allow_html=True)
+st.markdown(
+    f'<div class="version">앱 {APP_VERSION} · 실행 app.py · 엔진 {ENGINE_VERSION} · Python 공통 지표 1개 경로</div>',
+    unsafe_allow_html=True,
+)
+
+st.caption(
+    f"{ACTIVE_STRATEGY_COUNT}개 활성 매매기법 전체의 실제 ENTRY를 합산한 세션별 고유 진입종목 "
+    f"기록 · 매 접속시각 진입 가능 최소 {MIN_UNIQUE_ENTRIES_PER_SESSION}개·목표 {TARGET_ACTIONABLE_SYMBOLS}개(없으면 없음) · 80% 승률 미검증 · 자동 주문 없음 · "
+    "-1.5%는 손절 트리거이며 갭 손실 한도가 아님"
+)
+if not os.environ.get("WELLSCAN_INSTRUMENT_POLICIES"):
+    st.warning("추정 비용 적용 중 · 상품 분류 미확인 종목은 관찰 전용입니다. 실제 계좌 수익과 다를 수 있습니다.")
+
+if not client().configured:
+    st.error("KIS_APP_KEY와 KIS_APP_SECRET 환경변수가 필요합니다.")
+    st.stop()
+
+process_daemon_status = daemon_service_status()
+daemon_is_running = process_daemon_status is not None and process_daemon_status.running
+
+if not status.active:
+    signal_store = validations()
+    closed_tracking_cases = []
+    if not daemon_is_running:
+        try:
+            signal_store.retry_pending_durable()
+            closed_tracking_cases = signal_store.tracking_cases()
+        except (OSError, RuntimeError, ValueError) as exc:
+            st.error(f"신호 저장소 조회 실패 · {safe_pipeline_message(exc)}")
+    st.warning(f"{status.label}입니다. 세션 밖의 오래된 가격으로 신규 매수 신호를 만들지 않습니다.")
+    for closed_case in closed_tracking_cases:
+        closed_candidate = _candidate_for_case(closed_case.symbol, closed_case.last_price, {})
+        if closed_candidate is not None:
+            try:
+                closed_bars = history().load(closed_candidate.symbol, HistoryCache._namespace(closed_candidate))
+                if not closed_bars.empty:
+                    signal_store.update_completed_bars(closed_case, closed_bars, datetime.now(UTC))
+            except (ValueError, RuntimeError) as exc:
+                st.warning(f"{closed_candidate.symbol} 모의 청산 분봉 검증 오류: {exc}")
+    try:
+        if not daemon_is_running:
+            signal_store.expire_unobserved(None, datetime.now(UTC))
+        # Immutable execution contracts remain visible across an engine deploy.
+        closed_session_records = signal_store.daily_cases(None, market.value)
+    except (OSError, RuntimeError, ValueError) as exc:
+        st.error(f"오늘 신호 기록 조회 실패 · {safe_pipeline_message(exc)}")
+        closed_session_records = []
+    render_tracking_history(closed_session_records)
+    st.stop()
+
+with st.sidebar:
+    if realtime().connected:
+        st.success("KIS WebSocket 연결됨")
+    elif realtime().last_error:
+        st.warning(f"WebSocket 연결 대기 · {realtime().last_error}")
+    else:
+        st.caption("KIS WebSocket 연결 시도 중")
+
+
+@dataclass(frozen=True)
+class StructureBatch:
+    results: tuple[tuple[Candidate, ScanResult], ...]
+    issues: tuple[PipelineIssue, ...]
+    dropped_issues: int = 0
+
+
+def structure_results(
+    candidates: tuple[Candidate, ...], completed_minute: int, selected_mode: str, on_result=None
+) -> StructureBatch:
+    del completed_minute
+    started = perf_counter()
+    output: list[tuple[Candidate, ScanResult]] = []
+    issues = PipelineIssueCollector()
+    cache = history()
+    try:
+        pending_cases = validations().cases()
+    except (OSError, RuntimeError, ValueError) as exc:
+        issues.add(PipelineStage.PERSISTENCE, "SIGNAL_STATE_LOAD_FAILED", "", exc)
+        pending_cases = []
+    history_returned: set[str] = set()
+
+    def publish_update() -> None:
+        if on_result is not None:
+            on_result(tuple(output), issues.snapshot(), issues.dropped)
+
+    def prepared_candidates():
+        try:
+            yield from cache.iter_backfill_candidates(
+                client(), candidates, target_bars=HistoryCache.INITIAL_READY_BARS
+            )
+        except Exception as exc:  # boundary: preserve a typed batch failure in the UI
+            LOGGER.warning("history_batch_failed error=%s", exc)
+            issues.add(PipelineStage.HISTORY, "HISTORY_BATCH_FAILED", "", exc)
+            publish_update()
+
+    for candidate, bars in prepared_candidates():
+        history_returned.add(candidate.key)
+        tick = realtime().tick(candidate)
+        if tick is not None:
+            price = tick.price
+        else:
+            try:
+                price, _, _ = rest_price(candidate.market, candidate.symbol, candidate.exchange, candidate.session)
+            except KISError as exc:
+                LOGGER.warning("structure_quote_unavailable symbol=%s error=%s", candidate.key, exc)
+                issues.add(PipelineStage.QUOTE, "QUOTE_UNAVAILABLE", candidate.key, exc)
+                publish_update()
+                continue
+        try:
+            observed_at = datetime.now(UTC)
+            universe_book().observe(candidate, bars, observed_at)
+            policy = client().trading_policy(candidate)
+            result = evaluate(
+                candidate.key,
+                bars,
+                price,
+                sequences(),
+                now=observed_at,
+                session=candidate.session,
+                require_fresh=True,
+                policy=policy,
+                classification_portfolio=ALL_ENTRY_STRATEGIES,
+            )
+            # Structural signals are fixed by the common engine on completed
+            # bars. Only this tick-level result is published and persisted.
+            result = revalidate_live(result, price, observed_at)
+        except (ValueError, RuntimeError) as exc:
+            LOGGER.warning("structure_failed symbol=%s error=%s", candidate.key, exc)
+            issues.add(PipelineStage.ENGINE, "ENGINE_EVALUATION_FAILED", candidate.key, exc)
+            publish_update()
+            continue
+        try:
+            if result.stage == Stage.FINAL_BUY:
+                validations().record(
+                    result,
+                    ENGINE_VERSION,
+                    candidate.market.value,
+                    candidate.session.value,
+                    mode=selected_mode,
+                    display_name=candidate.name,
+                    costs=policy.costs,
+                )
+            else:
+                validations().observe_nonfinal(candidate.key, candidate.market.value, candidate.session.value,
+                                                result.evaluated_at)
+            for case in pending_cases:
+                if case.symbol == candidate.key and case.market == candidate.market.value and case.session == candidate.session.value and not case.scored:
+                    validations().score(case, bars)
+        except (OSError, RuntimeError, ValueError) as exc:
+            LOGGER.warning("structure_persistence_failed symbol=%s error=%s", candidate.key, exc)
+            issues.add(PipelineStage.PERSISTENCE, "SIGNAL_STATE_WRITE_FAILED", candidate.key, exc)
+        metrics = cache.metrics(candidate)
+        if metrics is not None:
+            LOGGER.info(
+                "structure symbol=%s cache_hit=%s cached_before=%s cached_after=%s api_calls=%s load_s=%.3f api_s=%.3f total_s=%.3f stage=%s",
+                candidate.key,
+                metrics.cache_hit,
+                metrics.cached_before,
+                metrics.cached_after,
+                metrics.api_calls,
+                metrics.load_seconds,
+                metrics.api_seconds,
+                metrics.total_seconds,
+                result.stage.value,
+            )
+        output.append((candidate, result))
+        publish_update()
+    for candidate in candidates:
+        if candidate.key in history_returned:
+            continue
+        metrics = cache.metrics(candidate)
+        detail = metrics.error if metrics is not None and metrics.error else "분봉 작업이 결과 없이 종료됨"
+        issues.add(PipelineStage.HISTORY, "HISTORY_BACKFILL_FAILED", candidate.key, detail)
+    publish_update()
+    try:
+        cache.schedule_warmup(client(), candidates)
+    except (OSError, RuntimeError, ValueError, KISError) as exc:
+        issues.add(PipelineStage.HISTORY, "HISTORY_WARMUP_FAILED", "", exc)
+    TIMINGS.record("구조 배치/API/DB 포함", perf_counter() - started)
+    metrics = cache.snapshot_metrics()
+    realtime_metrics = realtime().metrics()
+    LOGGER.info(
+        "structure_batch candidates=%s cache_hits=%s api_calls=%s elapsed_s=%.3f ws_attempts=%s ws_reconnects=%s ws_ticks=%s ws_connected=%s ws_error=%s",
+        len(output),
+        sum(item.cache_hit for item in metrics),
+        sum(item.api_calls for item in metrics),
+        perf_counter() - started,
+        realtime_metrics["connection_attempts"],
+        realtime_metrics["reconnects"],
+        realtime_metrics["received_ticks"],
+        realtime_metrics["connected"],
+        realtime_metrics["last_error"],
+    )
+    return StructureBatch(tuple(output), issues.snapshot(), issues.dropped)
+
+
+@dataclass(frozen=True)
+class ScanSnapshot:
+    pool: tuple[Candidate, ...]
+    filtered: tuple[Candidate, ...]
+    analysis_candidates: tuple[Candidate, ...]
+    results: tuple[tuple[Candidate, ScanResult], ...]
+    issues: tuple[PipelineIssue, ...] = ()
+    dropped_issues: int = 0
+
+
+def build_scan_snapshot(
+    selected_market: Market,
+    selected_session: TradingSession,
+    completed_minute: int,
+) -> ScanSnapshot:
+    key = shared_scan_key(selected_market, selected_session)
+    previous = scan_coordinator().peek(key)
+    loaded_pool = candidate_pool(selected_market, selected_session)
+    # The expensive candidate/history/engine path is shared by every viewer.
+    # Price/mode controls below are display filters over this one snapshot.
+    loaded_filtered = loaded_pool
+    retained = [item for item, result in previous.results if result.stage in {Stage.ENTRY_WAIT, Stage.FINAL_BUY}] if previous else []
+    loaded_analysis = select_analysis_candidates(universe_book().select(loaded_filtered, retained))
+    # Begin subscriptions before slow historical preparation, not after it.
+    if not realtime().metrics()["subscriptions"]:
+        realtime().configure(loaded_analysis)
+    tracked = [
+        candidate
+        for case in validations().tracking_cases()
+        if (
+            candidate := _candidate_for_case(
+                case.symbol,
+                case.last_price,
+                {item.key: item for item in loaded_analysis},
+            )
+        )
+        is not None
+    ]
+    tracked_here = [item for item in tracked if item.market == selected_market and item.session == selected_session]
+    # Active observations survive changes in ranking; they are outside the discovery quota.
+    loaded_analysis = list({item.key: item for item in tracked_here + loaded_analysis}.values())
+    current_keys = {item.key for item in loaded_analysis}
+    prior = {item.key: (item, result) for item, result in previous.results if item.key in current_keys} if previous else {}
+
+    def publish_partial(partial_results, partial_issues, dropped_issues):
+        combined = dict(prior)
+        combined.update({item.key: (item, result) for item, result in partial_results})
+        scan_coordinator().publish(key, completed_minute, ScanSnapshot(
+            tuple(loaded_pool), tuple(loaded_filtered), tuple(loaded_analysis), tuple(combined.values()),
+            partial_issues, dropped_issues))
+
+    batch = structure_results(tuple(loaded_analysis), completed_minute, "전체", publish_partial)
+    loaded_results = list(batch.results)
+    result_by_key = {candidate.key: result for candidate, result in loaded_results}
+    realtime_priority = sorted(
+        loaded_analysis,
+        key=lambda candidate: (
+            result_by_key.get(candidate.key) is not None
+            and result_by_key[candidate.key].stage in {Stage.FINAL_BUY, Stage.ENTRY_WAIT},
+            result_by_key.get(candidate.key) is not None
+            and result_by_key[candidate.key].stage == Stage.FINAL_BUY,
+        ),
+        reverse=True,
+    )
+    realtime().configure(tracked + realtime_priority)
+    return ScanSnapshot(
+        tuple(loaded_pool),
+        tuple(loaded_filtered),
+        tuple(loaded_analysis),
+        tuple(loaded_results),
+        batch.issues,
+        batch.dropped_issues,
+    )
+
+
+def render_current_session_tracking() -> None:
+    """Show daemon-created records even before the first web scan snapshot."""
+    try:
+        session_daily = validations().daily_cases(None, market.value, session=status.session.value)
+        market_daily = validations().daily_cases(None, market.value)
+        progress = validations().session_progress(
+            ENGINE_VERSION,
+            market.value,
+            status.session.value,
+            datetime.now(UTC),
+        )
+    except (OSError, RuntimeError, ValueError) as exc:
+        st.error(f"신호 기록 조회 실패 · {safe_pipeline_message(exc)}")
+        return
+    st.caption(
+        f"{ACTIVE_STRATEGY_COUNT}개 활성 매매기법 전체 합산 · 이번 세션 고유 모의 진입종목 {progress['unique_symbols']}개 "
+        f"(세션 누계이며 매 접속시각 최소 {MIN_UNIQUE_ENTRIES_PER_SESSION}개·목표 {TARGET_ACTIONABLE_SYMBOLS}개 판정과 별개) · 신호 {progress['signals']}건 · "
+        f"모의 진입 {progress['entries']}건 · 미체결 대기 {progress['pending']}건 · 실제 주문 아님"
+    )
+    ongoing = [
+        case
+        for case in session_daily
+        if case.verified_execution_contract and case.live_outcome in {None, "TARGET1", "PENDING_ENTRY"}
+    ]
+    if ongoing:
+        st.subheader("자동 추적 진행 중")
+        for case in ongoing:
+            render_tracking_case(case)
+    # Do not select only known outcomes here. Every verified persisted state,
+    # including explicit errors and future/unknown states, remains visible.
+    render_tracking_history(market_daily)
+
+
+def snapshot_from_daemon(selected_market: Market, selected_session: TradingSession) -> ScanSnapshot | None:
+    """Adapt the process-local common-engine feed; never rerun strategy logic in the UI."""
+    feed = daemon_results_snapshot()
+    if feed is None:
+        return None
+    session_feed = next((item for item in feed.sessions if item.session == selected_session), None)
+    if session_feed is None:
+        return None
+    today = session_day(selected_session, datetime.now(UTC))
+    selected_results = tuple(
+        (candidate, result)
+        for candidate, result in session_feed.results
+        if candidate.market == selected_market
+        and candidate.session == selected_session
+        and session_day(selected_session, result.evaluated_at) == today
+    )
+    candidates = tuple(candidate for candidate, _ in selected_results)
+    issues = []
+    for error in feed.recent_errors:
+        if error.session not in {"", selected_session.value}:
+            continue
+        category = error.category.lower()
+        stage = PipelineStage.TRACKING if "track" in category else PipelineStage.ENGINE
+        issues.append(
+            PipelineIssue(
+                stage=stage,
+                code=safe_pipeline_message(f"DAEMON_{error.category.upper()}", 64),
+                candidate_key=safe_pipeline_message(error.symbol, 96),
+                message=safe_pipeline_message(error.error),
+            )
+        )
+    return ScanSnapshot(candidates, candidates, candidates, selected_results, tuple(issues))
+
+
+def daemon_session_updated_at(selected_session: TradingSession) -> str | None:
+    feed = daemon_results_snapshot()
+    if feed is None:
+        return None
+    current = next((item for item in feed.sessions if item.session == selected_session), None)
+    return current.updated_at if current is not None else None
+
+
+minute_bucket = int(datetime.now(UTC).timestamp() // 60)
+scan_key = shared_scan_key(market, status.session)
+snapshot_loader = partial(
+    build_scan_snapshot,
+    market,
+    status.session,
+    minute_bucket,
+)
+service_status = process_daemon_status
+use_daemon_feed = daemon_is_running
+if use_daemon_feed:
+    daemon_snapshot = snapshot_from_daemon(market, status.session)
+    scan_state = SnapshotState(snapshot=daemon_snapshot, running=daemon_snapshot is None, error=None)
+    st.sidebar.success("상시 스캐너 실행 중")
+    cycle_at = diagnostic_timestamp_text(service_status.last_cycle_started_at, "첫 실행 대기")
+    elapsed = (
+        f"{service_status.last_cycle_elapsed_seconds:.2f}초"
+        if service_status.last_cycle_elapsed_seconds is not None
+        else "측정 대기"
+    )
+    st.sidebar.caption(f"최근 주기 {cycle_at} · 처리 {elapsed}")
+    service_counters = getattr(service_status, "counters", {})
+    st.sidebar.caption(
+        f"과거시점 후보 저장 {service_counters.get('candidate_snapshots_written', 0)}회 · "
+        f"종목행 {service_counters.get('candidate_snapshot_candidates_written', 0)}건 · "
+        f"오류 {service_counters.get('candidate_snapshot_errors', 0)}건"
+    )
+    st.sidebar.caption(
+        f"3,000봉 묶음복구 {service_counters.get('candidate_prefetches', 0)}회 · "
+        f"종목 {service_counters.get('candidate_prefetch_symbols', 0)}개 · "
+        f"오류 {service_counters.get('candidate_prefetch_errors', 0)}건"
+    )
+    st.sidebar.caption(
+        f"후보 API 빈응답 {service_counters.get('candidate_empty_discoveries', 0)}회 · "
+        f"최근스냅샷 복구 {service_counters.get('candidate_fallbacks', 0)}회/"
+        f"{service_counters.get('candidate_fallback_symbols', 0)}개 · "
+        f"오류 {service_counters.get('candidate_fallback_errors', 0)}건"
+    )
+    access_coverage = getattr(service_status, "access_coverage", {})
+    current_access = access_coverage.get(f"{market.value}:{status.session.value}")
+    if current_access:
+        coverage_label = "전체 후보 평가됨" if current_access.get("coverage_complete") else "전체 후보 평가 미완료"
+        st.sidebar.caption(
+            f"실제 접속시각 검증 · 평가 {current_access.get('evaluated_symbols', 0)}개 · "
+            f"진입대기 이상 {current_access.get('actionable_symbols', 0)}개 · "
+            f"즉시진입 {current_access.get('immediate_entry_symbols', 0)}개 · {coverage_label}"
+        )
+    st.sidebar.caption(
+        f"접속시각 기록 {service_counters.get('access_snapshots_written', 0)}회 · "
+        f"오류 {service_counters.get('access_snapshot_errors', 0)}건"
+    )
+    if service_status.recent_errors:
+        last_daemon_error = service_status.recent_errors[-1]
+        st.sidebar.warning(
+            "상시 스캐너 최근 오류 · "
+            + safe_pipeline_message(last_daemon_error.get("error", "상세 오류 없음"), 120)
+        )
+else:
+    scan_state = scan_coordinator().request(scan_key, minute_bucket, snapshot_loader)
+    st.sidebar.warning("상시 스캐너 미실행 · 현재 웹 세션의 제한된 대체 스캔 사용")
+
+if scan_state.snapshot is None:
+    waiting_message = (
+        "상시 스캐너가 첫 시장 결과를 준비 중입니다. 기존 신호 기록은 아래에서 바로 확인할 수 있습니다."
+        if use_daemon_feed
+        else "백그라운드에서 후보와 차트를 분석 중입니다. 이 화면은 그대로 두면 자동으로 결과가 표시됩니다."
+    )
+    st.info(waiting_message)
+    render_current_session_tracking()
+    if scan_state.error:
+        st.error(f"스캔 실패 · {safe_pipeline_message(scan_state.error)}")
+
+    @st.fragment(run_every=UI_STATUS_POLL_SECONDS)
+    def wait_for_first_snapshot() -> None:
+        if use_daemon_feed:
+            latest_status = daemon_service_status()
+            latest = snapshot_from_daemon(market, status.session)
+            if latest is not None or latest_status is None or not latest_status.running:
+                st.rerun()
+            st.caption("화면은 멈추지 않았습니다 · 상시 스캐너 최초 주기 진행 중")
+        else:
+            pending = scan_coordinator().request(scan_key, minute_bucket, snapshot_loader)
+            if pending.snapshot is not None:
+                st.rerun()
+            if pending.error:
+                st.error(f"스캔 실패 · {safe_pipeline_message(pending.error)}")
+                return
+            st.caption("화면은 멈추지 않았습니다 · 최초 데이터 준비 중")
+
+    wait_for_first_snapshot()
+    st.stop()
+
+snapshot = scan_state.snapshot
+
+if use_daemon_feed:
+    daemon_feed_marker = daemon_session_updated_at(status.session)
+    st.caption(
+        "상시 공통엔진 결과 갱신 "
+        + diagnostic_timestamp_text(daemon_feed_marker, "첫 결과 대기")
+    )
+
+    @st.fragment(run_every=UI_STATUS_POLL_SECONDS)
+    def poll_daemon_snapshot() -> None:
+        latest_status = daemon_service_status()
+        latest_marker = daemon_session_updated_at(status.session)
+        if latest_status is None or not latest_status.running:
+            st.rerun()
+        if latest_marker != daemon_feed_marker:
+            st.rerun()
+
+    poll_daemon_snapshot()
+
+total_pool = list(snapshot.pool)
+pool = [
+    candidate for candidate in total_pool
+    if candidate_matches_filter(candidate, mode, float(minimum_price), float(maximum_price))
+]
+filtered = pool
+filtered_keys = {candidate.key for candidate in pool}
+analysis_candidates = [candidate for candidate in snapshot.analysis_candidates if candidate.key in filtered_keys]
+results = [(candidate, result) for candidate, result in snapshot.results if candidate.key in filtered_keys]
+pipeline_issues = [
+    issue for issue in snapshot.issues
+    if use_daemon_feed or not issue.candidate_key or issue.candidate_key in filtered_keys
+]
+if scan_state.running and not use_daemon_feed:
+    st.caption("새 1분봉 구조를 백그라운드에서 계산 중 · 직전 결과와 현재가는 계속 표시됩니다.")
+
+    @st.fragment(run_every=UI_STATUS_POLL_SECONDS)
+    def poll_snapshot_refresh() -> None:
+        refreshed = scan_coordinator().request(scan_key, minute_bucket, snapshot_loader)
+        if not refreshed.running or refreshed.snapshot is not snapshot:
+            st.rerun()
+
+    poll_snapshot_refresh()
+if scan_state.error:
+    st.warning(f"새 구조 갱신 실패 · 직전 결과 유지 · {safe_pipeline_message(scan_state.error)}")
+persistence = history().persistence_status()
+if persistence.configured and persistence.available:
+    st.caption("영구 분봉 저장소: CockroachDB 연결됨 · 종목별 최근 3,000봉")
+elif persistence.configured:
+    persistence_error = safe_pipeline_message(persistence.last_error or "연결 확인 대기")
+    st.error(f"영구 분봉 저장소 연결 실패 · 로컬 CSV 임시 사용 · {persistence_error}")
+else:
+    st.warning("영구 분봉 저장소 미설정 · Render 재시작 시 로컬 분봉이 사라질 수 있습니다.")
+if pipeline_issues or snapshot.dropped_issues:
+    shown = len(pipeline_issues)
+    suffix = f" · 전체 배치에서 추가 {snapshot.dropped_issues}건 생략" if snapshot.dropped_issues else ""
+    with st.expander(f"데이터·처리 오류 {shown}건{suffix}", expanded=not results):
+        if pipeline_issues:
+            st.dataframe([issue.row() for issue in pipeline_issues], hide_index=True, use_container_width=True)
+        if snapshot.dropped_issues:
+            st.caption("화면과 메모리를 보호하기 위해 한 번의 스캔에서 오류 상세는 최대 100건만 보관합니다.")
+
+stage_priority = {
+    Stage.FINAL_BUY: 7,
+    Stage.ENTRY_WAIT: 6,
+    Stage.WELL_FORMING: 5,
+    Stage.TREND_READY: 4,
+    Stage.CANDIDATE: 3,
+    Stage.DATA_WAIT: 2,
+    Stage.MISSED: 1,
+    Stage.EXCLUDED: 0,
+}
+def shadow_priority(result: ScanResult) -> tuple[int, int, int]:
+    assessments = result.diagnostics.get("classification_assessments", {})
+    if not isinstance(assessments, dict):
+        return 0, 0, 0
+    rows = [value for value in assessments.values() if isinstance(value, dict)]
+    return (
+        sum(bool(row.get("shadow_ready")) for row in rows),
+        sum(bool(row.get("planned_cost_pass")) for row in rows),
+        len(rows),
+    )
+
+
+ordered = sorted(
+    results,
+    key=lambda item: (stage_priority[item[1].stage], *shadow_priority(item[1]), item[1].score),
+    reverse=True,
+)
+final_buy_results = [item for item in ordered if item[1].stage == Stage.FINAL_BUY]
+entry_wait_results = [item for item in ordered if item[1].stage == Stage.ENTRY_WAIT]
+watch_results = [item for item in ordered if item[1].stage not in {Stage.FINAL_BUY, Stage.ENTRY_WAIT}][:display_count]
+visible = final_buy_results + entry_wait_results + watch_results
+if use_daemon_feed:
+    # Quote only this compact view, not forty unrelated ranking candidates.
+    # Tracking has its own REST path; filtering the UI never filters the scanner.
+    realtime().configure(prioritize_realtime_candidates(
+        visible, limit=display_count,
+        preferred=tuple(candidate for candidate, _ in visible[:display_count]),
+    ))
+shadow_formed_results = [
+    (candidate, result)
+    for candidate, result in ordered
+    if shadow_priority(result)[2] > 0
+]
+shadow_ready_results = [
+    (candidate, result)
+    for candidate, result in shadow_formed_results
+    if shadow_priority(result)[0] > 0
+]
+counts = {stage: sum(result.stage == stage for _, result in results) for stage in Stage}
+with st.expander("처리 시간 실측 · 미충족 이유"):
+    st.json(TIMINGS.summary())
+    st.caption("조건 검사 목표 p95 500ms · API 수집/화면 표시 지연과 별개 · 실측 표본이 없으면 성능 판정 불가")
+    st.write({stage.value: number for stage, number in counts.items()})
+    _show_diag = st.checkbox("진단 상세(JSON·표) 보기", value=False, key="diag_detail")
+    if st.checkbox("종목별 22기법 탈락 경로 보기", value=False, key="symbol_gate_trace") and results:
+        trace_index = st.selectbox(
+            "추적할 종목", range(len(results)), key="gate_trace_symbol",
+            format_func=lambda index: f"{results[index][0].symbol} · {results[index][0].name}",
+        )
+        trace_result = results[trace_index][1]
+        st.caption(f"완료봉 기준 진단: {diagnostic_timestamp_text(trace_result.diagnostics.get('completed_bar_at'))} · 체결·T1 증명 아님")
+        st.dataframe(strategy_gate_rows(trace_result), hide_index=True, use_container_width=True)
+    _daemon_breakdown_source = daemon_service_status()
+    _discovery_breakdown = getattr(_daemon_breakdown_source, "discovery_breakdown", None) or {}
+    for _funnel_key, _stages in _discovery_breakdown.items():
+        if isinstance(_stages, dict):
+            st.caption(
+                f" funnel {_funnel_key}: "
+                f"발견{_stages.get('union_raw', 0)}→선택{_stages.get('selected', 0)}→"
+                f"시도{_stages.get('attempted', 0)}→평가{_stages.get('evaluated', 0)}→"
+                f"진입{_stages.get('final_buy', 0)}"
+            )
+    if _discovery_breakdown:
+        _budget_states = {
+            stages.get("resource_budget", {}).get("state", "UNKNOWN")
+            for stages in _discovery_breakdown.values() if isinstance(stages, dict)
+        }
+        _budget_label = " · ".join(sorted(_budget_states))
+        st.caption(f"무료 자원 점검(최근 스캔): {_budget_label} · UNKNOWN=측정 미확인, 무중단 보장 아님. 선택적 심화 수집만 제어합니다.")
+        st.caption("발견 단계 계측 · 원응답→세션→중복제거→선택→분봉→상품→평가→진입")
+        st.caption("KIS 바이트는 응답 본문 추정치(전체 네트워크 전송량 아님)이며, 캐시 적중은 로컬 분봉 재사용으로 백필 호출을 생략한 경우입니다.")
+        if _show_diag:
+            st.json(_discovery_breakdown)
+    _shadow_summary = None
+    try:
+        _shadow_summary = daemon_shadow_summary()
+    except Exception:
+        _shadow_summary = None
+    if _shadow_summary:
+        _sc = _shadow_summary.get("counters", {}) if isinstance(_shadow_summary, dict) else {}
+        st.caption(
+            f"그림자 장부 요약(공식 성과 아님) · 정산 {_sc.get('settled', 0)} · "
+            f"T1 {_sc.get('t1', 0)} · 미체결 {_sc.get('unfilled', 0)} · "
+            f"진행중 {_shadow_summary.get('open_plans', 0) if isinstance(_shadow_summary, dict) else 0}"
+        )
+        if _show_diag:
+            st.json(_shadow_summary)
+    rejected_reasons: dict[str, int] = {}
+    strategy_rejected_reasons: dict[str, int] = {}
+    strategy_formed_counts: dict[str, int] = {}
+    strategy_cost_pass_counts: dict[str, int] = {}
+    strategy_fill_band_counts: dict[str, int] = {}
+    strategy_shadow_ready_counts: dict[str, int] = {}
+    shadow_rows: list[dict[str, object]] = []
+    for candidate, item in results:
+        if not item.final_buy:
+            for reason in item.reasons:
+                rejected_reasons[reason] = rejected_reasons.get(reason, 0) + 1
+        classification_matches = item.diagnostics.get("classification_matches", ())
+        if isinstance(classification_matches, (list, tuple)):
+            for strategy in classification_matches:
+                strategy_formed_counts[str(strategy)] = strategy_formed_counts.get(str(strategy), 0) + 1
+        assessments = item.diagnostics.get("classification_assessments", {})
+        if isinstance(assessments, dict):
+            for strategy, details in assessments.items():
+                if not isinstance(details, dict):
+                    continue
+                if details.get("planned_cost_pass"):
+                    strategy_cost_pass_counts[str(strategy)] = strategy_cost_pass_counts.get(str(strategy), 0) + 1
+                if details.get("fill_band_pass"):
+                    strategy_fill_band_counts[str(strategy)] = strategy_fill_band_counts.get(str(strategy), 0) + 1
+                if details.get("shadow_ready"):
+                    strategy_shadow_ready_counts[str(strategy)] = strategy_shadow_ready_counts.get(str(strategy), 0) + 1
+                shadow_rows.append({
+                    "종목": f"{candidate.symbol} · {candidate.name}",
+                    "기법": str(strategy),
+                    "운영활성": bool(details.get("active")),
+                    "상품확인": bool(details.get("product_valid")),
+                    "계획 순손익비": details.get("planned_net_rr"),
+                    "비용통과": bool(details.get("planned_cost_pass")),
+                    "체결구간": bool(details.get("fill_band_pass")),
+                    "현재가 비용통과": bool(details.get("current_cost_pass")),
+                    "그림자 진입준비": bool(details.get("shadow_ready")),
+                    "차단원인": details.get("block_reason", ""),
+                })
+        opportunity_rejections = item.diagnostics.get("classification_rejections", {})
+        if isinstance(opportunity_rejections, dict):
+            for strategy, reasons in opportunity_rejections.items():
+                if not isinstance(reasons, (list, tuple)):
+                    continue
+                for reason in reasons:
+                    key = f"{strategy} · {reason}"
+                    strategy_rejected_reasons[key] = strategy_rejected_reasons.get(key, 0) + 1
+    st.write(rejected_reasons)
+    st.caption("22개 기법 그림자 평가 형성 수 · 실전 활성화나 매수 신호를 뜻하지 않습니다")
+    st.write(dict(sorted(strategy_formed_counts.items(), key=lambda item: item[1], reverse=True)))
+    st.caption("형성 뒤 단계별 통과 수 · 비용 0.43%/세션별 추정비용과 순손익비 1.0 기준 유지")
+    st.write({
+        "비용 통과": dict(sorted(strategy_cost_pass_counts.items(), key=lambda item: item[1], reverse=True)),
+        "현재 체결구간": dict(sorted(strategy_fill_band_counts.items(), key=lambda item: item[1], reverse=True)),
+        "상품·비용·체결 전부 통과": dict(sorted(strategy_shadow_ready_counts.items(), key=lambda item: item[1], reverse=True)),
+    })
+    if shadow_rows:
+        st.caption(f"그림자 표 {len(shadow_rows)}행 (상세는 체크박스)")
+        if _show_diag:
+            st.dataframe(shadow_rows, hide_index=True, use_container_width=True)
+    st.caption("22개 기법별 실제 미충족 조건 · 같은 후보에서 여러 조건이 함께 집계될 수 있습니다")
+    _top_blocked = sorted(strategy_rejected_reasons.items(), key=lambda item: item[1], reverse=True)[:5]
+    if _top_blocked:
+        st.caption("차단 상위: " + " · ".join(f"{key} {value}" for key, value in _top_blocked))
+    if _show_diag:
+        st.write(dict(sorted(strategy_rejected_reasons.items(), key=lambda item: item[1], reverse=True)))
+st.caption(
+    f"후보풀 {len(total_pool)} · 모드 통과 {len(filtered)} · 내부 분석 {len(results)} · 표시 {len(visible)} · "
+    f"현재 진입 조건 충족 {counts[Stage.FINAL_BUY]} · 진입대기 {counts[Stage.ENTRY_WAIT]} · 데이터수집 {counts[Stage.DATA_WAIT]}"
+)
+st.session_state["structure_minute"] = minute_bucket
+
+
+@st.fragment(run_every=refresh_seconds)
+def live_prices() -> None:
+    """Only displayed quotes and read-only price revalidation run at 1 second."""
+    current_minute = int(datetime.now(UTC).timestamp() // 60)
+    if current_minute != st.session_state.get("structure_minute"):
+        st.rerun()
+    rows = []
+    for candidate, result in visible[:display_count]:
+        checked = None
+        try:
+            price, _, received, source = _live_quote(candidate)
+            now = datetime.now(UTC)
+            if not math.isfinite(price) or price <= 0 or received is None:
+                raise KISError("현재가 미수신")
+            checked = revalidate_live(result, price, now)
+            age = max(0.0, (now - received).total_seconds())
+            route = "WS" if "WebSocket" in source else "REST"
+            stamp = f"{received.astimezone(KST):%H:%M:%S} {route} {age:.1f}s"
+            state_text = safe_pipeline_message(entry_readiness_text(checked), 150)
+            if age > 1:
+                stamp += " 지연"
+        except KISError as exc:
+            price = math.nan
+            state_text = "지금 매수 금지 · " + safe_pipeline_message(entry_readiness_text(result), 120)
+            stamp = "현재가 미수신 · " + safe_pipeline_message(exc, 100)
+        levels = result.levels
+        plan = f"{price_text(levels.entry, '구조 미형성')} / {price_text(levels.target1, 'T1 미산출')}"
+        if checked is None or not checked.final_buy:
+            plan = "관찰용 · " + plan
+        plan += " · " + target_return_text(result)
+        rows.append((
+            f"{candidate.symbol} {candidate.name}", price_text(price, "미수신"),
+            plan,
+            price_text(levels.hard_stop), state_text, stamp,
+        ))
+    st.markdown(live_price_table(rows), unsafe_allow_html=True)
+
+
+st.subheader(f"실시간 현재가 · 우선 {display_count}종목의 현재 조건")
+st.caption("기본 1초 화면 갱신 · WS 우선 / REST 대체 조회 1초 요청 주기(호출 제한·응답 지연 가능) · 수신시각은 거래소 체결시각이 아님 · 1초 초과 시 지연 표시")
+live_prices()
+
+
+@st.fragment(run_every=LIVE_DETAIL_REFRESH_SECONDS)
+def live_cards() -> None:
+    """Heavy cards and the full paper history never run on the quote clock."""
+    st.caption("아래 상세 카드는 30초 간격의 참고 스냅샷입니다. 최신 현재가·현재 조건은 위 실시간 표를 확인하세요.")
+    buy_names = " · ".join(candidate.name for candidate, _ in final_buy_results) or "없음"
+    wait_names = " · ".join(candidate.name for candidate, _ in entry_wait_results) or "없음"
+    shadow_names = " · ".join(candidate.name for candidate, _ in shadow_formed_results) or "없음"
+    shadow_ready_names = " · ".join(candidate.name for candidate, _ in shadow_ready_results) or "없음"
+    st.markdown(f"**직전 구조 계산의 진입신호 (현재 상태는 각 카드 확인):** {html.escape(buy_names)}")
+    st.markdown(f"**진입 대기:** {html.escape(wait_names)}")
+    st.markdown(
+        "**22개 전체 기법 형성 후보(운영 비활성 포함·매수신호 아님):** "
+        + html.escape(shadow_names)
+    )
+    st.markdown(
+        "**상품·비용·현재 체결구간까지 통과한 그림자 후보(승률 검증 전·매수신호 아님):** "
+        + html.escape(shadow_ready_names)
+    )
+    if final_buy_results:
+        st.subheader("진입신호 발생 기록 · 현재 상태 재확인")
+        for candidate, result in final_buy_results:
+            render_result(candidate, result, actionable=True)
+    if entry_wait_results:
+        st.subheader("진입 대기 · 지금 매수 금지")
+        for candidate, result in entry_wait_results:
+            render_result(candidate, result, actionable=True)
+    if watch_results:
+        st.subheader("관찰후보")
+        for candidate, result in watch_results:
+            render_result(candidate, result)
+    render_current_session_tracking()
+
+
+if not visible:
+    st.warning("현재 모드와 가격 조건을 통과한 후보가 없습니다.")
+
+
+live_cards()
+
+
+def _refresh_tracking() -> int:
+    """Refresh paper-signal prices without adding a validation panel to the UI."""
+    validations().retry_pending_durable()
+    tracked = validations().tracking_cases()
+    batch = tracking_case_rotator().select(tracked, VALIDATION_CASES_PER_REFRESH)
+    current = {candidate.key: candidate for candidate in analysis_candidates}
+    failures: list[str] = []
+    for case in batch:
+        candidate = _candidate_for_case(case.symbol, case.last_price, current)
+        if candidate is None:
+            failures.append(f"{case.symbol}: 추적 종목 또는 저장 현재가 없음")
+            continue
+        current_status = session_status(candidate.market)
+        refresh_scope = tracking_refresh_scope(candidate.session, current_status.session, current_status.active)
+        if refresh_scope.observe_live_quote and case.fill_price is not None:
+            try:
+                price, _, checked_at, _ = _live_quote(candidate)
+                case = validations().update_live(case, price, checked_at.isoformat())
+            except KISError as exc:
+                LOGGER.warning("validation price refresh failed symbol=%s error=%s", case.symbol, exc)
+                failures.append(f"{case.symbol}: 현재가 {safe_pipeline_message(exc, 120)}")
+        # Paper fills/exits use closed OHLCV, never a sampled quote that may
+        # have skipped the entry or a previous stop. Refresh missing tracked
+        # symbols at most once per minute through the shared KIS limiter.
+        # Closed bars remain eligible after DAY→PRE→REGULAR transitions.  They
+        # belong to the immutable plan session and can prove its last exit.
+        if refresh_scope.replay_completed_bars:
+            try:
+                now = datetime.now(UTC)
+                cache = history()
+                bars = cache.load(candidate.symbol, HistoryCache._namespace(candidate))
+                minute = int(now.timestamp() // 60)
+                stale = bars.empty or local_time(bars.index[-1], candidate.session) + timedelta(minutes=2) < now
+                if stale and tracking_bar_attempts().get(candidate.key) != minute:
+                    tracking_bar_attempts()[candidate.key] = minute
+                    bars = cache.backfill_candidate(client(), candidate, HistoryCache.INITIAL_READY_BARS)
+                if not bars.empty:
+                    validations().update_completed_bars(case, bars, now)
+            except (ValueError, RuntimeError, KISError) as exc:
+                LOGGER.warning("validation execution feed failed symbol=%s error=%s", case.symbol, exc)
+                failures.append(f"{case.symbol}: 분봉/체결 {safe_pipeline_message(exc, 120)}")
+    validations().expire_unobserved(None, datetime.now(UTC))
+    if failures:
+        details = " | ".join(failures[:5])
+        omitted = f" 외 {len(failures) - 5}건" if len(failures) > 5 else ""
+        raise RuntimeError(f"신호 추적 일부 실패 {len(failures)}건{omitted} · {details}")
+    return len(batch)
+
+
+@st.fragment(run_every=VALIDATION_TRACKING_REFRESH_SECONDS)
+def refresh_hidden_validation_tracking() -> None:
+    state = tracking_coordinator().request(
+        "tracking",
+        int(datetime.now(UTC).timestamp() // VALIDATION_TRACKING_REFRESH_SECONDS),
+        _refresh_tracking,
+    )
+    if state.error:
+        st.warning(f"신호 추적 오류: {safe_pipeline_message(state.error)}")
+
+
+if not use_daemon_feed:
+    refresh_hidden_validation_tracking()
+
+
+# 신호는 미체결 대기로 저장하며, 완료 1분봉 공통 실행기가 모의 진입/청산을 확정합니다.
+# 사용자의 요청에 따라 개별 진입가·성과·Calibration 화면은 스캐너에 표시하지 않습니다.

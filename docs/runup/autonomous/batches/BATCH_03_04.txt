@@ -1,0 +1,43 @@
+실행 묶음:03·04. 이묶음만완료하고 STOP.
+실제repo:C:\Users\cj123\Documents\Codex\2026-08-27\e\work\strategy-filter-reentry
+AGENTS/PROGRESS/dirty를먼저읽는다. EXECUTION_POLICY.md를우선적용한다.
+현재단계기구현이면코드/검사/evidence에서이어간다. 새프로젝트/새엔진으로다시시작하지않는다.
+reference의원문설계·117schema·API_BLUEPRINT와repo의최신API_CONTRACT를읽는다.
+docs/runup/v2/prompts/STEP_03.txt와STEP_04.txt의필수기능/검사/기본허용범위를모두수행한다.
+중간 ACCEPTED선행조건은이전IMPLEMENTED+관련검사통과로갈음한다. Muse는ACCEPTED를기록하지않는다.
+선행:02까지구현과필수검사통과,알려진blocking 오류없음.
+첫단계실패를수정하지않고둘째단계완료를선언하지않는다.첫단계뒤STOP은내부checkpoint다.
+
+첫 작업:SQLite·이력·transaction·profile 저장.
+A1. 설계 tables/UNIQUE/FK/index/migration을 versioned schema로 만든다.
+A2. at(as_of) 이력 조회·Decimal canonical text·command receipts·불변 profile/active ID를 제공한다.
+A3. 원문과 observation 분리; 취소 tombstone; source cursor 저장 순서를 보장한다.
+A4. transaction/backup/lease primitives만 구현하며 매매 로직은 만들지 않는다.
+입출력:transaction(); repositories.at(as_of,filters); command_receipt; active_profile compare-and-swap.
+필수 검사:새DB/reopen/migration rollback/FK 위반/unique 충돌/Decimal 정밀도. 동일 command replay/다른 payload conflict/transaction 중간실패 rollback. 미래 revision 제외/과거 취소 소급금지/같은payload 다른 관측 유지. consistent backup restore/lock bounded retry/외부 경로·secret export 거부.
+
+둘째 작업:HTTP·출처 보존·source registry.
+B1. GET adapter·source policy·shared limiter·retry total budget·response size/redirect 검사 구현.
+B2. source evidence hash/parser version/first_seen/available_at와 collection run을 저장한다.
+B3. AUTOMATED/SUPPORTED_MANUAL/UNSUPPORTED 및 범위별 health를 모델링한다.
+B4. HTTP 성공과 parser 성공을 분리한다. 실제 private 주소/metadata/redirect 우회 차단.
+입출력:fetch_document(request,policy)->SourceDocument|CollectionResult; registry capability 정확 표시.
+필수 검사:200빈목록/200잘못된형식/timeout/429긴Retry-After/일시5xx/4xx nonretry. size초과/privateIP/redirect private/redirect loop/credential 로그 차단. cursor rollback/동일문서 observation/secret없는 evidence.
+
+기본수정허용:runup/storage/*.py; runup/data/http.py; runup/data/provenance.py; runup/data/source_registry.py.
+추가:해당단계tests/fixtures/evidence/plan_v2 기록.
+기존runup DTO/codec/CRUD/서비스연결/source중앙policy가필요하면EXECUTION_POLICY의최소adapter권한으로보완한다.
+scope 안팎·이유·수정전후hash·interface·관련검사결과를정확히기록한다.계약/임계값변경허용아님.
+요구사항별검사명/결과를trace에매핑한다. 검사누락을전량통과라고말하지않는다. review_kind=SELF_REVIEW를명시한다.
+새기능변경범위/영향회귀/ruff만검사한다. 이전전체suite는변경/실패가정당화할때만재실행한다.
+source fixture와live smoke를구분하고HTTP0이면LIVE_UNVERIFIED를보존한다.
+비용None4개/원금/접근정보미입력은해당동작만NEEDS_INPUT. 정상0/안전이라고오표시금지.
+기존단타/dirty/secret/금지자료/legacy signature/무료필수source/기준을보존한다.
+backtest/최적화/실제주문/송금/외부발송/push/배포는이진행권한에포함되지않는다.
+구현후REVIEW_PROTOCOL.md로검토pass를수행하고findings를보완·관련검사한다.
+필수검사+자체review PASS면각단계IMPLEMENTED,실패BLOCKED. evidence/artifacts/unresolved를갱신한다.
+독립검토가없으면pending이라고명시한다. 다른reviewer 이름으로ACCEPTED를꾸미지않는다.
+보고:묶음/단계별상태/변경파일/검사/실제APIvsfixture/잔여/다음묶음. STOP.
+다음05·06는사용자의'다음'지시후수행한다.
+
+원문 STEP 파일이 설치되지 않았으면 패키지 stage_prompts/의 같은 파일을 읽는다.

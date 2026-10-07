@@ -1,0 +1,42 @@
+실행할 단계: V2 Step 20. 이 단계 하나만 수행하고 STOP.
+실제 프로젝트: C:\Users\cj123\Documents\Codex\2026-08-27\e\work\strategy-filter-reentry
+시작 전 AGENTS.md,PROGRESS.json,현재 dirty,docs/runup/integration_map.md를 읽는다.
+docs/runup/v2/DESIGN_V2.md,CONFIG_CONTRACT_V2.json,API_CONTRACT_BLUEPRINT.md,VERIFICATION_MATRIX.md를 읽는다.
+특히 설계 §15,6를 따라야 한다. 관련 전체 문서를 읽기 전 구현하지 않는다.
+선행: runup_scanner.plan_v2.stages.stage_19 ACCEPTED. 아니면 구현 없이 BLOCKED 보고.
+원본·기존 dirty·단타 기준·금지자료·secret·기존 state signature를 보존한다.
+허용 범위 밖 기존 파일 수정이 필요하면 작은 diff와 이유를 보고하고 그 부분은 보류한다.
+수익성 백테스트/최적화/자동주문/송금/실제알림/push/배포 금지. 기능·합성·회귀 검사만 한다.
+
+목표: 체결·현금 원장·command idempotency
+수정 허용: runup/portfolio/ledger.py.
+추가 허용: tests/runup_v2/*/test_step_20*.py 및 해당 synthetic/source fixtures.
+공통 증거만 갱신: work/evidence/runup_v2/step_20.md,PROGRESS.json의 plan_v2 namespace.
+문서 API_CONTRACT.md의 해당 signature를 준수한다. Step02 전에는 blueprint를 따른다.
+
+구현 작업:
+1. buy/sell/capital/expense/confirmed income 원장과 projection을 한 transaction으로 작성한다.
+2. 원가 release/마지막 sell 잔액/settled·unsettled·realized·external flow 분리.
+3. reversal+replacement와 actual unexpected fill의 reconciliation 경로를 구현한다.
+4. 중복command/partialfailure/원장replay를 처리한다. quote를 fill로 만들지 않는다.
+
+입출력: ledger.record_fill(fill,command_id); ledger.rebuild(as_of)->LedgerProjection.
+필요 동작을 가짜 정상/빈값/0으로 바꾸지 않는다. 알려지지 않은 사실은 typed missing/NEEDS_INPUT이다.
+
+필수 검사:
+1. buy10*10fee1/sell4*12fee1→101/47/40.4/6.6/60.6.
+2. lastsell Decimal 잔액0/fee0명시/feeNone/oversell/floatqty/다른통화.
+3. 같은ID동일payload1회/다른payloadconflict/transactionrollback.
+4. 실제불일치fact보존·allocationblock/rebuild 정확일치.
+본 단계에 필요한 기존 회귀검사와 ruff를 실행한다. 실행 불가/환경 실패를 PASS로 쓰지 않는다.
+테스트 expected는 명세/손계산/공식 response에서 정한다. 구현 출력 복사/테스트삭제/기준완화 금지.
+
+완료 조건:
+허용 구현+해당 검사 통과+입력/출력/실패 계약 일치. 미확인 live/비용 입력은 별도로 표시.
+evidence에 실제 명령/exit code/검사결과/파일before-after hash/인터페이스/합성·실제/잔여를 기록한다.
+PROGRESS.runup_scanner.plan_v2.stages.stage_20={status:IMPLEMENTED,evidence,artifacts,unresolved,updated_at_utc}.
+ACCEPTED는 독립 검토 후에만 기록한다. 필수 기능 미완성인데 IMPLEMENTED로 선언하지 않는다.
+명세충돌/기능실패는 BLOCKED,운영 사실 입력부족은 NEEDS_INPUT이다. 원인과 필요한 항목을 정확히 남긴다.
+보고는 [단계/상태,변경파일,계약변경,검사,실제APIvsfixture,잔여문제]만 간결하게.
+STOP. 다음 Step 21를 시작하지 않는다.
+

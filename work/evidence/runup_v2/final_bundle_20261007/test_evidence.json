@@ -1,0 +1,6 @@
+{
+  "command": "pytest tests/runup_v2 tests/test_web_app_boundary.py",
+  "result": "226 passed, 2 pre-existing env failures (see verification table)",
+  "verification_sha256": "3ad0f854bf5ea99f2dde5aa4989bde0fba974c93a504ce5111a3fdc48ad6b22f",
+  "verification_table": "work\\evidence\\runup_v2\\step_30_verification.md"
+}

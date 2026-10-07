@@ -1,0 +1,10 @@
+{
+  "excluded": [
+    ".env",
+    "secrets",
+    "auth cache",
+    "account numbers",
+    "portfolio row contents"
+  ],
+  "rule": "counts and hashes only; no row dumps"
+}
