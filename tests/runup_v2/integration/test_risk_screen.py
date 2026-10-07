@@ -199,17 +199,38 @@ def test_render_mobile_titles_and_cash_labels(tmp_path):
     app = AppTest.from_string(
         "from runup.ui.main import render\nrender(" + repr(str(path)) + ")").run(timeout=30)
     assert not app.exception
+    assert not any("실패" in str(e.value) for e in app.error)
     assert any("실현손익" in s.value for s in app.subheader)
     assert any("수동 원장" in s.value for s in app.subheader)
     assert any("미연결" in c.value for c in app.caption)
     assert any("DISABLED" in c.value for c in app.caption)
     app.checkbox(key="runup_mobile").check().run(timeout=30)
     assert not app.exception
+    assert not any("실패" in str(e.value) for e in app.error)
     labels = []
     for exp in app.expander:
         labels.append(getattr(exp, "label", getattr(exp, "value", "")))
     pending_labels = [label for label in labels if "NCT" in str(label)]
     assert len(pending_labels) == 2 and len(set(pending_labels)) == 2
+
+
+def test_render_no_scan_no_errors(tmp_path):
+    """계산 전 빈 화면도 에러 박스 없이 렌더된다(회귀: 조건부 import 바인딩)."""
+    from streamlit.testing.v1 import AppTest
+    conn, profile = _db(tmp_path)
+    _seed_company(conn)
+    _seed_event(conn)
+    path = tmp_path / "screen.sqlite3"
+    conn.close()
+    for mobile in (False, True):
+        app = AppTest.from_string(
+            "from runup.ui.main import render\nrender(" + repr(str(path)) + ")").run(timeout=30)
+        assert not app.exception
+        assert not any("실패" in str(e.value) for e in app.error)
+        if mobile:
+            app.checkbox(key="runup_mobile").check().run(timeout=30)
+            assert not app.exception
+            assert not any("실패" in str(e.value) for e in app.error)
 
 
 def test_status_summary_first_screen(tmp_path):
@@ -223,6 +244,7 @@ def test_status_summary_first_screen(tmp_path):
     app = AppTest.from_string(
         "from runup.ui.main import render\nrender(" + repr(str(path)) + ")").run(timeout=30)
     assert not app.exception
+    assert not any("실패" in str(e.value) for e in app.error)
     assert any("지금 상태" in s.value for s in app.subheader)
     texts = [str(w.value) for w in
              list(app.info) + list(app.success) + list(app.warning) + list(app.markdown)]

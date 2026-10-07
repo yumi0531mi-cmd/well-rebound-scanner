@@ -323,6 +323,7 @@ def render(db_path=None):
     mobile = st.checkbox("모바일 카드 보기",key="runup_mobile")
     mode = st.selectbox("분야",["전체","BIO","PHARMA","SPACE"],key="runup_sector")
     from runup.storage import database as _database
+    from runup.ui.i18n import EXIT_KO, ko_table
     use_remote = db_path is None and _database._env_db_target() is not None
     path = Path(db_path) if db_path else None
     conn = None
@@ -387,7 +388,6 @@ def render(db_path=None):
                     decisions = [r for r in decisions if dict(r["decision"])["security_id"] in ids]
                 cards = read_models.candidate_cards(conn, model, results=decisions)
                 st.subheader("후보 — 점수는 승률이 아닙니다")
-                from runup.ui.i18n import ko_table
                 summary = ko_table(
                     [{**c, "block": "; ".join(c["block_reasons"])} for c in cards],
                     {"ticker": "티커", "company": "기업", "exchange": "거래소",
@@ -440,7 +440,6 @@ def render(db_path=None):
                         st.write("당일: "+str(r["daily_exit"])+" | "+r["risk_note"])
                         st.caption("UTC: "+r["received"]["utc"])
             else:
-                from runup.ui.i18n import EXIT_KO
                 shown = []
                 for r in risks:
                     row = dict(r)

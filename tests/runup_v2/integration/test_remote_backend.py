@@ -106,14 +106,14 @@ def test_raw_transaction_passthrough():
 def test_connect_remote_connector_and_scheme_passthrough():
     made = {}
 
-    def connector(url, auth_token=None):
-        made["url"], made["token"] = url, auth_token
+    def connector(url, auth_token=None, isolation_level="unset"):
+        made.update(url=url, token=auth_token, isolation=isolation_level)
         return _StubInner([])
 
     conn = R.connect_remote("libsql://db.turso.io", "tok", connector=connector)
     assert isinstance(conn, R.RemoteConnection)
-    # libsql:// 그대로 전달한다(클라이언트가 직접 처리).
-    assert made == {"url": "libsql://db.turso.io", "token": "tok"}
+    # libsql:// 그대로 전달 + autocommit 격리(hanging txn 회귀 방지).
+    assert made == {"url": "libsql://db.turso.io", "token": "tok", "isolation": None}
     with pytest.raises(ValueError, match="remote database URL"):
         R.connect_remote("not-a-url", "tok", connector=connector)
 
