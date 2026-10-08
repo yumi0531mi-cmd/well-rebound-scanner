@@ -46,3 +46,12 @@ def match_sponsor(sponsor, companies):
                 want in got or got in want):
             alias_hit = ("alias", ticker, title)
     return alias_hit
+
+
+def is_unique_exact(sponsor, companies):
+    """정확 일치가 단 하나뿐이면 True. 복수면 자동 승인 금지."""
+    want = normalize_name(sponsor)
+    if len(want) < 2:
+        return False
+    found = [ticker for ticker, title in companies if normalize_name(title) == want]
+    return len(found) == 1

@@ -77,7 +77,7 @@ def test_suggest_creates_review_proposals(tmp_path):
         commit(conn)
     assert summary["exact"] == 1 and summary["unmapped"] == 1
     row = conn.execute("SELECT * FROM mapping_reviews").fetchone()
-    assert row["status"] == "REVIEW" and row["reviewed_by"] == "matcher"
+    assert row["status"] == "APPROVED" and row["reviewed_by"] == "auto-exact"
     assert "Novavax" in row["evidence"] and "NVAX" in row["evidence"]
     sec = conn.execute("SELECT * FROM securities WHERE security_id='SEC:NVAX'").fetchone()
     assert sec["listing_status"] == "UNVERIFIED" and sec["equity_type"] == "UNKNOWN"

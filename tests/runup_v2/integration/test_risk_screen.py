@@ -274,20 +274,23 @@ def test_status_summary_first_screen(tmp_path):
     assert any("진입 가능" in text and "검토 대기" in text for text in texts)
 
 
-def test_calendar_month_buckets_and_notes(tmp_path):
+def test_calendar_agenda_window_and_past(tmp_path):
+    from datetime import date
+
     from runup.services import read_models as R
     conn, profile = _db(tmp_path)
     _seed_company(conn)
     _seed_event(conn)
     _seed_scan(conn, profile)
     model = R.load(conn, T0)
-    cal = R.calendar_month(conn, model, 2024, 3)
-    assert "2024-03-01" in cal["days"]
-    row = cal["days"]["2024-03-01"][0]
-    assert row["tickers"] == ["NVX"] and row["status"] == "승인됨"
-    assert any(len(w) == 7 for w in cal["weeks"])
-    feb = R.calendar_month(conn, model, 2024, 2)
-    assert "2024-03-01" not in feb["days"]
+    cal = R.calendar_agenda(conn, model, date(2024, 1, 1), date(2024, 12, 31))
+    days = {r["date"] for r in cal["rows"]}
+    assert "2024-03-01" in days
+    first = next(r for r in cal["rows"] if r["date"] == "2024-03-01")
+    assert first["tickers"] == ["NVX"] and first["status"] == "승인됨"
+    assert [r["date"] for r in cal["rows"]] == sorted(r["date"] for r in cal["rows"])
+    narrow = R.calendar_agenda(conn, model, date(2024, 6, 1), date(2024, 6, 30))
+    assert all(r["date"].startswith("2024-06") for r in narrow["rows"])
     conn.close()
 
 
@@ -326,7 +329,7 @@ def test_watch_board_gain_and_outlook(tmp_path):
     conn.close()
 
 
-def test_calendar_month_navigation(tmp_path):
+def test_calendar_agenda_navigation(tmp_path):
     from streamlit.testing.v1 import AppTest
     conn, profile = _db(tmp_path)
     _seed_company(conn)
@@ -339,8 +342,9 @@ def test_calendar_month_navigation(tmp_path):
     assert not app.exception
     assert not any("실패" in str(e.value) for e in app.error)
     assert any("이벤트 달력" in s.value for s in app.subheader)
-    before = [str(m.value) for m in app.markdown]
+    before = [str(c.value) for c in app.caption if "조회 기간" in str(c.value)]
     app.button(key="runup_cal_next").click().run(timeout=30)
     assert not app.exception
-    after = [str(m.value) for m in app.markdown]
-    assert before != after
+    assert not any("실패" in str(e.value) for e in app.error)
+    after = [str(c.value) for c in app.caption if "조회 기간" in str(c.value)]
+    assert before and after and before != after

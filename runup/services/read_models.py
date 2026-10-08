@@ -44,6 +44,35 @@ def _security_map(conn):
     return {r["security_id"]: dict(r) for r in conn.execute("SELECT * FROM securities")}
 
 
+def _doc_map(conn, model):
+    """승인·대기 문서를 한 번에 읽는다(N+1 방지)."""
+    ids = set()
+    for event in (model.events or ()):
+        raw = event.get("source_document_ids") or ()
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw)
+            except Exception:
+                raw = []
+        ids.update(list(raw or ()))
+    pending = model.pending if hasattr(model, "pending") else model.get("pending", ())
+    for cand in (pending or ()):
+        if cand.get("document_id"):
+            ids.add(cand["document_id"])
+    found = {}
+    if not ids:
+        return found
+    try:
+        marks = ",".join("?" for _ in ids)
+        for row in conn.execute(
+                "SELECT document_id, source_id, url FROM source_documents "
+                f"WHERE document_id IN ({marks})", tuple(ids)):
+            found[row["document_id"]] = row
+    except Exception:
+        pass
+    return found
+
+
 def _doc_urls(conn, document_ids):
     urls = []
     for doc_id in (document_ids or ()):
@@ -77,70 +106,59 @@ def _tickers_of(securities, sec_ids):
     return names
 
 
-def _day_key(year: int, month: int, day: int) -> str:
-    return f"{year:04d}-{month:02d}-{day:02d}"
+def calendar_agenda(conn, model, start_day, end_day):
+    """기간 창 일정 목록. 과거→미래 순. 날짜·티커·내용·상태를 한눈에.
 
-
-def calendar_month(conn, model, year, month):
-    """달력 셀. {days: {날짜: [행]}, month_note: [...]}.
-
-    승인 일정은 시작일 셀에, 대기 후보는 날짜 글자 그대로 셀에 올린다.
-    날짜가 이상하면 버리지 않고 month_note에 남긴다. 추측 날짜를 만들지 않는다.
-    행: {date, tickers, event_type, status, precision, ref}.
+    승인 일정은 시작일, 대기 후보는 기록 날짜로 올린다. 날짜가 이상하면
+    버리지 않고 notes에 남긴다. 추측 날짜를 만들지 않는다.
+    행: {date, time, title, tickers, status, precision, ref}.
     """
-    import calendar as _cal
     import datetime as _dt
     securities = _security_map(conn)
-    days = {}
-    notes = []
+    rows, notes = [], []
 
-    def _tickers(sec_ids):
-        return _tickers_of(securities, sec_ids)
-
-    for event in (model.events or ()):
-        start = str(event.get("start") or "")
-        day = start[:10] if len(start) >= 10 else ""
+    def _split_start(text):
+        text = str(text or "")
+        day, time = (text[:10], text[11:16]) if len(text) >= 10 else ("", "")
         try:
             parsed = _dt.date.fromisoformat(day) if day else None
         except ValueError:
             parsed = None
+        return parsed, (time if parsed and len(text) >= 16 else "")
+
+    for event in (model.events or ()):
+        parsed, time = _split_start(event.get("start"))
         if parsed is None:
             notes.append(f"{event.get('event_id')}: 날짜 없음")
             continue
-        if (parsed.year, parsed.month) != (year, month):
+        if not (start_day <= parsed <= end_day):
             continue
-        days.setdefault(day, []).append({
-            "date": day, "tickers": _tickers(event.get("security_ids")),
-            "event_type": event.get("event_type"), "status": "승인됨",
-            "precision": str(event.get("date_precision")),
+        rows.append({
+            "date": parsed.isoformat(), "time": time or "시간 미정",
+            "title": str(event.get("event_type")),
+            "tickers": _tickers_of(securities, event.get("security_ids")),
+            "status": "승인됨", "precision": str(event.get("date_precision")),
             "ref": event.get("event_id")})
     for cand in (model.pending or ()):
         raw = str(cand.get("raw_date_text") or "")
         day = raw[:10] if len(raw) >= 10 else ""
         try:
-            parsed = _dt.date.fromisoformat(day)
+            parsed = _dt.date.fromisoformat(day) if day else None
         except ValueError:
+            parsed = None
+        if parsed is None:
             notes.append(f"{cand.get('candidate_id')}: 날짜 미확정({raw})")
             continue
-        if (parsed.year, parsed.month) != (year, month):
+        if not (start_day <= parsed <= end_day):
             continue
-        days.setdefault(day, []).append({
-            "date": day, "tickers": [],
-            "event_type": cand.get("event_type"), "status": "검토 대기",
-            "precision": str(cand.get("date_precision")),
+        rows.append({
+            "date": parsed.isoformat(), "time": "시간 미정",
+            "title": str(cand.get("event_type")),
+            "tickers": [],
+            "status": "검토 대기", "precision": str(cand.get("date_precision")),
             "ref": cand.get("candidate_id")})
-    first_weekday, ndays = _cal.monthrange(year, month)
-    weeks = []
-    week = [None] * ((first_weekday + 1) % 7)
-    for day_no in range(1, ndays + 1):
-        week.append(_day_key(year, month, day_no))
-        if len(week) == 7:
-            weeks.append(week)
-            week = []
-    if week:
-        week += [None] * (7 - len(week))
-        weeks.append(week)
-    return {"weeks": weeks, "days": days, "notes": notes}
+    rows.sort(key=lambda r: (r["date"], r["title"]))
+    return {"rows": rows, "notes": notes}
 
 
 def watch_board(conn, model, lookback=20):
@@ -264,7 +282,20 @@ def calendar_rows(conn, model):
     """
     approved = []
     securities = _security_map(conn)
-    for event in (model.events or ()):
+    events = list(model.events or ())
+    histories = {}
+    try:
+        eids = [e.get("event_id") for e in events if e.get("event_id")]
+        if eids:
+            marks = ",".join("?" for _ in eids)
+            for row in conn.execute(
+                    "SELECT event_id, revision_seq, status, available_at FROM catalyst_revisions "
+                    f"WHERE event_id IN ({marks}) ORDER BY event_id, revision_seq", tuple(eids)):
+                histories.setdefault(row["event_id"], []).append(row)
+    except Exception:
+        histories = {}
+    doc_map = _doc_map(conn, model)
+    for event in events:
         raw_docs = event.get("source_document_ids") or ()
         if isinstance(raw_docs, str):
             try:
@@ -273,30 +304,20 @@ def calendar_rows(conn, model):
                 docs = []
         else:
             docs = list(raw_docs)
-        try:
-            history = conn.execute("SELECT revision_seq, status, available_at FROM catalyst_revisions"
-                                   " WHERE event_id=? ORDER BY revision_seq",
-                                   (event.get("event_id"),)).fetchall()
-        except Exception:
-            history = []
+        history = histories.get(event.get("event_id"), [])
         tickers = _tickers_of(securities, event.get("security_ids"))
         approved.append({
             "event_id": event.get("event_id"), "event_type": event.get("event_type"),
             "date_precision": str(event.get("date_precision")),
             "start": event.get("start"), "status": event.get("status"),
             "tickers": ", ".join(sorted(set(tickers))),
-            "document_urls": _doc_urls(conn, docs),
+            "document_urls": [doc_map[d]["url"] for d in docs if d in doc_map],
             "revisions": len(history),
             "reviewed_by": event.get("reviewed_by"),
         })
     pending = []
     for cand in (model.pending or ()):
-        try:
-            doc = cand.get("document_id")
-            row = conn.execute("SELECT source_id, url FROM source_documents WHERE document_id=?",
-                               (doc,)).fetchone() if doc else None
-        except Exception:
-            row = None
+        row = doc_map.get(cand.get("document_id")) if cand.get("document_id") else None
         pending.append({
             "candidate_id": cand.get("candidate_id"),
             "title": cand.get("evidence_span", ""),

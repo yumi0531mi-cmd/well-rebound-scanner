@@ -149,6 +149,8 @@ def prepare_suggest(conn, at, user_agent="", transport=None):
         if hit is None:
             continue
         kind, ticker, _ = hit
+        if kind == "exact" and not sponsor_match.is_unique_exact(cand["sponsor_text"], companies):
+            kind = "alias"
         matches.append((cand, kind, ticker, company_map[ticker]["cik"]))
 
     def commit(db):
@@ -165,13 +167,20 @@ def prepare_suggest(conn, at, user_agent="", transport=None):
                                 (issuer_id, issuer_id)).fetchone()
             if exists:
                 continue
+            if kind == "exact":
+                status, reviewer = "APPROVED", "auto-exact"
+            else:
+                status, reviewer = "REVIEW", "matcher"
             evidence = (f"sponsor '{cand['sponsor_text']}' ↔ 상장 '{ticker}' "
-                        f"({kind}). 자동 제안이므로 사람 승인이 필요하다.")
+                        f"({kind}). 자동 제안이므로 사람 승인이 필요하다."
+                        if status == "REVIEW" else
+                        f"sponsor '{cand['sponsor_text']}' ↔ 상장 '{ticker}' "
+                        f"(exact 유일). 공식 목록 기준 자동 승인.")
             db.execute("INSERT INTO mapping_reviews(issuer_id, security_id, status, "
                        "evidence, reviewed_by, reviewed_at) VALUES (?,?,?,?,?,?)",
-                       (issuer_id, issuer_id, "REVIEW", evidence, "matcher",
+                       (issuer_id, issuer_id, status, evidence, reviewer,
                         at.isoformat()))
-            if kind == "exact":
+            if status == "APPROVED":
                 exact += 1
             else:
                 alias += 1
@@ -241,6 +250,7 @@ def prepare_sec(conn, at, user_agent="", after="", transport=None, budget_second
             db.execute("UPDATE issuers SET cik=? WHERE issuer_id IN "
                        "(SELECT issuer_id FROM securities WHERE UPPER(ticker)=?) "
                        "AND (cik IS NULL OR cik='')", (cik, ticker))
+        by_cik = {c: t for t, c in cik_map.items()}
         for cik, result, _ in outcomes:
             if result.status.value in ("OK", "EMPTY_CONFIRMED"):
                 import dataclasses as _dc
@@ -262,6 +272,23 @@ def prepare_sec(conn, at, user_agent="", after="", transport=None, budget_second
                     if not db.execute("SELECT 1 FROM event_candidates WHERE candidate_id=?",
                                       (data["candidate_id"],)).fetchone():
                         insert_candidate(db, data)
+                ticker = by_cik.get(cik)
+                if ticker:
+                    issuer_id = "SEC:" + ticker
+                    db.execute("INSERT OR IGNORE INTO issuers VALUES (?,?,?,?,?,?)",
+                               (issuer_id, cik, ticker, "[]", "UNVERIFIED", at.isoformat()))
+                    db.execute("INSERT OR IGNORE INTO securities VALUES (?,?,?,?,?,?,?,?,?)",
+                               (issuer_id, issuer_id, ticker, "", "USD", "UNKNOWN",
+                                "UNVERIFIED", at.isoformat(), None))
+                    exists = db.execute(
+                        "SELECT 1 FROM mapping_reviews WHERE issuer_id=? AND security_id=? "
+                        "AND status IN ('REVIEW','APPROVED')", (issuer_id, issuer_id)).fetchone()
+                    if not exists:
+                        db.execute("INSERT INTO mapping_reviews(issuer_id, security_id, status, "
+                                   "evidence, reviewed_by, reviewed_at) VALUES (?,?,?,?,?,?)",
+                                   (issuer_id, issuer_id, "APPROVED",
+                                    f"SEC 공식 목록 CIK {cik} ↔ 상장 '{ticker}'. 제출 문서 기준 자동 승인.",
+                                    "auto-sec", at.isoformat()))
             health(db, "sec:" + cik, result.status.value, at,
                    "; ".join(str(e) for e in (result.errors or ())) or None)
         if attempted:

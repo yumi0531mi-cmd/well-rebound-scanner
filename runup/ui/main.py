@@ -358,65 +358,47 @@ def _allocation_forms(service, profile):
 
 def _calendar_section(conn, model, mobile):
     from datetime import date as _date
+    from datetime import timedelta as _delta
 
     from runup.ui.i18n import ko_status
     st.subheader("이벤트 달력")
     today = _date.today()
-    if "runup_cal_year" not in st.session_state:
-        st.session_state["runup_cal_year"] = today.year
-        st.session_state["runup_cal_month"] = today.month
-    year, month = st.session_state["runup_cal_year"], st.session_state["runup_cal_month"]
-    left, title, right = st.columns([1, 2, 1])
+    if "runup_cal_start" not in st.session_state:
+        st.session_state["runup_cal_start"] = (today - _delta(days=14)).isoformat()
+        st.session_state["runup_cal_end"] = (today + _delta(days=92)).isoformat()
+    start = _date.fromisoformat(st.session_state["runup_cal_start"])
+    end = _date.fromisoformat(st.session_state["runup_cal_end"])
+    st.caption(f"조회 기간 {start.isoformat()} — {end.isoformat()}")
+    left, mid, right = st.columns([1, 1, 1])
     with left:
-        if st.button("◀ 이전 달", key="runup_cal_prev"):
-            month -= 1
-            if month < 1:
-                month, year = 12, year - 1
-            st.session_state["runup_cal_year"], st.session_state["runup_cal_month"] = year, month
+        if st.button("◀ 이전", key="runup_cal_prev"):
+            st.session_state["runup_cal_start"] = (start - _delta(days=30)).isoformat()
+            st.session_state["runup_cal_end"] = (end - _delta(days=30)).isoformat()
             st.rerun()
-    with title:
-        st.write(f"{year}년 {month}월")
+    with mid:
+        if st.button("오늘", key="runup_cal_today"):
+            st.session_state["runup_cal_start"] = (today - _delta(days=14)).isoformat()
+            st.session_state["runup_cal_end"] = (today + _delta(days=92)).isoformat()
+            st.rerun()
     with right:
-        if st.button("다음 달 ▶", key="runup_cal_next"):
-            month += 1
-            if month > 12:
-                month, year = 1, year + 1
-            st.session_state["runup_cal_year"], st.session_state["runup_cal_month"] = year, month
+        if st.button("다음 ▶", key="runup_cal_next"):
+            st.session_state["runup_cal_start"] = (start + _delta(days=30)).isoformat()
+            st.session_state["runup_cal_end"] = (end + _delta(days=30)).isoformat()
             st.rerun()
-    year, month = st.session_state["runup_cal_year"], st.session_state["runup_cal_month"]
-    cal = read_models.calendar_month(conn, model, year, month)
-    if mobile:
-        for week in cal["weeks"]:
-            for day in week:
-                if day is None or day not in cal["days"]:
-                    continue
-                with st.expander(f"{day[5:]} · {len(cal['days'][day])}건"):
-                    for row in cal["days"][day]:
-                        st.write(" · ".join([", ".join(row["tickers"]) or row["ref"],
-                                             str(row["event_type"]),
-                                             ko_status(row["status"])]))
-    else:
-        st.write("일 월 화 수 목 금 토")
-        for week in cal["weeks"]:
-            cols = st.columns(7)
-            for col, day in zip(cols, week, strict=True):
-                with col:
-                    if day is None:
-                        st.write("")
-                    else:
-                        st.write(day[8:])
-                        for row in cal["days"].get(day, ()):
-                            label = (", ".join(row["tickers"]) or row["ref"])[:12]
-                            if st.button(label, key=f"runup_cal_{day}_{label}"):
-                                st.session_state["runup_cal_sel"] = row
-                                st.rerun()
-    sel = st.session_state.get("runup_cal_sel")
-    if sel:
-        st.subheader("일정 내용")
-        st.write("날짜: " + str(sel.get("date")))
-        st.write("티커: " + (", ".join(sel.get("tickers") or ()) or "미연결"))
-        st.write("유형: " + str(sel.get("event_type")))
-        st.write("상태: " + ko_status(sel.get("status")) + " · 정밀도: " + str(sel.get("precision")))
+    start = _date.fromisoformat(st.session_state["runup_cal_start"])
+    end = _date.fromisoformat(st.session_state["runup_cal_end"])
+    cal = read_models.calendar_agenda(conn, model, start, end)
+    checked = read_models.display_times(today.isoformat())["kst"]
+    st.caption(f"전체 일정 {len(cal['rows'])}건 · {checked} 조회")
+    for row in cal["rows"]:
+        past = "일정 경과" if row["date"] < today.isoformat() else "예정"
+        head = f"{row['date'][5:]} · {row['time']} · " + (
+            ", ".join(row["tickers"]) if row["tickers"] else row["ref"])
+        with st.expander(f"{head} · {past}"):
+            st.write("제목: " + str(row["title"]))
+            st.write("티커: " + (", ".join(row["tickers"]) or "미연결(검토 필요)"))
+            st.write("상태: " + ko_status(row["status"]) + " · 정밀도: " + str(row["precision"]))
+            st.write("일정: " + past)
     for note in cal["notes"][:10]:
         st.caption(note)
 
