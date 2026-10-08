@@ -173,12 +173,37 @@ class Worker:
 _worker = None
 
 
-def start(runtime, db_path=None):
+def start(runtime, db_path=None, enabled=None):
     global _worker
     import config
+    if enabled is None:
+        enabled = _resolve_enabled(db_path)
+    if _worker is None and not enabled:
+        return {"state": "DISABLED"}
     if _worker is None:
         _worker = Worker(runtime, dict(config.RUNUP_CONFIG), db_path=db_path)
+    _worker.values["runup_worker_enabled"] = bool(enabled)
     return _worker.start()
+
+
+def _resolve_enabled(db_path):
+    """DB 활성 프로필 스위치 우선, 없으면 코드 기본값."""
+    import config
+    try:
+        from runup.services import config_service
+        from runup.storage import connect
+        from runup.storage.repositories import get_active_profile
+        conn = connect(db_path)
+        try:
+            if get_active_profile(conn) is None:
+                return bool(config.RUNUP_CONFIG.get("runup_worker_enabled", False))
+            return bool(config_service.load(conn).values.get(
+                "runup_worker_enabled", False))
+        finally:
+            conn.close()
+    except Exception:
+        import config as _config
+        return bool(_config.RUNUP_CONFIG.get("runup_worker_enabled", False))
 
 
 def register_handlers(handlers):

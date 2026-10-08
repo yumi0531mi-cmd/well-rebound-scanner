@@ -18,5 +18,11 @@ def test_worker_disabled_by_default_no_side_effects(monkeypatch):
     assert jobs._worker is before
 
 
+def test_jobs_start_honors_explicit_enabled(monkeypatch, tmp_path):
+    from runup.services import jobs
+    assert jobs.start(object(), enabled=False)["state"] == "DISABLED"
+    assert jobs._worker is None
+
+
 def test_worker_enabled_returns_bool():
     assert isinstance(runup_app.worker_enabled(), bool)
