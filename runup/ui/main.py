@@ -611,23 +611,6 @@ def render(db_path=None):
             else:
                 st.info("아직 판정이 없습니다. 자료 수집·검토 후 명시적으로 계산하세요.")
             calendar = read_models.calendar_rows(conn, model)
-            st.subheader("이벤트 캘린더(승인) — 출처·날짜 정밀도·변경 이력")
-            if not calendar["approved"]:
-                st.info("승인된 이벤트가 없습니다. 검토 대기를 먼저 처리하세요.")
-            elif mobile:
-                for e in calendar["approved"]:
-                    with st.expander(f"{e['event_id']} · {e['event_type']} · {e['status']}"):
-                        st.write("티커: "+e["tickers"]+" | 정밀도: "+e["date_precision"])
-                        st.write("시작: "+str(e["start"])+" | 변경: "+str(e["revisions"])+"회")
-                        for url in e["document_urls"]:
-                            st.write("문서: "+url)
-            else:
-                st.dataframe(ko_table(calendar["approved"], {
-                    "event_id": "이벤트", "event_type": "유형",
-                    "date_precision": "날짜 정밀도", "start": "시작",
-                    "status": "상태", "tickers": "티커들",
-                    "document_urls": "문서", "revisions": "변경 횟수",
-                    "reviewed_by": "검토자"}), use_container_width=True)
             risks = read_models.position_risk(conn, model)
             st.subheader("실제 보유·위험 — 수동 기록, 자동 감시 아님")
             if not risks:
@@ -663,27 +646,29 @@ def render(db_path=None):
             st.subheader("검토 대기")
             if not model.pending:
                 st.info("아직 기록된 자료가 없습니다.")
-            elif mobile:
-                for p in calendar["pending"]:
-                    with st.expander(f"{p['candidate_id']} · {p['event_type']} · {(p['title'] or '')[:24]}"):
-                        st.write("제목: "+p["title"])
-                        st.write("출처: "+p["source"]+" | 티커: "+p["ticker"])
-                        st.write("날짜: "+str(p["date"])+" ("+p["date_precision"]+")")
-                        if p["source_url"]:
-                            st.write("문서: "+p["source_url"])
-                        st.caption("UTC: "+p["available"]["utc"])
             else:
-                st.dataframe(ko_table(calendar["pending"], {
-                    "candidate_id": "후보", "title": "제목", "source": "출처",
-                    "source_url": "출처 주소", "event_type": "유형",
-                    "date": "날짜", "date_precision": "날짜 정밀도",
-                    "ticker": "티커"}), use_container_width=True)
+                from runup.ui.i18n import ko_table as _ko_table
+                with st.expander(f"대기 목록 {len(calendar['pending'])}건 펼치기"):
+                    if mobile:
+                        for p in calendar["pending"]:
+                            st.write(f"{p['candidate_id']} · {p['event_type']} · "
+                                     f"{(p['title'] or '')[:24]} · {p['date']}")
+                    else:
+                        st.dataframe(_ko_table(calendar["pending"], {
+                            "candidate_id": "후보", "title": "제목", "source": "출처",
+                            "source_url": "출처 주소", "event_type": "유형",
+                            "date": "날짜", "date_precision": "날짜 정밀도",
+                            "ticker": "티커"}), use_container_width=True)
             observed = [dict(r) for r in conn.execute(
                 "SELECT ticker,exchange,listing_status FROM securities ORDER BY ticker")]
             for row in observed:
                 row["standard_exchange"] = to_standard_exchange(row.get("exchange", ""))
-            _rows("미국 관측 종목 — 업종·이벤트 연결 검토 필요", observed, mobile,
-                  name=lambda r: r.get("ticker", "종목"))
+            with st.expander(f"미국 관측 종목 {len(observed)}건 (업종·이벤트 연결 검토 필요)"):
+                from runup.ui.i18n import ko_table as _ko_table2
+                st.dataframe(_ko_table2(observed, {
+                    "ticker": "티커", "exchange": "거래소",
+                    "standard_exchange": "표준 거래소",
+                    "listing_status": "상장 상태"}), use_container_width=True)
             _rows("수집 출처·접근 범위",model.sources,mobile,
                   name=lambda r: str(r.get("source_id", r.get("ticker", "출처"))))
         else:

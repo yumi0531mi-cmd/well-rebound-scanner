@@ -214,8 +214,9 @@ def test_render_mobile_titles_and_cash_labels(tmp_path):
     labels = []
     for exp in app.expander:
         labels.append(getattr(exp, "label", getattr(exp, "value", "")))
-    pending_labels = [label for label in labels if "NCT" in str(label)]
-    assert len(pending_labels) == 2 and len(set(pending_labels)) == 2
+    texts = [str(w.value) for w in app.markdown]
+    assert any("NCT001" in text for text in texts)
+    assert any("NCT002" in text for text in texts)
 
 
 def test_render_empty_db_setup_prompt(tmp_path, monkeypatch):
