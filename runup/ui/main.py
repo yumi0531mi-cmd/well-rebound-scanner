@@ -519,7 +519,10 @@ def render(db_path=None):
     except Exception as exc:
         import traceback
         traceback.print_exc()
-        st.error("런업 기록 조회 실패: "+type(exc).__name__)
+        if "no such table" in str(exc):
+            st.info("런업 저장소가 비어 있습니다. 로그인 후 준비 버튼을 누르세요.")
+        else:
+            st.error("런업 기록 조회 실패: "+type(exc).__name__)
     finally:
         if conn:
             try:
@@ -541,6 +544,8 @@ def render(db_path=None):
         writable = connect(db_path)
         service = Commands(writable,grant)
         try:
+            from runup.storage import migrate as _migrate
+            _migrate(writable)
             if profile is None:
                 if st.button("런업 초기 설정 준비",key="runup_prepare"):
                     _submit("준비",lambda: "프로필 준비됨: "+service.prepare().profile_id)

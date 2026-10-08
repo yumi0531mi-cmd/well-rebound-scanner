@@ -218,6 +218,25 @@ def test_render_mobile_titles_and_cash_labels(tmp_path):
     assert len(pending_labels) == 2 and len(set(pending_labels)) == 2
 
 
+def test_render_empty_db_setup_prompt(tmp_path, monkeypatch):
+    """빈 저장소는 에러 박스 대신 준비 안내를 보여준다."""
+    from streamlit.testing.v1 import AppTest
+    path = tmp_path / "empty.sqlite3"
+    import sqlite3 as _sq
+    _sq.connect(str(path)).close()
+    app = AppTest.from_string(
+        "from runup.ui.main import render\nrender(" + repr(str(path)) + ")").run(timeout=30)
+    assert not app.exception
+    assert not any("실패" in str(e.value) for e in app.error)
+    assert any("비어" in str(w.value) for w in app.info)
+    monkeypatch.setenv("WELLSCAN_ADMIN_TOKEN", "test-empty-only-1234567890")
+    app.text_input(key="runup_login_value").input("test-empty-only-1234567890")
+    app.button[0].click().run(timeout=30)
+    assert not app.exception
+    assert not any("실패" in str(e.value) for e in app.error)
+    assert any("준비" in str(b.label) for b in app.button)
+
+
 def test_render_no_scan_no_errors(tmp_path):
     """계산 전 빈 화면도 에러 박스 없이 렌더된다(회귀: 조건부 import 바인딩)."""
     from streamlit.testing.v1 import AppTest
