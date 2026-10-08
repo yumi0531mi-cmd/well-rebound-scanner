@@ -568,6 +568,12 @@ def render(db_path=None):
                     from wellscan.scanner_service import shared_runtime_components
                     with st.spinner("공개 일정과 미국 후보를 수집합니다."):
                         _submit("수집",lambda: service.collect_sources(shared_runtime_components()))
+                if st.button("한 번에 모으기 (수집·일봉·계산)",key="runup_collect_all"):
+                    from wellscan.scanner_service import shared_runtime_components
+                    with st.spinner("순서대로 모으고 계산합니다."):
+                        _submit("수집",lambda: service.collect_sources(shared_runtime_components()))
+                        _submit("일봉",service.collect_daily)
+                        _submit("계산",service.scan)
                 if st.button("미국 일봉 수집 — 다음 묶음",key="runup_collect_daily"):
                     with st.spinner("무료 일봉을 수집합니다. 전체 범위는 여러 묶음으로 처리합니다."):
                         _submit("일봉",service.collect_daily)
