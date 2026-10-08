@@ -160,6 +160,61 @@ class Commands:
             sid = _add(self.conn, ticker, exchange, datetime.now(UTC))
         return sid
 
+    def fetch_quotes(self, security_ids, runtime):
+        """KIS에서 최신 시세를 가져온다. 지연 여부 미확인은 표시한다.
+
+        QUOTE_ONLY 오버레이와 달리 수신·체결 시각을 분리한 판정용 관측을 돌려준다.
+        저장은 하지 않는다(승인 때 재검증용).
+        """
+        self.require_writer()
+        client = getattr(runtime, "client", None)
+        if client is None or not getattr(client, "configured", False):
+            raise ValueError("KIS 미연결: 키 설정을 확인하세요")
+        try:
+            max_age = float(self._quote_max_age())
+        except Exception:
+            raise ValueError("시세 유효 기간 설정 오류") from None
+        now = datetime.now(UTC)
+        out = []
+        for sid in (security_ids or ()):
+            row = self.conn.execute(
+                "SELECT ticker, exchange FROM securities WHERE security_id=?",
+                (sid,)).fetchone()
+            if row is None:
+                continue
+            price = None
+            try:
+                price, _volume, _trade_at = client.overseas_current_price(
+                    row["ticker"], row["exchange"])
+                trade_at = _trade_at if getattr(_trade_at, "tzinfo", None) else None
+                if trade_at is not None:
+                    age = (now - trade_at).total_seconds()
+                    fresh = 0 <= age <= max_age
+                else:
+                    fresh = False
+            except Exception:
+                trade_at, fresh = None, False
+            from decimal import Decimal as _Decimal
+            try:
+                last = _Decimal(str(price)) if fresh else None
+                if last is not None and last <= 0:
+                    last, fresh = None, False
+            except Exception:
+                last, fresh = None, False
+            out.append(D.QuoteObservation(
+                security_id=sid, received_at=now, time_quality="EXCHANGE",
+                source_id="kis", session="", delay_known=False,
+                age_seconds=None, status="FRESH" if fresh else "STALE",
+                last=last, trade_at=trade_at))
+        return out
+
+    def _quote_max_age(self):
+        try:
+            profile = config_service.load(self.conn)
+            return profile.values.get("quote_max_age_seconds", 120)
+        except Exception:
+            return 120
+
     def collect_daily(self, collector=None):
         """일봉 다음 묶음을 수집한다. 성공·미처리·실패·마지막 성공을 구분한다.
 
@@ -349,7 +404,10 @@ class Commands:
         proposals = rollover.propose(ctx, ranked, costs, exposures, stops, sessions)
         if not proposals:
             if not ctx.quotes:
-                raise ValueError("신선 시세 없음: 확인된 FRESH 시세 필요")
+                raise ValueError("신선 시세 없음: 시세 가져오기를 먼저 누르세요")
+            if not any(getattr(q, "status", None) == "FRESH" and
+                       getattr(q, "trade_at", None) for q in ctx.quotes):
+                raise ValueError("신선 시세 없음: 가져온 시세가 오래됨")
             if not sessions:
                 raise ValueError("만료 세션 없음: 다음 거래 세션 종가 확인 필요")
             raise ValueError("제안 생성 불가: 현금·슬롯·예산 조건 부족")

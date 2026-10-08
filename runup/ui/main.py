@@ -303,10 +303,36 @@ def _allocation_forms(service, profile):
     nav_text = st.text_input("확인한 현재 계좌 평가액 USD (배분 기준)", key="runup_alloc_nav")
     st.caption("비용 미입력·평가액 미입력·신선 시세 없음은 제안 생성·승인을 차단합니다. 0으로 가정하지 않습니다.")
 
+    def _stored_quotes():
+        return list(st.session_state.get("runup_quotes") or ())
+
+    if st.button("최신 시세 가져오기", key="runup_quotes_fetch"):
+        def fetch():
+            from runup.services import read_models as _rm
+            from wellscan.scanner_service import shared_runtime_components
+            model = _rm.load(service.conn)
+            sids = {p["security_id"] for p in service.get_allocation_proposals()}
+            for item in ((model.latest or {}).get("decisions", ()) or ()):
+                try:
+                    sids.add(item["decision"]["security_id"])
+                except Exception:
+                    continue
+            quotes = service.fetch_quotes(sorted(sids), shared_runtime_components())
+            st.session_state["runup_quotes"] = quotes
+            fresh = sum(1 for q in quotes if q.status == "FRESH")
+            return f"신선 {fresh}건 / 전체 {len(quotes)}건"
+        _submit("시세", fetch)
+    stored = _stored_quotes()
+    if stored:
+        st.caption("가져온 시세: " + ", ".join(
+            f"{q.security_id} {q.status}" for q in stored))
+        st.caption("지연 여부 미확인 시세입니다. 승인 전 확인하세요.")
+
     # Generate proposals via public command path (no direct rollover/SQL).
     if st.button("현재 판정 기반 배분 제안 생성", key="runup_alloc_propose"):
         def propose():
-            return service.propose_allocations(nav_usd=nav_text or None)
+            return service.propose_allocations(nav_usd=nav_text or None,
+                                              quotes=_stored_quotes() or None)
         _submit("제안 생성", propose)
 
     # Display pending proposals with real DB columns.
@@ -324,7 +350,7 @@ def _allocation_forms(service, profile):
                 if st.button("최신 조건 재검증", key=f"runup_alloc_revalidate_{p['allocation_id']}"):
                     def revalidate(pid=p["allocation_id"]):
                         ctx, _, _, _, _, _ = service.build_allocation_context(
-                            nav_usd=nav_text or None)
+                            nav_usd=nav_text or None, quotes=_stored_quotes() or None)
                         ok, reasons = service.revalidate_allocation(pid, ctx)
                         return "재검증 통과" if ok else "재검증 실패: " + "; ".join(reasons)
                     _submit("재검증", revalidate)
@@ -337,7 +363,7 @@ def _allocation_forms(service, profile):
                     if st.button("승인 (재검증 후)", key=f"runup_alloc_approve_{p['allocation_id']}"):
                         def approve(pid=p["allocation_id"]):
                             ctx, _, _, _, _, _ = service.build_allocation_context(
-                                nav_usd=nav_text or None)
+                                nav_usd=nav_text or None, quotes=_stored_quotes() or None)
                             ok, reasons = service.revalidate_allocation(pid, ctx)
                             if not ok:
                                 raise ValueError("재검증 실패: " + "; ".join(reasons))

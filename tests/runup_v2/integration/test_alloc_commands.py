@@ -245,3 +245,63 @@ def test_cancel_via_public_path(tmp_path, monkeypatch):
     with pytest.raises(ValueError):
         svc.cancel_allocation(pid, svc.new_intent_command_id("alloc_cancel", {"allocation_id": pid}))
     conn.close()
+
+
+def test_fetch_quotes_fresh_stale_and_gates(tmp_path, monkeypatch):
+    from datetime import timedelta
+    grant = _grant(monkeypatch)
+    conn, _ = _db(tmp_path, costs=True)
+    svc = Commands(conn, grant)
+    _seed_security(conn)
+    now = datetime.now(UTC)
+
+    class _Client:
+        configured = True
+
+        def overseas_current_price(self, symbol, exchange):
+            if symbol == "OLD":
+                return 90.0, 1.0, now - timedelta(seconds=10000)
+            if symbol == "BOOM":
+                raise ValueError("no quote")
+            return 100.0, 10.0, now
+
+    class _Runtime:
+        client = _Client()
+
+    conn.execute("INSERT OR IGNORE INTO issuers(issuer_id, legal_name, sector_tags, observed_at)"
+                 " VALUES (?,?,?,?)",
+                 ("i-OLD", "OLD", "BIO", T0.isoformat()))
+    conn.execute("INSERT OR IGNORE INTO securities(security_id, issuer_id, ticker, exchange,"
+                 " currency, equity_type, listing_status, valid_from)"
+                 " VALUES (?,?,?,?,?,?,?,?)",
+                 ("OLD", "i-OLD", "OLD", "NAS", "USD", "COMMON", "VERIFIED", T0.isoformat()))
+    conn.execute("INSERT OR IGNORE INTO issuers(issuer_id, legal_name, sector_tags, observed_at)"
+                 " VALUES (?,?,?,?)",
+                 ("i-BOOM", "BOOM", "BIO", T0.isoformat()))
+    conn.execute("INSERT OR IGNORE INTO securities(security_id, issuer_id, ticker, exchange,"
+                 " currency, equity_type, listing_status, valid_from)"
+                 " VALUES (?,?,?,?,?,?,?,?)",
+                 ("BOOM", "i-BOOM", "BOOM", "NAS", "USD", "COMMON", "VERIFIED", T0.isoformat()))
+    conn.commit()
+    quotes = {q.security_id: q for q in
+              svc.fetch_quotes(["AAA", "OLD", "BOOM", "NOPE"], _Runtime())}
+    assert quotes["AAA"].status == "FRESH"
+    assert quotes["AAA"].last == Decimal("100")
+    assert quotes["AAA"].received_at is not None and quotes["AAA"].trade_at is not None
+    assert quotes["OLD"].status == "STALE"
+    assert quotes["BOOM"].status == "STALE" and quotes["BOOM"].last is None
+    assert "NOPE" not in quotes
+    assert quotes["AAA"].delay_known is False
+
+    class _Off:
+        configured = False
+
+    class _RuntimeOff:
+        client = _Off()
+
+    with pytest.raises(ValueError, match="KIS"):
+        svc.fetch_quotes(["AAA"], _RuntimeOff())
+    bad = Commands(conn, {"verified": True})
+    with pytest.raises(PermissionError):
+        bad.fetch_quotes(["AAA"], _Runtime())
+    conn.close()
