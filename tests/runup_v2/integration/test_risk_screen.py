@@ -342,9 +342,13 @@ def test_calendar_agenda_navigation(tmp_path):
     assert not app.exception
     assert not any("실패" in str(e.value) for e in app.error)
     assert any("이벤트 달력" in s.value for s in app.subheader)
-    before = [str(c.value) for c in app.caption if "조회 기간" in str(c.value)]
+    app.session_state["runup_cal_year"] = 2024
+    app.session_state["runup_cal_month"] = 3
+    app.run(timeout=30)
+    assert not app.exception
+    assert any("NVX" in str(b.label) for b in app.button)
+    before = (app.session_state["runup_cal_year"], app.session_state["runup_cal_month"])
     app.button(key="runup_cal_next").click().run(timeout=30)
     assert not app.exception
-    assert not any("실패" in str(e.value) for e in app.error)
-    after = [str(c.value) for c in app.caption if "조회 기간" in str(c.value)]
-    assert before and after and before != after
+    after = (app.session_state["runup_cal_year"], app.session_state["runup_cal_month"])
+    assert before != after
