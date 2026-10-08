@@ -106,7 +106,69 @@ def test_sponsor_captured_at_collection(tmp_path):
     conn.close()
 
 
+def test_mapping_table_renders(tmp_path, monkeypatch):
+    from streamlit.testing.v1 import AppTest
+    conn, _ = _db(tmp_path)
+    conn.execute("INSERT INTO mapping_reviews(issuer_id, security_id, status, evidence,"
+                 " reviewed_by, reviewed_at) VALUES (?,?,?,?,?,?)",
+                 ("SEC:NVAX", "SEC:NVAX", "REVIEW", "sponsor ↔ 상장 (exact)", "matcher",
+                  T0.isoformat()))
+    conn.commit()
+    conn.close()
+    path = tmp_path / "sug.sqlite3"
+    monkeypatch.setenv("WELLSCAN_ADMIN_TOKEN", TOKEN)
+    app = AppTest.from_string(
+        "from runup.ui.main import render\nrender(" + repr(str(path)) + ")").run(timeout=30)
+    assert not app.exception
+    app.text_input(key="runup_login_value").input(TOKEN)
+    app.button[0].click().run(timeout=30)
+    assert not app.exception
+    assert not any("실패" in str(e.value) for e in app.error)
+    assert any("연결 검토" in s.value for s in app.subheader)
+
+
+def test_bulk_exact_approve(tmp_path, monkeypatch):
+    grant = _grant(monkeypatch)
+    conn = connect(tmp_path / "bulk.sqlite3")
+    migrate(conn)
+    config_service.save(conn, dict(config.RUNUP_CONFIG),
+                        "TEST_SUG_BULK_UNVALIDATED", None, T0)
+    svc = Commands(conn, grant)
+    for iid, kind in (("SEC:A", "exact"), ("SEC:B", "exact"), ("SEC:C", "alias")):
+        conn.execute("INSERT INTO mapping_reviews(issuer_id, security_id, status, evidence,"
+                     " reviewed_by, reviewed_at) VALUES (?,?,?,?,?,?)",
+                     (iid, iid, "REVIEW", f"sponsor ↔ 상장 ({kind})", "matcher", T0.isoformat()))
+    conn.commit()
+    exact_ids = [r[0] for r in conn.execute(
+        "SELECT review_id FROM mapping_reviews WHERE evidence LIKE '%(exact)%'")]
+    assert len(exact_ids) == 2
+    for rid in exact_ids:
+        assert svc.approve_mapping(rid) == "APPROVED"
+    left = conn.execute("SELECT COUNT(*) FROM mapping_reviews WHERE status='REVIEW'").fetchone()[0]
+    assert left == 1
+    conn.close()
+
+
 def test_approve_mapping_paths(tmp_path, monkeypatch):
+    grant = _grant(monkeypatch)
+    conn = connect(tmp_path / "appr.sqlite3")
+    migrate(conn)
+    config_service.save(conn, dict(config.RUNUP_CONFIG),
+                        "TEST_SUG_APPR_UNVALIDATED", None, T0)
+    svc = Commands(conn, grant)
+    for iid, kind in (("SEC:A", "exact"), ("SEC:B", "exact"), ("SEC:C", "alias")):
+        conn.execute("INSERT INTO mapping_reviews(issuer_id, security_id, status, evidence,"
+                     " reviewed_by, reviewed_at) VALUES (?,?,?,?,?,?)",
+                     (iid, iid, "REVIEW", f"sponsor ↔ 상장 ({kind})", "matcher", T0.isoformat()))
+    conn.commit()
+    exact_ids = [r[0] for r in conn.execute(
+        "SELECT review_id FROM mapping_reviews WHERE evidence LIKE '%(exact)%'")]
+    assert len(exact_ids) == 2
+    for rid in exact_ids:
+        assert svc.approve_mapping(rid) == "APPROVED"
+    left = conn.execute("SELECT COUNT(*) FROM mapping_reviews WHERE status='REVIEW'").fetchone()[0]
+    assert left == 1
+    conn.close()
     grant = _grant(monkeypatch)
     conn, _ = _db(tmp_path)
     svc = Commands(conn, grant)

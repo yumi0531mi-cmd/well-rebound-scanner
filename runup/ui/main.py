@@ -273,12 +273,26 @@ def _mapping_forms(service):
     if not rows:
         st.info("검토할 연결 제안이 없습니다. 수집 버튼을 먼저 누르세요.")
         return
-    for row in rows:
-        with st.expander(f"{row['issuer_id']} · {row['evidence'][:40]}"):
-            st.write(row["evidence"])
-            if st.button("승인", key=f"runup_map_approve_{row['review_id']}"):
-                _submit("연결 승인",
-                        lambda rid=row["review_id"]: service.approve_mapping(rid))
+    table = [{"선택": True, "회사": r["issuer_id"], "티커": r["security_id"],
+              "근거": r["evidence"], "번호": r["review_id"]} for r in rows]
+    picked = st.data_editor(table, use_container_width=True, key="runup_map_table",
+                            column_config={"선택": st.column_config.CheckboxColumn("선택")},
+                            disabled=["회사", "티커", "근거", "번호"])
+    chosen = [r["번호"] for r in picked if r.get("선택")]
+    if st.button(f"선택 승인 ({len(chosen)}건)", key="runup_map_approve_all"):
+        def bulk():
+            done, failed = 0, []
+            for rid in chosen:
+                try:
+                    service.approve_mapping(rid)
+                    done += 1
+                except Exception as exc:
+                    failed.append(f"{rid}:{type(exc).__name__}")
+            if failed:
+                raise ValueError(f"{done}건 승인, 실패: {'; '.join(failed)}")
+            return f"{done}건 승인됨"
+        _submit("선택 승인", bulk)
+        st.rerun()
 
 
 def _allocation_forms(service, profile):
