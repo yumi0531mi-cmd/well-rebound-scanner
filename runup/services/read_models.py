@@ -86,6 +86,34 @@ def _doc_urls(conn, document_ids):
     return urls
 
 
+def bulk_approvable(conn):
+    """묶음 승인 가능 후보. sponsor가 승인된 회사와 유일 정확 일치 + 확정 날짜.
+
+    하나라도 애매하면 제외한다(묶음에 섞지 않는다).
+    반환: [{candidate_id, issuer_id, ...}].
+    """
+    from runup.catalyst import sponsor_match
+    approved = [dict(r) for r in conn.execute(
+        "SELECT m.issuer_id, i.legal_name FROM mapping_reviews m "
+        "JOIN issuers i ON i.issuer_id=m.issuer_id WHERE m.status='APPROVED'")]
+    companies = [(a["issuer_id"], a["legal_name"]) for a in approved]
+    out = []
+    for cand in conn.execute(
+            "SELECT * FROM event_candidates WHERE review_status='PENDING' "
+            "AND sponsor_text IS NOT NULL AND sponsor_text<>'' "
+            "AND date_precision='EXACT_DATE'"):
+        cand = dict(cand)
+        titles = [(iid, name) for iid, name in companies]
+        hit = sponsor_match.match_sponsor(cand["sponsor_text"], titles)
+        if hit is None or hit[0] != "exact":
+            continue
+        if not sponsor_match.is_unique_exact(cand["sponsor_text"], titles):
+            continue
+        cand["issuer_id"] = hit[1]
+        out.append(cand)
+    return out
+
+
 def _event_index(model):
     index = {}
     for event in (model.events or ()):

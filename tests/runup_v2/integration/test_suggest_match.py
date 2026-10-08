@@ -90,8 +90,39 @@ def test_suggest_creates_review_proposals(tmp_path):
     conn.close()
 
 
+def test_bulk_approvable_filters(tmp_path):
+    from runup.services import read_models as R
+    conn, _ = _db(tmp_path)
+    conn.execute("INSERT OR IGNORE INTO issuers VALUES (?,?,?,?,?,?)",
+                 ("i-nova", None, "Nova Bio", '["BIO"]', "VERIFIED", T0.isoformat()))
+    conn.execute("INSERT OR IGNORE INTO securities VALUES (?,?,?,?,?,?,?,?,?)",
+                 ("SEC:NVAX", "i-nova", "NVAX", "", "USD", "UNKNOWN",
+                  "UNVERIFIED", T0.isoformat(), None))
+    conn.execute("INSERT INTO mapping_reviews(issuer_id, security_id, status, evidence,"
+                 " reviewed_by, reviewed_at) VALUES (?,?,?,?,?,?)",
+                 ("i-nova", "SEC:NVAX", "APPROVED", "exact", "owner", T0.isoformat()))
+    conn.execute("INSERT INTO source_documents(document_id, source_id, url, fetched_at,"
+                 " first_seen_at, available_at, payload_hash) VALUES (?,?,?,?,?,?,?)",
+                 ("d1", "clinicaltrials", "https://example.test/", T0.isoformat(),
+                  T0.isoformat(), T0.isoformat(), "h1"))
+    rows = [("N1", "Nova Bio", "EXACT_DATE"), ("N2", "Nova", "EXACT_DATE"),
+            ("N3", "Hosp", "EXACT_DATE"), ("N4", "Nova Bio", "MONTH")]
+    for cid, sponsor, prec in rows:
+        conn.execute("INSERT INTO event_candidates VALUES (?,?,?,?,?,?,?,?,?)",
+                     (cid, "d1", "t", "TRIAL_COMPLETION_MARKER", "2024-03-01",
+                      prec, "PENDING", T0.isoformat(), sponsor))
+    conn.commit()
+    got = R.bulk_approvable(conn)
+    assert [c["candidate_id"] for c in got] == ["N1"]
+    assert got[0]["issuer_id"] == "i-nova"
+    conn.close()
+
+
 def test_sponsor_captured_at_collection(tmp_path):
-    conn = _db(tmp_path)[0]
+    conn = connect(tmp_path / "cap.sqlite3")
+    migrate(conn)
+    config_service.save(conn, dict(config.RUNUP_CONFIG),
+                        "TEST_SUG_CAP_UNVALIDATED", None, T0)
     body = json.dumps({"studies": [{"protocolSection": {
         "identificationModule": {"nctId": "NCT9", "briefTitle": "t"},
         "statusModule": {"primaryCompletionDateStruct": {"date": "2024-03-01"}},

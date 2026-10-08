@@ -239,8 +239,39 @@ def _manual_forms(service, profile):
                     else:
                         _submit("정산 승인",lambda:service.withdrawal(withdrawal.proposal_id(p),
                             _id("withdraw"),latest,ctx.ny_period))
+    with st.expander("일정 묶음 승인 — 회사 유일·확정 날짜만"):
+        st.caption("애매한 건 제외됩니다. 나머지는 상세 입력에서 한 건씩.")
+        if st.button("대상 보기", key="runup_bulk_preview"):
+            st.session_state["runup_bulk_list"] = read_models.bulk_approvable(service.conn)
+        targets = st.session_state.get("runup_bulk_list", [])
+        if targets:
+            st.write(f"승인 가능 {len(targets)}건")
+            if st.button(f"묶음 승인 ({len(targets)}건)", key="runup_bulk_approve"):
+                def bulk():
+                    done, failed = 0, []
+                    for cand in targets:
+                        try:
+                            cmd = from_dict(D.ReviewCommand, {
+                                "command_id": service.new_intent_command_id(
+                                    "review", {"candidate_id": cand["candidate_id"]}),
+                                "candidate_id": cand["candidate_id"], "decision": "APPROVED",
+                                "date_precision": cand["date_precision"],
+                                "reviewer": "owner",
+                                "expected_revision": cand["available_at"],
+                                "evidence_document_ids": [cand["document_id"]],
+                                "issuer_id": cand["issuer_id"]})
+                            service.review(cmd)
+                            done += 1
+                        except Exception as exc:
+                            failed.append(f"{cand['candidate_id']}:{type(exc).__name__}")
+                    if failed:
+                        raise ValueError(f"{done}건 승인, 실패: {'; '.join(failed)}")
+                    return f"{done}건 승인됨"
+                _submit("묶음 승인", bulk)
+                st.rerun()
     with st.expander("근거 검토·매도 예약·배분 승인 — 상세 입력"):
-        kind = st.selectbox("처리 종류",["근거 검토","매도 예약","매도 예약 취소"],key="runup_advanced_kind")
+        kind = st.selectbox("처리 종류", ["근거 검토", "매도 예약", "매도 예약 취소"],
+                            key="runup_advanced_kind")
         st.caption("식별자는 위 기록표에서 확인합니다. 제출 ID는 입력을 바꾸기 전까지 유지됩니다.")
         template = ({"candidate_id":"","decision":"APPROVED","date_precision":"EXACT_DATE",
                      "reviewer":"owner","expected_revision":"","issuer_id":"","evidence_document_ids":[]}
