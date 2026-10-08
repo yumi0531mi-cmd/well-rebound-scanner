@@ -356,6 +356,94 @@ def _allocation_forms(service, profile):
         st.info("대기 중인 배분 제안이 없습니다. '배분 제안 생성' 버튼으로 생성하세요.")
 
 
+def _calendar_section(conn, model, mobile):
+    from datetime import date as _date
+
+    from runup.ui.i18n import ko_status
+    st.subheader("이벤트 달력")
+    today = _date.today()
+    if "runup_cal_year" not in st.session_state:
+        st.session_state["runup_cal_year"] = today.year
+        st.session_state["runup_cal_month"] = today.month
+    year, month = st.session_state["runup_cal_year"], st.session_state["runup_cal_month"]
+    left, title, right = st.columns([1, 2, 1])
+    with left:
+        if st.button("◀ 이전 달", key="runup_cal_prev"):
+            month -= 1
+            if month < 1:
+                month, year = 12, year - 1
+            st.session_state["runup_cal_year"], st.session_state["runup_cal_month"] = year, month
+            st.rerun()
+    with title:
+        st.write(f"{year}년 {month}월")
+    with right:
+        if st.button("다음 달 ▶", key="runup_cal_next"):
+            month += 1
+            if month > 12:
+                month, year = 1, year + 1
+            st.session_state["runup_cal_year"], st.session_state["runup_cal_month"] = year, month
+            st.rerun()
+    year, month = st.session_state["runup_cal_year"], st.session_state["runup_cal_month"]
+    cal = read_models.calendar_month(conn, model, year, month)
+    if mobile:
+        for week in cal["weeks"]:
+            for day in week:
+                if day is None or day not in cal["days"]:
+                    continue
+                with st.expander(f"{day[5:]} · {len(cal['days'][day])}건"):
+                    for row in cal["days"][day]:
+                        st.write(" · ".join([", ".join(row["tickers"]) or row["ref"],
+                                             str(row["event_type"]),
+                                             ko_status(row["status"])]))
+    else:
+        st.write("일 월 화 수 목 금 토")
+        for week in cal["weeks"]:
+            cols = st.columns(7)
+            for col, day in zip(cols, week, strict=True):
+                with col:
+                    if day is None:
+                        st.write("")
+                    else:
+                        st.write(day[8:])
+                        for row in cal["days"].get(day, ()):
+                            label = (", ".join(row["tickers"]) or row["ref"])[:12]
+                            if st.button(label, key=f"runup_cal_{day}_{label}"):
+                                st.session_state["runup_cal_sel"] = row
+                                st.rerun()
+    sel = st.session_state.get("runup_cal_sel")
+    if sel:
+        st.subheader("일정 내용")
+        st.write("날짜: " + str(sel.get("date")))
+        st.write("티커: " + (", ".join(sel.get("tickers") or ()) or "미연결"))
+        st.write("유형: " + str(sel.get("event_type")))
+        st.write("상태: " + ko_status(sel.get("status")) + " · 정밀도: " + str(sel.get("precision")))
+    for note in cal["notes"][:10]:
+        st.caption(note)
+
+
+def _watch_section(conn, model, mobile):
+    st.subheader("관찰 — 진입·탈출 타점")
+    st.caption("버튼 없이 자동 표시됩니다. 상승률은 과거 종가 계산이며 예측이 아닙니다.")
+    rows = read_models.watch_board(conn, model)
+    if not rows:
+        st.info("관찰할 판정이 없습니다. 계산 버튼을 먼저 누르세요.")
+        return
+    if mobile:
+        for r in rows:
+            with st.expander(f"{r['ticker']} · {r['outlook']}"):
+                st.write(f"상태: {r['state']} · 힘: {r['strength']} · "
+                         f"소진: {r['exhaustion']} · 근간 상승: {r['gain']}%")
+                if r["reasons"]:
+                    st.write("이유: " + "; ".join(r["reasons"]))
+                st.json(r["detail"])
+    else:
+        from runup.ui.i18n import ko_table
+        st.dataframe(ko_table(rows, {
+            "ticker": "티커", "state": "상태", "strength": "힘",
+            "exhaustion": "소진", "gain": "근간 상승(%)", "outlook": "조짐"}),
+            use_container_width=True)
+
+
 def render(db_path=None):
     st.header("런업스캐너")
     st.caption("미국 BIO · PHARMA · SPACE | 이벤트 전 기대감 관찰 | 전략 성과 미검증")
@@ -408,6 +496,8 @@ def render(db_path=None):
                 st.info("진입 가능 후보가 없습니다. 차단 사유를 후보 표에서 확인하세요.")
             else:
                 st.success("들어갈 후보가 있습니다. 아래 후보 표를 보세요.")
+            _calendar_section(conn, model, mobile)
+            _watch_section(conn, model, mobile)
             if model.latest:
                 times = read_models.display_times(model.latest["as_of"])
                 st.write("최근 계산:", times["kst"] + " / " + times["et"], model.latest["status"])

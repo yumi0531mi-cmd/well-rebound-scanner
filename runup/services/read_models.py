@@ -64,6 +64,143 @@ def _event_index(model):
     return index
 
 
+def _tickers_of(securities, sec_ids):
+    if isinstance(sec_ids, str):
+        try:
+            import json as _json
+            sec_ids = _json.loads(sec_ids)
+        except Exception:
+            sec_ids = []
+    names = []
+    for sec_id in (sec_ids or ()):
+        names.append(securities.get(sec_id, {}).get("ticker", sec_id))
+    return names
+
+
+def _day_key(year: int, month: int, day: int) -> str:
+    return f"{year:04d}-{month:02d}-{day:02d}"
+
+
+def calendar_month(conn, model, year, month):
+    """달력 셀. {days: {날짜: [행]}, month_note: [...]}.
+
+    승인 일정은 시작일 셀에, 대기 후보는 날짜 글자 그대로 셀에 올린다.
+    날짜가 이상하면 버리지 않고 month_note에 남긴다. 추측 날짜를 만들지 않는다.
+    행: {date, tickers, event_type, status, precision, ref}.
+    """
+    import calendar as _cal
+    import datetime as _dt
+    securities = _security_map(conn)
+    days = {}
+    notes = []
+
+    def _tickers(sec_ids):
+        return _tickers_of(securities, sec_ids)
+
+    for event in (model.events or ()):
+        start = str(event.get("start") or "")
+        day = start[:10] if len(start) >= 10 else ""
+        try:
+            parsed = _dt.date.fromisoformat(day) if day else None
+        except ValueError:
+            parsed = None
+        if parsed is None:
+            notes.append(f"{event.get('event_id')}: 날짜 없음")
+            continue
+        if (parsed.year, parsed.month) != (year, month):
+            continue
+        days.setdefault(day, []).append({
+            "date": day, "tickers": _tickers(event.get("security_ids")),
+            "event_type": event.get("event_type"), "status": "승인됨",
+            "precision": str(event.get("date_precision")),
+            "ref": event.get("event_id")})
+    for cand in (model.pending or ()):
+        raw = str(cand.get("raw_date_text") or "")
+        day = raw[:10] if len(raw) >= 10 else ""
+        try:
+            parsed = _dt.date.fromisoformat(day)
+        except ValueError:
+            notes.append(f"{cand.get('candidate_id')}: 날짜 미확정({raw})")
+            continue
+        if (parsed.year, parsed.month) != (year, month):
+            continue
+        days.setdefault(day, []).append({
+            "date": day, "tickers": [],
+            "event_type": cand.get("event_type"), "status": "검토 대기",
+            "precision": str(cand.get("date_precision")),
+            "ref": cand.get("candidate_id")})
+    first_weekday, ndays = _cal.monthrange(year, month)
+    weeks = []
+    week = [None] * ((first_weekday + 1) % 7)
+    for day_no in range(1, ndays + 1):
+        week.append(_day_key(year, month, day_no))
+        if len(week) == 7:
+            weeks.append(week)
+            week = []
+    if week:
+        week += [None] * (7 - len(week))
+        weeks.append(week)
+    return {"weeks": weeks, "days": days, "notes": notes}
+
+
+def watch_board(conn, model, lookback=20):
+    """관찰판. 티커별 현재 상태·점수·근간 상승률·조짐 한 줄.
+
+    조짐은 기존 판정·설정 기준만 쓴다(새 기준을 만들지 않는다).
+    상승률은 종가 기준 단순 계산이며 예측이 아니다.
+    """
+    securities = _security_map(conn)
+    items = list((model.latest or {}).get("decisions", ()))
+    profile = None
+    try:
+        profile = config_service.load(conn)
+        high = tuple(profile.values.get("exhaustion_thresholds", (35, 55, 75)))
+    except Exception:
+        high = (35, 55, 75)
+    rows = []
+    for item in items:
+        try:
+            dec = item["decision"]
+        except Exception:
+            continue
+        sid = dec.get("security_id", "")
+        ticker = securities.get(sid, {}).get("ticker", sid)
+        try:
+            bars = conn.execute("SELECT close, session_date FROM price_bar_revisions "
+                                "WHERE security_id=? ORDER BY session_date DESC LIMIT ?",
+                                (sid, int(lookback))).fetchall()
+            closes = [float(r["close"]) for r in bars]
+            gain = ((closes[0] - closes[-1]) / closes[-1] * 100
+                    if len(closes) >= 2 and closes[-1] else None)
+        except Exception:
+            gain = None
+        ex = dec.get("exhaustion")
+        try:
+            ex_num = float(ex) if ex is not None else None
+        except (TypeError, ValueError):
+            ex_num = None
+        if dec.get("entry_eligible"):
+            outlook = "오를 조짐: 진입 타점"
+        elif ex_num is not None and ex_num >= high[2]:
+            outlook = "떨어질 조짐: 과열"
+        elif ex_num is not None and ex_num >= high[1]:
+            outlook = "주의: 열기 오름"
+        elif str(dec.get("setup_state")) == "SETUP":
+            outlook = "오를 조짐: 자리 잡힘"
+        else:
+            outlook = "관찰 중"
+        rows.append({
+            "ticker": ticker, "security_id": sid,
+            "state": "진입 타점" if dec.get("entry_eligible") else str(dec.get("setup_state")),
+            "strength": dec.get("strength"), "exhaustion": dec.get("exhaustion"),
+            "gain": round(gain, 2) if gain is not None else None,
+            "outlook": outlook,
+            "reasons": list(dec.get("reasons") or ()),
+            "detail": {"decision_id": dec.get("decision_id"), "run_id": dec.get("run_id")},
+        })
+    return rows
+
+
 def candidate_cards(conn, model, today=None, results=None):
     """첫 화면용 후보 카드. 해시류는 detail에만 둔다.
 
@@ -142,9 +279,7 @@ def calendar_rows(conn, model):
                                    (event.get("event_id"),)).fetchall()
         except Exception:
             history = []
-        tickers = []
-        for sec_id in (event.get("security_ids") or ()):
-            tickers.append(securities.get(sec_id, {}).get("ticker", sec_id))
+        tickers = _tickers_of(securities, event.get("security_ids"))
         approved.append({
             "event_id": event.get("event_id"), "event_type": event.get("event_type"),
             "date_precision": str(event.get("date_precision")),

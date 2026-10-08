@@ -65,7 +65,7 @@ def test_render_populated_readonly_model_and_profile_widgets(tmp_path,monkeypatc
     assert any("설정 "+p.config_hash in message.value for message in app.caption)
     monkeypatch.setenv("WELLSCAN_ADMIN_TOKEN","test-server-auth-only-123456789")
     app.text_input(key="runup_login_value").input("test-server-auth-only-123456789")
-    app.button[0].click().run(timeout=20)
+    next(b for b in app.button if b.label == "인증").click().run(timeout=20)
     assert not app.exception
     # Every schema field has its own prefixed input; None costs stay None.
     assert app.checkbox(key="runup_none_fee_estimate_rate").value is True

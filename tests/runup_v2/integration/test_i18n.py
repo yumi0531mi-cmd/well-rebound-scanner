@@ -45,7 +45,7 @@ def test_settings_form_korean_labels(tmp_path, monkeypatch):
         "from runup.ui.main import render\nrender(" + repr(str(path)) + ")").run(timeout=30)
     assert not app.exception
     app.text_input(key="runup_login_value").input("test-korean-only-123456789")
-    app.button[0].click().run(timeout=30)
+    next(b for b in app.button if b.label == "인증").click().run(timeout=30)
     assert not app.exception
     labels = [str(e.label) if hasattr(e, "label") else "" for e in app.text_input]
     assert any("수수료율" in label for label in labels)

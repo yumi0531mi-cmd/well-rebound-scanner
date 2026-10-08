@@ -121,7 +121,7 @@ def test_mapping_table_renders(tmp_path, monkeypatch):
         "from runup.ui.main import render\nrender(" + repr(str(path)) + ")").run(timeout=30)
     assert not app.exception
     app.text_input(key="runup_login_value").input(TOKEN)
-    app.button[0].click().run(timeout=30)
+    next(b for b in app.button if b.label == "인증").click().run(timeout=30)
     assert not app.exception
     assert not any("실패" in str(e.value) for e in app.error)
     assert any("연결 검토" in s.value for s in app.subheader)

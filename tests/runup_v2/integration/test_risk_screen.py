@@ -231,7 +231,7 @@ def test_render_empty_db_setup_prompt(tmp_path, monkeypatch):
     assert any("비어" in str(w.value) for w in app.info)
     monkeypatch.setenv("WELLSCAN_ADMIN_TOKEN", "test-empty-only-1234567890")
     app.text_input(key="runup_login_value").input("test-empty-only-1234567890")
-    app.button[0].click().run(timeout=30)
+    next(b for b in app.button if b.label == "인증").click().run(timeout=30)
     assert not app.exception
     assert not any("실패" in str(e.value) for e in app.error)
     assert any("준비" in str(b.label) for b in app.button)
@@ -272,3 +272,75 @@ def test_status_summary_first_screen(tmp_path):
     texts = [str(w.value) for w in
              list(app.info) + list(app.success) + list(app.warning) + list(app.markdown)]
     assert any("진입 가능" in text and "검토 대기" in text for text in texts)
+
+
+def test_calendar_month_buckets_and_notes(tmp_path):
+    from runup.services import read_models as R
+    conn, profile = _db(tmp_path)
+    _seed_company(conn)
+    _seed_event(conn)
+    _seed_scan(conn, profile)
+    model = R.load(conn, T0)
+    cal = R.calendar_month(conn, model, 2024, 3)
+    assert "2024-03-01" in cal["days"]
+    row = cal["days"]["2024-03-01"][0]
+    assert row["tickers"] == ["NVX"] and row["status"] == "승인됨"
+    assert any(len(w) == 7 for w in cal["weeks"])
+    feb = R.calendar_month(conn, model, 2024, 2)
+    assert "2024-03-01" not in feb["days"]
+    conn.close()
+
+
+def test_watch_board_gain_and_outlook(tmp_path):
+    from decimal import Decimal
+
+    import runup.domain as D
+    from runup.domain.base import to_dict
+    from runup.services import read_models as R
+    conn, profile = _db(tmp_path)
+    _seed_company(conn)
+    for i, price in enumerate(["10", "11", "12"]):
+        conn.execute("INSERT INTO price_bar_revisions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                     ("KIS:NAS:NVX", f"2024-06-{24 + i}", "yahoo", 1, price, price,
+                      price, price, 100, "USD", "SPLIT_ADJUSTED",
+                      T0.isoformat(), T0.isoformat(), 1))
+    dec = D.DecisionSnapshot(
+        decision_id="d1", run_id="r1", security_id="KIS:NAS:NVX", as_of=T0,
+        config_hash=profile.config_hash, feature_hash="fh",
+        setup_state=D.SetupState.SETUP, entry_eligible=True,
+        exit_action=D.ExitAction.HOLD, target_sell_fraction=Decimal("0"),
+        reasons=(), health="OK", event_ids=())
+    import json as _json
+    payload = {"run_id": "r1", "as_of": T0.isoformat(), "profile_hash": profile.config_hash,
+               "status": "OK", "errors": [], "decisions": [{"decision": to_dict(dec)}],
+               "coverage": "SYNTHETIC"}
+    conn.execute("INSERT INTO runup_results VALUES (?,?,?,?,?,?)",
+                 ("r1", T0.isoformat(), profile.config_hash, "ih", "OK", _json.dumps(payload)))
+    conn.commit()
+    model = R.load(conn, T0)
+    rows = R.watch_board(conn, model)
+    assert len(rows) == 1
+    assert rows[0]["ticker"] == "NVX"
+    assert rows[0]["gain"] == 20.0
+    assert rows[0]["outlook"] == "오를 조짐: 진입 타점"
+    conn.close()
+
+
+def test_calendar_month_navigation(tmp_path):
+    from streamlit.testing.v1 import AppTest
+    conn, profile = _db(tmp_path)
+    _seed_company(conn)
+    _seed_event(conn)
+    _seed_scan(conn, profile)
+    path = tmp_path / "screen.sqlite3"
+    conn.close()
+    app = AppTest.from_string(
+        "from runup.ui.main import render\nrender(" + repr(str(path)) + ")").run(timeout=30)
+    assert not app.exception
+    assert not any("실패" in str(e.value) for e in app.error)
+    assert any("이벤트 달력" in s.value for s in app.subheader)
+    before = [str(m.value) for m in app.markdown]
+    app.button(key="runup_cal_next").click().run(timeout=30)
+    assert not app.exception
+    after = [str(m.value) for m in app.markdown]
+    assert before != after
