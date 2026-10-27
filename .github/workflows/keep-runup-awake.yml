@@ -24,5 +24,5 @@ jobs:
         env:
           RUNUP_HEALTH_URL: https://runup-scanner.onrender.com/_stcore/health
         run: |
-          set -euo pipefail
-          curl --fail --silent --show-error --location --max-time 90 --retry 1 "$RUNUP_HEALTH_URL"
+          # A suspended or cold service may answer 5xx; the request itself is the wake signal.
+          curl --silent --show-error --location --max-time 90 --retry 1 "$RUNUP_HEALTH_URL" || true
