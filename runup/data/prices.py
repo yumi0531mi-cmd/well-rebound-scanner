@@ -16,9 +16,9 @@ def kis_daily_capability() -> dict:
 
 def describe_shared_runtime() -> dict:
     """기존 ranitime 구성 요소(코드 확인, import 없음)."""
-    return {"client": "wellscan shared_runtime_components().client",
+    return {"client": "runup.services.runtime.shared_runtime_components().client",
             "limiter": "KIS 공유 limiter (전역 변경 금지)",
-            "quotes": "wellscan/quotes.py QuoteBook",
+            "quotes": "runup.services.commands.fetch_quotes",
             "status": "NEEDS_INPUT",
             "reason": "live daemon·credential 없이 연결하지 않음"}
 

@@ -76,7 +76,7 @@ def test_kis_exchange_contract():
 
 
 def test_kis_discovery_stays_unconfirmed(tmp_path):
-    from wellscan.models import Candidate, Market
+    from runup.core.types import Candidate, Market
     conn, _ = _db(tmp_path)
     us = Candidate("ABC", "Example", 10, 1, 100, 1000, market=Market.US,
                    exchange="NAS")
@@ -211,7 +211,7 @@ def test_watch_ticker_manual_entry(tmp_path, monkeypatch):
 def test_kis_failure_classified_not_silent(tmp_path, monkeypatch):
     from types import SimpleNamespace
 
-    import wellscan.kis as _kis
+    import runup.core.kis as _kis
     from runup.services import handlers
 
     class _Boom:

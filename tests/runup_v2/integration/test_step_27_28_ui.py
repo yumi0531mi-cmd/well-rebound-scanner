@@ -1,13 +1,10 @@
 """Tab render and server-gated command boundaries."""
-import ast
 from dataclasses import replace
 from datetime import timedelta
-from pathlib import Path
 
 import pytest
 from streamlit.testing.v1 import AppTest
 
-import config
 from runup.services import auth
 from runup.services.commands import Commands
 from tests.runup_v2.integration.test_step_25_services import T, db
@@ -72,13 +69,4 @@ def test_render_populated_readonly_model_and_profile_widgets(tmp_path,monkeypatc
     assert app.checkbox(key="runup_value_runup_worker_enabled").value is False
 
 
-def test_mount_preserves_exact_legacy_ast():
-    text=Path("app.py").read_text(encoding="utf-8")
-    original=Path("work/evidence/runup_v2/legacy_ui_before_mount.txt").read_text(encoding="utf-8")
-    parsed=ast.parse(text)
-    wrapper=next(n for n in parsed.body if isinstance(n,ast.With) and
-                 "runup_tabs[0]" in ast.unparse(n.items[0].context_expr))
-    assert ast.dump(ast.Module(body=wrapper.body,type_ignores=[])) == ast.dump(ast.parse(original))
-    assert text.index("render_runup_tab()") < text.index("with runup_tabs[0]")
-    assert config.RUNUP_CONFIG["runup_worker_enabled"] is False
 

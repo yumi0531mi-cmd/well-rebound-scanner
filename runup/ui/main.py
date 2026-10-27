@@ -340,7 +340,7 @@ def _allocation_forms(service, profile):
     if st.button("최신 시세 가져오기", key="runup_quotes_fetch"):
         def fetch():
             from runup.services import read_models as _rm
-            from wellscan.scanner_service import shared_runtime_components
+            from runup.services.runtime import shared_runtime_components
             model = _rm.load(service.conn)
             sids = {p["security_id"] for p in service.get_allocation_proposals()}
             for item in ((model.latest or {}).get("decisions", ()) or ()):
@@ -522,7 +522,12 @@ def render(db_path=None):
     from runup.storage import database as _database
     from runup.ui.i18n import EXIT_KO, ko_table
     use_remote = db_path is None and _database._env_db_target() is not None
-    path = Path(db_path) if db_path else None
+    if db_path:
+        path = Path(db_path)
+    elif use_remote:
+        path = None
+    else:
+        path = Path(_database.default_db_path())
     conn = None
     profile = None
     try:
@@ -710,11 +715,11 @@ def render(db_path=None):
                     _submit("준비",lambda: "프로필 준비됨: "+service.prepare().profile_id)
             else:
                 if st.button("미국 후보·임상 일정 수집",key="runup_collect_sources"):
-                    from wellscan.scanner_service import shared_runtime_components
+                    from runup.services.runtime import shared_runtime_components
                     with st.spinner("공개 일정과 미국 후보를 수집합니다."):
                         _submit("수집",lambda: service.collect_sources(shared_runtime_components()))
                 if st.button("한 번에 모으기 (수집·일봉·계산)",key="runup_collect_all"):
-                    from wellscan.scanner_service import shared_runtime_components
+                    from runup.services.runtime import shared_runtime_components
                     with st.spinner("순서대로 모으고 계산합니다."):
                         _submit("수집",lambda: service.collect_sources(shared_runtime_components()))
                         _submit("일봉",service.collect_daily)

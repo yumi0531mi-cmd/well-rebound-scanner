@@ -40,7 +40,7 @@ def maybe_start_worker():
     from runup.services import jobs
     if not worker_enabled():
         return {"state": "DISABLED"}
-    from wellscan.scanner_service import shared_runtime_components
+    from runup.services.runtime import shared_runtime_components
     status = jobs.start(shared_runtime_components(), db_path=None)
     try:
         jobs.register_handlers(worker_handlers())

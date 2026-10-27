@@ -1,15 +1,15 @@
 """Synthetic integration checks, never strategy performance evidence."""
+import json
 from datetime import UTC, datetime
 from types import SimpleNamespace
-import json
 
 import pytest
-import config
+
+from runup.core.types import Candidate, Market
 from runup.data.http import HttpResponse
-from runup.services import collection, config_service, handlers, operations, scan
+from runup.services import collection, config_service, handlers, operations
 from runup.storage import connect, migrate
 from runup.storage.database import transaction
-from wellscan.models import Candidate, Market, TradingSession
 
 T = datetime(2025, 6, 30, 22, tzinfo=UTC)
 

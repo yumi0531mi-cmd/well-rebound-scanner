@@ -7,10 +7,10 @@ from __future__ import annotations
 import json
 from datetime import UTC
 
+from runup.core.types import TradingSession
 from runup.domain.base import stable_key
 from runup.services import config_service, scan
 from runup.storage import connect
-from wellscan.models import TradingSession
 
 
 def _source_handler(runtime, at, cursor):
@@ -25,7 +25,7 @@ def _source_handler(runtime, at, cursor):
             status = 'OK' if candidates else 'EMPTY_CONFIRMED'
             error = None
         except Exception as exc:
-            from wellscan.kis import KISError
+            from runup.core.kis import KISError
             if isinstance(exc, KISError):
                 status, error = 'FAILED', 'kis:' + str(exc)[:120]
             else:

@@ -1,0 +1,28 @@
+name: Keep runup scanner awake during active windows
+
+on:
+  schedule:
+    # Weekday 08:00-10:00 KST (23:00-01:00 UTC, previous UTC day).
+    - cron: "*/10 23 * * 0-4"
+    - cron: "*/10 0 * * 1-5"
+    # Weekday 21:00-24:00 KST (12:00-15:00 UTC), covering the US open.
+    - cron: "*/10 12-14 * * 1-5"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: runup-keep-awake
+  cancel-in-progress: true
+
+jobs:
+  keep-awake:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Wake runup health endpoint
+        env:
+          RUNUP_HEALTH_URL: https://runup-scanner.onrender.com/_stcore/health
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location --max-time 90 --retry 1 "$RUNUP_HEALTH_URL"

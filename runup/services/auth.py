@@ -7,7 +7,7 @@ import hmac
 import os
 from datetime import UTC, datetime, timedelta
 
-from wellscan.web_status import ADMIN_TOKEN_ENV, admin_token_configured, admin_token_valid
+from runup.core.auth import ADMIN_TOKEN_ENV, admin_token_configured, admin_token_valid
 
 
 @dataclasses.dataclass(frozen=True)
