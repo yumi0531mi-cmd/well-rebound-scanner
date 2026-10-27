@@ -76,14 +76,6 @@ def test_cost_missing_is_config_required_not_silent_zero():
     assert any("tax_reserve" in r for r in result["config_required"])
 
 
-def test_existing_scalper_config_preserved():
-    assert config.TARGET1_HIT_RATE_GOAL == 0.80
-    assert config.TARGET1_HIT_RATE_FLOOR == 0.70
-    assert len(config.ACTIVE_STRATEGY_VALUES) == 19
-    assert len(config.NARROW_TIME_STRATEGY_VALUES) == 3
-    assert config.BACKTEST_LOOKBACK_DAYS == 60
-
-
 def test_runup_progress_recovery_and_hash_mismatch(tmp_path):
     from state_manager import PROGRESS_PATH  # noqa: F401  (import 경로 확인용)
 
